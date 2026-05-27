@@ -1,0 +1,31 @@
+version = 1
+name = "Local Media Library"
+
+[setup]
+script = '''
+cd "$CODEX_WORKTREE_PATH"
+mise trust .mise.toml
+mise install
+mise exec -- pnpm install --frozen-lockfile
+'''
+
+[cleanup]
+script = '''
+true
+'''
+
+[[actions]]
+name = "Start server"
+icon = "run"
+command = '''
+cd "$CODEX_WORKTREE_PATH"
+mise exec -- pnpm start
+'''
+
+[[actions]]
+name = "Run tests"
+icon = "test"
+command = '''
+cd "$CODEX_WORKTREE_PATH"
+mise exec -- pnpm test
+'''

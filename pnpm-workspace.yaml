@@ -1,0 +1,21 @@
+packages:
+  - "."
+
+nodeVersion: 26.2.0
+engineStrict: true
+strictPeerDependencies: true
+autoInstallPeers: false
+
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+trustPolicy: no-downgrade
+trustLockfile: false
+
+strictDepBuilds: true
+dangerouslyAllowAllBuilds: false
+allowBuilds: {}
+
+managePackageManagerVersions: false
+packageManagerStrict: true
+verifyDepsBeforeRun: error

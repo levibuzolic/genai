@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "GP Auth Helper",
+  "description": "Local development helper for forwarding a fresh auth token to the local media library.",
+  "version": "0.1.0",
+  "permissions": [
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://app.generateporn.ai/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://app.generateporn.ai/*"
+      ],
+      "css": [
+        "src/panel.css"
+      ],
+      "js": [
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
