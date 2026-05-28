@@ -9,6 +9,7 @@ import { mediaUrlForItem } from "@/lib/media"
 
 import { CatalogSourcePanel } from "./CatalogSourcePanel"
 import { CreateResultPanel } from "./CreateResultPanel"
+import { CreationHistoryPanel } from "./CreationHistoryPanel"
 import { SourceTabs } from "./SourceTabs"
 import { TemplateTools } from "./TemplateTools"
 import type { CreateStudioProps } from "./types"
@@ -115,6 +116,19 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
           result={props.createResult}
           onDownload={props.onDownload}
           onAnimate={props.onAnimate}
+        />
+
+        <CreationHistoryPanel
+          creations={props.creations}
+          activeCount={props.activeCreationCount}
+          loading={props.creationHistoryLoading}
+          selectedCreation={props.selectedCreation}
+          selectedEvents={props.selectedCreationEvents}
+          statusMessage={props.creationHistoryStatus}
+          onRefresh={props.onRefreshCreations}
+          onDetails={props.onCreationDetails}
+          onCloseDetails={props.onCloseCreationDetails}
+          onDuplicate={props.onDuplicateCreation}
         />
       </div>
     </section>

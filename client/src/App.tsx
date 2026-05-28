@@ -7,6 +7,7 @@ import { MediaDialog } from "@/components/media/MediaDialog"
 import { useBackups } from "@/hooks/use-backups"
 import { useConfig } from "@/hooks/use-config"
 import { useCreateStudio } from "@/hooks/use-create-studio"
+import { useCreationHistory } from "@/hooks/use-creation-history"
 import { useLibrary } from "@/hooks/use-library"
 import { useSyncOperations } from "@/hooks/use-sync-operations"
 import { fetchJson } from "@/lib/api"
@@ -25,6 +26,13 @@ function App() {
   })
   const create = useCreateStudio(async () => {
     await library.loadItems({ keepLoading: true })
+  })
+  const creationHistory = useCreationHistory(async (form) => {
+    await create.openCreator({
+      modeId: form.modeId || undefined,
+      source: form.source || undefined,
+      params: form.params,
+    })
   })
   const [selectedItem, setSelectedItem] = React.useState<CatalogItem | null>(null)
   const [copyFlash, setCopyFlash] = React.useState("")
@@ -116,16 +124,32 @@ function App() {
           setIsDraggingUpload={create.setIsDraggingUpload}
           fileInputRef={create.fileInputRef}
           onUploadFile={create.acceptUploadFile}
-          onSubmit={create.submitCreateJob}
+          onSubmit={async () => {
+            await create.submitCreateJob()
+            await creationHistory.loadCreations()
+          }}
           onReset={create.resetCreateForm}
           onClose={() => create.setOpen(false)}
-          onDownload={create.downloadCreateJob}
+          onDownload={async () => {
+            await create.downloadCreateJob()
+            await creationHistory.loadCreations()
+          }}
           onAnimate={create.animateCreateResult}
           templateJobId={create.templateJobId}
           setTemplateJobId={create.setTemplateJobId}
           templateLabel={create.templateLabel}
           setTemplateLabel={create.setTemplateLabel}
           onImportTemplate={create.importTemplate}
+          creations={creationHistory.creations}
+          activeCreationCount={creationHistory.activeCount}
+          creationHistoryLoading={creationHistory.loading}
+          selectedCreation={creationHistory.selectedCreation}
+          selectedCreationEvents={creationHistory.selectedEvents}
+          creationHistoryStatus={creationHistory.statusMessage}
+          onRefreshCreations={creationHistory.refreshNow}
+          onCreationDetails={creationHistory.openDetails}
+          onCloseCreationDetails={() => creationHistory.setSelectedCreation(null)}
+          onDuplicateCreation={creationHistory.duplicateSettings}
         />
       )}
 

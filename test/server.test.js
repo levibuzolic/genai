@@ -127,7 +127,10 @@ test("catalog migrates from legacy JSON into SQLite storage", async () => {
 
   assert.equal(existsSync(path.join(mediaDir, "catalog.sqlite")), true)
   assert.equal(existsSync(path.join(mediaDir, "catalog.json")), false)
-  assert.equal((await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_catalog.json")), true)
+  assert.equal(
+    (await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_catalog.json")),
+    true,
+  )
   assert.equal(catalog.items[0].id, id)
   assert.equal(stored.items[0].prompt, "sqlite prompt")
   assert.equal(stored.lastSeenJobId, id)
@@ -153,19 +156,26 @@ test("legacy catalog JSON is archived without overwriting existing SQLite data",
     downloadedJobIds: [],
     lastSeenJobId: sqliteId,
   })
-  await writeFile(path.join(mediaDir, "catalog.json"), `${JSON.stringify({
-    items: [
+  await writeFile(
+    path.join(mediaDir, "catalog.json"),
+    `${JSON.stringify(
       {
-        id: jsonId,
-        type: "edit",
-        status: "done",
-        outputUrl: "https://assets.example/json-source.png",
-        createdAt: 1779769826,
+        items: [
+          {
+            id: jsonId,
+            type: "edit",
+            status: "done",
+            outputUrl: "https://assets.example/json-source.png",
+            createdAt: 1779769826,
+          },
+        ],
+        downloadedJobIds: [],
+        lastSeenJobId: jsonId,
       },
-    ],
-    downloadedJobIds: [],
-    lastSeenJobId: jsonId,
-  }, null, 2)}\n`)
+      null,
+      2,
+    )}\n`,
+  )
 
   await server.getItems(new URLSearchParams())
 
@@ -175,7 +185,10 @@ test("legacy catalog JSON is archived without overwriting existing SQLite data",
   assert.equal(existsSync(path.join(mediaDir, "catalog.json")), false)
   assert.equal(stored.items.length, 1)
   assert.equal(stored.items[0].id, sqliteId)
-  assert.equal(archived.some((name) => name.endsWith("_ignored_catalog.json")), true)
+  assert.equal(
+    archived.some((name) => name.endsWith("_ignored_catalog.json")),
+    true,
+  )
 })
 
 test("incremental sync refreshes a previously seen pending job before stopping", async () => {
@@ -710,18 +723,22 @@ test("create template registry migrates from legacy JSON into SQLite", async () 
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-sqlite-"))
   await writeFile(
     path.join(mediaDir, "create-templates.json"),
-    `${JSON.stringify({
-      templates: [
-        {
-          id: "legacy-template",
-          label: "Legacy Template",
-          prompt: "legacy template prompt",
-          endpoint: "video",
-          mediaType: "video",
-        },
-      ],
-      updatedAt: "2026-05-27T00:00:00.000Z",
-    }, null, 2)}\n`,
+    `${JSON.stringify(
+      {
+        templates: [
+          {
+            id: "legacy-template",
+            label: "Legacy Template",
+            prompt: "legacy template prompt",
+            endpoint: "video",
+            mediaType: "video",
+          },
+        ],
+        updatedAt: "2026-05-27T00:00:00.000Z",
+      },
+      null,
+      2,
+    )}\n`,
   )
 
   const server = await importServer(mediaDir)
@@ -729,7 +746,10 @@ test("create template registry migrates from legacy JSON into SQLite", async () 
 
   assert.equal(existsSync(path.join(mediaDir, "catalog.sqlite")), true)
   assert.equal(existsSync(path.join(mediaDir, "create-templates.json")), false)
-  assert.equal((await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_create-templates.json")), true)
+  assert.equal(
+    (await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_create-templates.json")),
+    true,
+  )
   assert.equal(registry.templates.length, 1)
   assert.equal(registry.templates[0].id, "legacy-template")
 })
@@ -805,11 +825,26 @@ test("creation job submit and download use mocked API and merge into catalog", a
     const downloaded = await server.downloadCreateJob(jobId)
     const catalog = await readCatalog(mediaDir)
     const item = catalog.items.find((entry) => entry.id === jobId)
+    const history = await server.getCreations(new URLSearchParams())
+    const details = await server.getCreationDetails(jobId)
 
     assert.equal(created.jobId, jobId)
     assert.equal(submitBody.image_base64, sourceDataUrl)
     assert.equal(submitBody.input_url, undefined)
     assert.equal(submitBody.seed, null)
+    assert.equal(
+      history.creations.some((creation) => creation.jobId === jobId && creation.status === "done"),
+      true,
+    )
+    assert.equal(details.creation.downloadedItemId, jobId)
+    assert.equal(
+      details.events.some((event) => event.status === "pending"),
+      true,
+    )
+    assert.equal(
+      details.events.some((event) => event.message === "Downloaded to library."),
+      true,
+    )
     assert.equal(downloaded.item.id, jobId)
     assert.equal(item.createModeId, "custom-video")
     assert.equal(item.sourceKind, "upload")
@@ -819,6 +854,180 @@ test("creation job submit and download use mocked API and merge into catalog", a
   } finally {
     globalThis.fetch = originalFetch
     restoreRunner()
+  }
+})
+
+test("creation history persists submitted jobs across server imports", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-history-persist-"))
+  const jobId = "17171717-1717-4171-8171-171717171717"
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      return jsonResponse({ job_id: jobId })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    await server.createMediaJob({
+      modeId: "custom-image",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "make it cinematic",
+      },
+    })
+
+    const reimported = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const history = await reimported.getCreations(new URLSearchParams())
+    const details = await reimported.getCreationDetails(jobId)
+
+    assert.equal(history.creations[0].jobId, jobId)
+    assert.equal(history.creations[0].status, "pending")
+    assert.equal(details.creation.params.prompt, "make it cinematic")
+    assert.equal(details.creation.source.url, "https://assets.example/source.png")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("failed creation submissions are recorded with reusable settings", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-history-failed-"))
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      return new Response(JSON.stringify({ error: "submission_failed" }), {
+        status: 500,
+        headers: {
+          "content-type": "application/json",
+        },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+
+    await assert.rejects(
+      () =>
+        server.createMediaJob({
+          modeId: "custom-image",
+          source: {
+            kind: "url",
+            url: "https://assets.example/source.png",
+          },
+          params: {
+            prompt: "failed prompt",
+          },
+        }),
+      /submission_failed/,
+    )
+
+    const history = await server.getCreations(new URLSearchParams())
+    const failed = history.creations.find((creation) => creation.status === "error")
+    const copied = await server.duplicateCreation(failed.id)
+
+    assert.equal(failed.error, "submission_failed")
+    assert.equal(failed.params.prompt, "failed prompt")
+    assert.equal(copied.form.modeId, "custom-image")
+    assert.equal(copied.form.params.prompt, "failed prompt")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("creation refresh updates active jobs and imports upstream history", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-history-refresh-"))
+  const activeId = "18181818-1818-4181-8181-181818181818"
+  const importedId = "19191919-1919-4191-8191-191919191919"
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      return jsonResponse({ job_id: activeId })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${activeId}`) {
+      return jsonResponse({
+        id: activeId,
+        type: "edit",
+        prompt: "active now done",
+        status: "done",
+        output_url: "https://assets.example/active.png",
+        input_url: "https://assets.example/source.png",
+        created_at: 1779893100,
+      })
+    }
+
+    if (href.includes("/api/jobs") && href.includes("page=1")) {
+      return jsonResponse({
+        results: [
+          {
+            id: importedId,
+            type: "video",
+            prompt: "history import",
+            status: "processing",
+            output_url: null,
+            input_url: "https://assets.example/history-source.png",
+            resolution: "720p",
+            duration: 4,
+            created_at: 1779893200,
+          },
+        ],
+      })
+    }
+
+    if (href.includes("/api/jobs") && href.includes("page=2")) {
+      return jsonResponse({ results: [] })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    await server.createMediaJob({
+      modeId: "custom-image",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "active now done",
+      },
+    })
+
+    const refreshed = await server.refreshCreations({ pageLimit: 2 })
+    const activeDetails = await server.getCreationDetails(activeId)
+    const importedDetails = await server.getCreationDetails(importedId)
+
+    assert.equal(refreshed.refreshed, 1)
+    assert.equal(refreshed.imported, 1)
+    assert.equal(activeDetails.creation.status, "done")
+    assert.equal(activeDetails.creation.outputUrl, "https://assets.example/active.png")
+    assert.equal(importedDetails.creation.status, "processing")
+    assert.equal(importedDetails.creation.modeId, "custom-video")
+  } finally {
+    globalThis.fetch = originalFetch
   }
 })
 
@@ -1509,9 +1718,18 @@ async function readCatalog(mediaDir) {
     const meta = new Map(metaRows.map((row) => [row.key, JSON.parse(row.value_json)]))
 
     return {
-      items: db.prepare("SELECT item_json FROM media_items ORDER BY created_at DESC, id ASC").all().map((row) => JSON.parse(row.item_json)),
-      downloadedJobIds: db.prepare("SELECT id FROM downloaded_job_ids ORDER BY position ASC").all().map((row) => row.id),
-      orphanFiles: db.prepare("SELECT file_json FROM orphan_files ORDER BY local_file ASC").all().map((row) => JSON.parse(row.file_json)),
+      items: db
+        .prepare("SELECT item_json FROM media_items ORDER BY created_at DESC, id ASC")
+        .all()
+        .map((row) => JSON.parse(row.item_json)),
+      downloadedJobIds: db
+        .prepare("SELECT id FROM downloaded_job_ids ORDER BY position ASC")
+        .all()
+        .map((row) => row.id),
+      orphanFiles: db
+        .prepare("SELECT file_json FROM orphan_files ORDER BY local_file ASC")
+        .all()
+        .map((row) => JSON.parse(row.file_json)),
       lastSeenJobId: meta.get("lastSeenJobId") || null,
       updatedAt: meta.get("updatedAt") || null,
       lastRun: meta.get("lastRun") || null,

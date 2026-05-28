@@ -136,6 +136,53 @@ export type CreateJob = {
   error?: string
 }
 
+export type CreationSource =
+  | { kind: "catalog"; itemId?: string; url?: string; contentType?: string; size?: number }
+  | { kind: "upload"; contentType?: string; size?: number }
+  | { kind: "url"; url?: string }
+  | { kind: string; [key: string]: unknown }
+
+export type Creation = {
+  id: string
+  jobId?: string | null
+  status: string
+  modeId?: string | null
+  modeLabel?: string | null
+  mediaType?: "image" | "video" | string | null
+  source?: CreationSource | null
+  params?: Record<string, string>
+  error?: string | null
+  inputUrl?: string | null
+  outputUrl?: string | null
+  externalTaskId?: string | null
+  createdAt?: number | null
+  createdAtIso?: string | null
+  createdLocallyAt?: string | null
+  submittedAt?: string | null
+  updatedAt?: string | null
+  finishedAt?: string | null
+  downloadedItemId?: string | null
+  active?: boolean
+  request?: Record<string, unknown> | null
+  response?: Record<string, unknown> | null
+  job?: Record<string, unknown> | null
+}
+
+export type CreationEvent = {
+  id: number
+  status: string
+  message?: string | null
+  data?: Record<string, unknown> | null
+  createdAt: string
+}
+
+export type CreationsResponse = {
+  creations: Creation[]
+  activeCount: number
+  total: number
+  pollMs: number
+}
+
 export type Backup = {
   file: string
   createdAt?: string

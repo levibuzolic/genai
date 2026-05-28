@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { createReadStream, readFileSync } from "node:fs"
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
@@ -58,6 +58,8 @@ const CREATE_DISALLOWED_TEXT_PATTERNS = [
   /\b(?:[0-9]|1[0-7])\s*(?:yo|yrs?|years?\s*old)\b/i,
   /\b(?:rape|raped|raping|non[-\s]?consensual|forced)\b/i,
 ]
+const CREATE_TERMINAL_STATUSES = new Set(["done", "failed", "error", "cancelled", "canceled"])
+const CREATE_ACTIVE_STATUSES = new Set(["submitted", "queued", "pending", "processing", "running", "in_progress"])
 
 const authState = {
   authorization: normalizeAuthorization(process.env.GENERATEPORN_AUTHORIZATION),
@@ -101,7 +103,6 @@ const autoSyncState = {
 }
 let autoSyncTimer = null
 
-const createJobState = new Map()
 let catalogDb = null
 let catalogJsonMigrationChecked = false
 let createTemplateJsonMigrationChecked = false
@@ -159,6 +160,30 @@ const server = http.createServer(async (request, response) => {
     const createDownloadMatch = url.pathname.match(/^\/api\/create\/jobs\/([^/]+)\/download$/)
     if (request.method === "POST" && createDownloadMatch) {
       return sendJson(response, await downloadCreateJob(createDownloadMatch[1]))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/creations") {
+      return sendJson(response, await getCreations(url.searchParams))
+    }
+
+    const creationMatch = url.pathname.match(/^\/api\/creations\/([^/]+)$/)
+    if (request.method === "GET" && creationMatch) {
+      return sendJson(response, await getCreationDetails(creationMatch[1]))
+    }
+
+    const creationDuplicateMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/duplicate$/)
+    if (request.method === "POST" && creationDuplicateMatch) {
+      return sendJson(response, await duplicateCreation(creationDuplicateMatch[1]))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/creations/refresh") {
+      const body = await readJsonBody(request)
+      return sendJson(
+        response,
+        await refreshCreations({
+          pageLimit: clamp(Number(body.pageLimit || CREATE_HISTORY_PAGE_LIMIT), 1, PAGE_LIMIT),
+        }),
+      )
     }
 
     if (request.method === "POST" && url.pathname === "/api/auth/token") {
@@ -990,6 +1015,9 @@ function templateToCreateMode(template) {
 }
 
 async function createMediaJob(requestBody) {
+  const attemptId = `local-${randomUUID()}`
+  const requestStartedAt = new Date().toISOString()
+
   if (!hasApiAuth()) {
     throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
   }
@@ -1009,33 +1037,111 @@ async function createMediaJob(requestBody) {
   const source = await resolveCreateSource(requestBody.source)
   const liveRequest = buildCreateApiRequest(mode, source, requestBody.params || {})
   const url = `${getJobsApiBaseUrl()}/${mode.endpoint}`
-  const response = await fetch(url, {
-    method: "POST",
-    headers: buildApiHeaders(),
-    body: JSON.stringify(liveRequest.body),
+  const baseRecord = {
+    id: attemptId,
+    status: "submitted",
+    modeId: mode.id,
+    modeLabel: mode.label,
+    mediaType: mode.mediaType || null,
+    source: source.publicSource,
+    params: requestBody.params || {},
+    request: liveRequest.publicRequest,
+    requestBody: liveRequest.body,
+    createdLocallyAt: requestStartedAt,
+    submittedAt: requestStartedAt,
+    updatedAt: requestStartedAt,
+  }
+
+  saveCreationJob(baseRecord, {
+    eventStatus: "submitted",
+    eventMessage: "Submitted creation request.",
   })
-  const body = await response.json().catch(() => ({}))
+
+  let response
+  let body
+  try {
+    response = await fetch(url, {
+      method: "POST",
+      headers: buildApiHeaders(),
+      body: JSON.stringify(liveRequest.body),
+    })
+    body = await response.json().catch(() => ({}))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    saveCreationJob(
+      {
+        ...baseRecord,
+        status: "error",
+        error: message,
+        finishedAt: new Date().toISOString(),
+      },
+      {
+        eventStatus: "error",
+        eventMessage: message,
+      },
+    )
+    throw error
+  }
 
   if (!response.ok) {
     const error = body?.error || `Create request failed: ${response.status} ${response.statusText}`
     const wrapped = new Error(error)
     wrapped.statusCode = response.status
+    saveCreationJob(
+      {
+        ...baseRecord,
+        status: "error",
+        response: body,
+        error,
+        finishedAt: new Date().toISOString(),
+      },
+      {
+        eventStatus: "error",
+        eventMessage: error,
+        eventData: body,
+      },
+    )
     throw wrapped
   }
 
   if (!body?.job_id) {
+    saveCreationJob(
+      {
+        ...baseRecord,
+        status: "error",
+        response: body,
+        error: "Create response did not include a job_id.",
+        finishedAt: new Date().toISOString(),
+      },
+      {
+        eventStatus: "error",
+        eventMessage: "Create response did not include a job_id.",
+        eventData: body,
+      },
+    )
     throw new Error("Create response did not include a job_id.")
   }
 
-  createJobState.set(body.job_id, {
+  const creation = {
+    ...baseRecord,
+    id: body.job_id,
+    previousId: attemptId,
     jobId: body.job_id,
     modeId: mode.id,
     modeLabel: mode.label,
     source: source.publicSource,
     params: requestBody.params || {},
+    request: liveRequest.publicRequest,
     requestBody: liveRequest.body,
-    createdLocallyAt: new Date().toISOString(),
-  })
+    response: body,
+    status: "pending",
+    createdLocallyAt: requestStartedAt,
+    submittedAt: requestStartedAt,
+    updatedAt: new Date().toISOString(),
+  }
+
+  moveCreationJob(attemptId, creation)
+  addCreationEvent(body.job_id, "pending", "Upstream job accepted.", body)
 
   return {
     ok: true,
@@ -1050,9 +1156,14 @@ async function createMediaJob(requestBody) {
 
 async function pollCreateJob(jobId) {
   const job = await fetchCreateJob(jobId)
+  const creation = saveCreationFromJob(job, {
+    existing: findCreationJob(jobId),
+    eventMessage: `Job ${job.status || "updated"}.`,
+  })
+
   return {
     job: toPublicCreateJob(job),
-    createState: createJobState.get(jobId) || null,
+    createState: creation ? toPublicCreation(creation) : null,
     pollMs: CREATE_POLL_MS,
   }
 }
@@ -1066,7 +1177,7 @@ async function downloadCreateJob(jobId) {
 
   const catalog = await loadCatalog()
   const existing = catalog.items.find((item) => item.id === job.id)
-  const createState = createJobState.get(job.id) || null
+  const createState = findCreationJob(job.id)
   const downloaded = await downloadJob(job)
   const nextItem = toCatalogItem(job, {
     ...existing,
@@ -1088,10 +1199,153 @@ async function downloadCreateJob(jobId) {
   catalog.lastSeenJobId ||= job.id
   catalog.updatedAt = new Date().toISOString()
   await saveCatalog(catalog)
+  saveCreationFromJob(job, {
+    existing: createState,
+    downloadedItemId: nextItem.id,
+    eventMessage: "Downloaded to library.",
+  })
 
   return {
     ok: true,
     item: toPublicCatalogItem(nextItem),
+  }
+}
+
+async function getCreations(searchParams = new URLSearchParams()) {
+  const status = searchParams.get("status") || "all"
+  const refresh = searchParams.get("refresh") === "true"
+
+  if (refresh && hasApiAuth()) {
+    await refreshActiveCreations()
+  }
+
+  const rows = listCreationJobs({ status })
+  const activeCount = rows.filter((row) => isActiveCreationStatus(row.status)).length
+
+  return {
+    creations: rows.map(toPublicCreation),
+    activeCount,
+    total: rows.length,
+    pollMs: activeCount ? CREATE_POLL_MS : 10000,
+  }
+}
+
+async function getCreationDetails(id) {
+  const creation = findCreationJob(id)
+
+  if (!creation) {
+    const error = new Error("Creation was not found.")
+    error.statusCode = 404
+    throw error
+  }
+
+  return {
+    creation: toPublicCreation(creation, { details: true }),
+    events: listCreationEvents(creation.id),
+  }
+}
+
+async function duplicateCreation(id) {
+  const creation = findCreationJob(id)
+
+  if (!creation) {
+    const error = new Error("Creation was not found.")
+    error.statusCode = 404
+    throw error
+  }
+
+  const now = new Date().toISOString()
+  const draft = {
+    id: `draft-${randomUUID()}`,
+    status: "draft",
+    modeId: creation.modeId,
+    modeLabel: creation.modeLabel,
+    mediaType: creation.mediaType,
+    source: getReusableCreationSource(creation.source),
+    params: creation.params || {},
+    createdLocallyAt: now,
+    updatedAt: now,
+  }
+
+  saveCreationJob(draft, {
+    eventStatus: "draft",
+    eventMessage: `Copied settings from ${creation.jobId || creation.id}.`,
+  })
+
+  return {
+    ok: true,
+    draft: toPublicCreation(draft),
+    form: {
+      modeId: draft.modeId,
+      source: draft.source,
+      params: draft.params,
+    },
+  }
+}
+
+async function refreshCreations({ pageLimit = CREATE_HISTORY_PAGE_LIMIT } = {}) {
+  if (!hasApiAuth()) {
+    throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
+  }
+
+  const active = await refreshActiveCreations()
+  let imported = 0
+
+  for (let page = 1; page <= pageLimit; page += 1) {
+    const jobs = await fetchJobsPage(page)
+
+    if (jobs.length === 0) {
+      break
+    }
+
+    for (const job of jobs) {
+      const existing = findCreationJob(job.id)
+      saveCreationFromJob(job, {
+        existing,
+        eventMessage: existing ? `History refresh saw ${job.status}.` : "Imported from upstream history.",
+      })
+      if (!existing) {
+        imported += 1
+      }
+    }
+  }
+
+  const rows = listCreationJobs({ status: "all" })
+  return {
+    ok: true,
+    refreshed: active.refreshed,
+    imported,
+    creations: rows.map(toPublicCreation),
+    activeCount: rows.filter((row) => isActiveCreationStatus(row.status)).length,
+    pollMs: rows.some((row) => isActiveCreationStatus(row.status)) ? CREATE_POLL_MS : 10000,
+    total: rows.length,
+  }
+}
+
+async function refreshActiveCreations() {
+  const activeRows = listCreationJobs({ status: "active" }).filter((row) => row.jobId)
+  const errors = []
+  let refreshed = 0
+
+  for (const row of activeRows) {
+    try {
+      const job = await fetchCreateJob(row.jobId)
+      saveCreationFromJob(job, {
+        existing: row,
+        eventMessage: `Job ${job.status || "updated"}.`,
+      })
+      refreshed += 1
+    } catch (error) {
+      errors.push({
+        id: row.id,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return {
+    refreshed,
+    errors,
   }
 }
 
@@ -1354,6 +1608,111 @@ function toPublicCreateJob(job) {
     createdAt: job.created_at || null,
     createdAtIso: job.created_at ? new Date(Number(job.created_at) * 1000).toISOString() : null,
   }
+}
+
+function saveCreationFromJob(job, options = {}) {
+  const existing = options.existing || findCreationJob(job.id)
+  const publicJob = toPublicCreateJob(job)
+  const status = publicJob.status || existing?.status || "pending"
+  const now = new Date().toISOString()
+  const creation = {
+    ...existing,
+    id: existing?.id || job.id,
+    jobId: job.id,
+    status,
+    modeId: existing?.modeId || inferCreateModeId(job),
+    modeLabel: existing?.modeLabel || inferCreateModeLabel(job),
+    mediaType: existing?.mediaType || (job.type === "video" ? "video" : "image"),
+    source: existing?.source || sourceFromCreateJob(job),
+    params: existing?.params || paramsFromCreateJob(job),
+    response: existing?.response || null,
+    job: publicJob,
+    error: job.error || null,
+    inputUrl: job.input_url || null,
+    outputUrl: job.output_url || null,
+    externalTaskId: job.external_task_id || null,
+    createdAt: job.created_at || existing?.createdAt || null,
+    createdAtIso: publicJob.createdAtIso || existing?.createdAtIso || null,
+    createdLocallyAt: existing?.createdLocallyAt || publicJob.createdAtIso || now,
+    submittedAt: existing?.submittedAt || publicJob.createdAtIso || null,
+    updatedAt: now,
+    finishedAt: isTerminalCreationStatus(status) ? existing?.finishedAt || now : null,
+    downloadedItemId: options.downloadedItemId || existing?.downloadedItemId || null,
+  }
+
+  saveCreationJob(creation, {
+    eventStatus: status,
+    eventMessage: options.eventMessage,
+    eventData: publicJob,
+  })
+
+  return creation
+}
+
+function inferCreateModeId(job) {
+  return job.type === "video" ? "custom-video" : "custom-image"
+}
+
+function inferCreateModeLabel(job) {
+  return job.type === "video" ? "Custom Video" : "Edit Image"
+}
+
+function paramsFromCreateJob(job) {
+  const params = {}
+
+  if (job.prompt) {
+    params.prompt = job.prompt
+  }
+
+  if (job.resolution && job.duration) {
+    params.quality = `${job.resolution}-${job.duration}`
+  }
+
+  return params
+}
+
+function sourceFromCreateJob(job) {
+  if (job.input_url) {
+    return {
+      kind: "url",
+      url: job.input_url,
+    }
+  }
+
+  return null
+}
+
+function getReusableCreationSource(source) {
+  if (!source?.kind) {
+    return null
+  }
+
+  if (source.kind === "catalog" && source.itemId) {
+    return {
+      kind: "catalog",
+      itemId: source.itemId,
+    }
+  }
+
+  if (source.kind === "url" && source.url) {
+    return {
+      kind: "url",
+      url: source.url,
+    }
+  }
+
+  return {
+    kind: source.kind,
+  }
+}
+
+function isTerminalCreationStatus(status) {
+  return CREATE_TERMINAL_STATUSES.has(String(status || "").toLowerCase())
+}
+
+function isActiveCreationStatus(status) {
+  const normalized = String(status || "").toLowerCase()
+  return CREATE_ACTIVE_STATUSES.has(normalized) || (!isTerminalCreationStatus(normalized) && normalized !== "draft")
 }
 
 async function loadCreateTemplateRegistry() {
@@ -2093,6 +2452,46 @@ function ensureCatalogSchema(db) {
       local_file TEXT PRIMARY KEY,
       file_json TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS creation_jobs (
+      id TEXT PRIMARY KEY,
+      job_id TEXT UNIQUE,
+      status TEXT NOT NULL,
+      mode_id TEXT,
+      mode_label TEXT,
+      media_type TEXT,
+      source_json TEXT,
+      params_json TEXT,
+      request_json TEXT,
+      request_body_json TEXT,
+      response_json TEXT,
+      job_json TEXT,
+      error TEXT,
+      input_url TEXT,
+      output_url TEXT,
+      external_task_id TEXT,
+      created_at INTEGER,
+      created_at_iso TEXT,
+      created_locally_at TEXT,
+      submitted_at TEXT,
+      updated_at TEXT,
+      finished_at TEXT,
+      downloaded_item_id TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS creation_jobs_status_idx ON creation_jobs(status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS creation_jobs_job_id_idx ON creation_jobs(job_id);
+
+    CREATE TABLE IF NOT EXISTS creation_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      creation_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      message TEXT,
+      event_json TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS creation_events_creation_id_idx ON creation_events(creation_id, id ASC);
   `)
 }
 
@@ -2182,6 +2581,256 @@ function writeCatalogMeta(key, value) {
       ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
     `)
     .run(key, JSON.stringify(value))
+}
+
+function saveCreationJob(creation, event = {}) {
+  const existing = creation.id ? findCreationJob(creation.id) : null
+  const next = normalizeCreationJob({
+    ...existing,
+    ...creation,
+    updatedAt: creation.updatedAt || new Date().toISOString(),
+  })
+  const db = getCatalogDb()
+
+  db.prepare(`
+    INSERT INTO creation_jobs (
+      id,
+      job_id,
+      status,
+      mode_id,
+      mode_label,
+      media_type,
+      source_json,
+      params_json,
+      request_json,
+      request_body_json,
+      response_json,
+      job_json,
+      error,
+      input_url,
+      output_url,
+      external_task_id,
+      created_at,
+      created_at_iso,
+      created_locally_at,
+      submitted_at,
+      updated_at,
+      finished_at,
+      downloaded_item_id
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      job_id = excluded.job_id,
+      status = excluded.status,
+      mode_id = excluded.mode_id,
+      mode_label = excluded.mode_label,
+      media_type = excluded.media_type,
+      source_json = excluded.source_json,
+      params_json = excluded.params_json,
+      request_json = excluded.request_json,
+      request_body_json = excluded.request_body_json,
+      response_json = excluded.response_json,
+      job_json = excluded.job_json,
+      error = excluded.error,
+      input_url = excluded.input_url,
+      output_url = excluded.output_url,
+      external_task_id = excluded.external_task_id,
+      created_at = excluded.created_at,
+      created_at_iso = excluded.created_at_iso,
+      created_locally_at = excluded.created_locally_at,
+      submitted_at = excluded.submitted_at,
+      updated_at = excluded.updated_at,
+      finished_at = excluded.finished_at,
+      downloaded_item_id = excluded.downloaded_item_id
+  `).run(
+    next.id,
+    next.jobId,
+    next.status,
+    next.modeId,
+    next.modeLabel,
+    next.mediaType,
+    stringifyNullable(next.source),
+    stringifyNullable(next.params),
+    stringifyNullable(next.request),
+    stringifyNullable(next.requestBody ? redactCreateRequestBody(next.requestBody) : null),
+    stringifyNullable(next.response),
+    stringifyNullable(next.job),
+    next.error,
+    next.inputUrl,
+    next.outputUrl,
+    next.externalTaskId,
+    next.createdAt,
+    next.createdAtIso,
+    next.createdLocallyAt,
+    next.submittedAt,
+    next.updatedAt,
+    next.finishedAt,
+    next.downloadedItemId,
+  )
+
+  const eventStatus = event.eventStatus || (existing?.status !== next.status ? next.status : null)
+  if (eventStatus && (event.eventMessage || existing?.status !== next.status || !existing)) {
+    addCreationEvent(next.id, eventStatus, event.eventMessage || `Status changed to ${eventStatus}.`, event.eventData || null)
+  }
+
+  return next
+}
+
+function moveCreationJob(previousId, creation) {
+  const db = getCatalogDb()
+  const existing = findCreationJob(previousId)
+
+  if (existing && previousId !== creation.id) {
+    db.prepare("DELETE FROM creation_jobs WHERE id = ?").run(previousId)
+    db.prepare("UPDATE creation_events SET creation_id = ? WHERE creation_id = ?").run(creation.id, previousId)
+  }
+
+  return saveCreationJob({
+    ...existing,
+    ...creation,
+  })
+}
+
+function addCreationEvent(creationId, status, message, data = null) {
+  getCatalogDb()
+    .prepare("INSERT INTO creation_events (creation_id, status, message, event_json, created_at) VALUES (?, ?, ?, ?, ?)")
+    .run(creationId, String(status || "updated"), message || null, stringifyNullable(data), new Date().toISOString())
+}
+
+function findCreationJob(id) {
+  if (!id) {
+    return null
+  }
+
+  const row = getCatalogDb().prepare("SELECT * FROM creation_jobs WHERE id = ? OR job_id = ? LIMIT 1").get(id, id)
+
+  return row ? creationJobFromRow(row) : null
+}
+
+function listCreationJobs({ status = "all", limit = 80 } = {}) {
+  const rows = getCatalogDb()
+    .prepare("SELECT * FROM creation_jobs ORDER BY updated_at DESC, created_locally_at DESC LIMIT ?")
+    .all(limit)
+    .map(creationJobFromRow)
+  const filtered = rows.filter((row) => {
+    if (status === "active") return isActiveCreationStatus(row.status)
+    if (status === "finished") return isTerminalCreationStatus(row.status)
+    return true
+  })
+
+  return filtered.toSorted((a, b) => {
+    const activeDelta = Number(isActiveCreationStatus(b.status)) - Number(isActiveCreationStatus(a.status))
+    if (activeDelta) return activeDelta
+    return String(b.updatedAt || b.createdLocallyAt || "").localeCompare(String(a.updatedAt || a.createdLocallyAt || ""))
+  })
+}
+
+function listCreationEvents(creationId) {
+  return getCatalogDb()
+    .prepare("SELECT id, status, message, event_json, created_at FROM creation_events WHERE creation_id = ? ORDER BY id ASC")
+    .all(creationId)
+    .map((row) => ({
+      id: row.id,
+      status: row.status,
+      message: row.message,
+      data: parseJson(row.event_json, null),
+      createdAt: row.created_at,
+    }))
+}
+
+function normalizeCreationJob(creation = {}) {
+  const now = new Date().toISOString()
+
+  return {
+    id: creation.id || creation.jobId || `local-${randomUUID()}`,
+    jobId: creation.jobId || creation.job_id || null,
+    status: creation.status || "draft",
+    modeId: creation.modeId || creation.mode_id || null,
+    modeLabel: creation.modeLabel || creation.mode_label || null,
+    mediaType: creation.mediaType || creation.media_type || null,
+    source: creation.source || null,
+    params: creation.params || {},
+    request: creation.request || null,
+    requestBody: creation.requestBody || null,
+    response: creation.response || null,
+    job: creation.job || null,
+    error: creation.error || null,
+    inputUrl: creation.inputUrl || creation.input_url || null,
+    outputUrl: creation.outputUrl || creation.output_url || null,
+    externalTaskId: creation.externalTaskId || creation.external_task_id || null,
+    createdAt: creation.createdAt || creation.created_at || null,
+    createdAtIso: creation.createdAtIso || creation.created_at_iso || null,
+    createdLocallyAt: creation.createdLocallyAt || creation.created_locally_at || now,
+    submittedAt: creation.submittedAt || creation.submitted_at || null,
+    updatedAt: creation.updatedAt || creation.updated_at || now,
+    finishedAt: creation.finishedAt || creation.finished_at || null,
+    downloadedItemId: creation.downloadedItemId || creation.downloaded_item_id || null,
+  }
+}
+
+function creationJobFromRow(row) {
+  return normalizeCreationJob({
+    id: row.id,
+    jobId: row.job_id,
+    status: row.status,
+    modeId: row.mode_id,
+    modeLabel: row.mode_label,
+    mediaType: row.media_type,
+    source: parseJson(row.source_json, null),
+    params: parseJson(row.params_json, {}),
+    request: parseJson(row.request_json, null),
+    requestBody: parseJson(row.request_body_json, null),
+    response: parseJson(row.response_json, null),
+    job: parseJson(row.job_json, null),
+    error: row.error,
+    inputUrl: row.input_url,
+    outputUrl: row.output_url,
+    externalTaskId: row.external_task_id,
+    createdAt: row.created_at,
+    createdAtIso: row.created_at_iso,
+    createdLocallyAt: row.created_locally_at,
+    submittedAt: row.submitted_at,
+    updatedAt: row.updated_at,
+    finishedAt: row.finished_at,
+    downloadedItemId: row.downloaded_item_id,
+  })
+}
+
+function toPublicCreation(creation, { details = false } = {}) {
+  const publicCreation = {
+    id: creation.id,
+    jobId: creation.jobId,
+    status: creation.status,
+    modeId: creation.modeId,
+    modeLabel: creation.modeLabel,
+    mediaType: creation.mediaType,
+    source: creation.source,
+    params: creation.params || {},
+    error: creation.error,
+    inputUrl: creation.inputUrl,
+    outputUrl: creation.outputUrl,
+    externalTaskId: creation.externalTaskId,
+    createdAt: creation.createdAt,
+    createdAtIso: creation.createdAtIso,
+    createdLocallyAt: creation.createdLocallyAt,
+    submittedAt: creation.submittedAt,
+    updatedAt: creation.updatedAt,
+    finishedAt: creation.finishedAt,
+    downloadedItemId: creation.downloadedItemId,
+    active: isActiveCreationStatus(creation.status),
+  }
+
+  if (details) {
+    publicCreation.request = creation.request
+    publicCreation.response = creation.response
+    publicCreation.job = creation.job
+  }
+
+  return publicCreation
+}
+
+function stringifyNullable(value) {
+  return value === undefined || value === null ? null : JSON.stringify(value)
 }
 
 function normalizeCatalog(catalog = {}) {
@@ -2668,8 +3317,11 @@ export {
   createMediaJob,
   downloadCreateJob,
   findJobForTemplate,
+  duplicateCreation,
   getCatalogDownloadQueue,
   getCreateModes,
+  getCreationDetails,
+  getCreations,
   getThumbnailGenerationQueue,
   getItems,
   hashBuffer,
@@ -2684,6 +3336,7 @@ export {
   applyDuplicateMetadata,
   reconcileCatalogWithLocalFiles,
   requestSyncCancellation,
+  refreshCreations,
   restoreCatalogBackup,
   resolveMediaDir,
   server,

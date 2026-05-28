@@ -4,7 +4,16 @@ import { fetchJson } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { isImageItem } from "@/lib/media"
 import { extensionForImageType, fileToDataUrl, getImageFileFromTransfer, sourceLabel, UPLOAD_IMAGE_TYPES } from "@/lib/upload"
-import type { CatalogItem, CreateField, CreateJob, CreateMode, ItemsResponse, SourceKind, UploadSource } from "@/types/domain"
+import type {
+  CatalogItem,
+  CreateField,
+  CreateJob,
+  CreateMode,
+  CreationSource,
+  ItemsResponse,
+  SourceKind,
+  UploadSource,
+} from "@/types/domain"
 
 const CREATE_SOURCE_SEARCH_DEBOUNCE_MS = 220
 
@@ -92,7 +101,10 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     if (!modeId || !selectedMode) return
     const firstQualityOption = qualityField?.options?.[0]
     if (firstQualityOption) {
-      setQuality(qualityField?.default || firstQualityOption.value)
+      setQuality((current) => {
+        if (current && qualityField.options?.some((option) => option.value === current)) return current
+        return qualityField?.default || firstQualityOption.value
+      })
     } else {
       setQuality("")
     }
@@ -115,14 +127,28 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     options: {
       sourceKind?: SourceKind | undefined
       sourceItem?: CatalogItem | null | undefined
+      source?: CreationSource | null | undefined
       prompt?: string | undefined
       modeId?: string | undefined
+      params?: Record<string, string> | undefined
     } = {},
   ) {
     setOpen(true)
     if (options.sourceKind) setSourceKind(options.sourceKind)
     if (options.prompt) setPrompt(options.prompt)
     if (options.modeId) setModeId(options.modeId)
+    if (options.params?.["prompt"]) setPrompt(options.params["prompt"])
+    if (options.params?.["quality"]) setQuality(options.params["quality"])
+    if (options.source?.kind === "url" && typeof options.source.url === "string") {
+      setSourceKind("url")
+      setSourceUrl(options.source.url)
+    } else if (options.source?.kind === "catalog" && typeof options.source.itemId === "string") {
+      setSourceKind("catalog")
+      setSelectedSourceId(options.source.itemId)
+    } else if (options.source?.kind === "upload") {
+      setSourceKind("upload")
+      setUploadMeta("Choose, drop, or paste the source image again.")
+    }
     const sourceItem = options.sourceItem
     if (sourceItem && isImageItem(sourceItem)) {
       setSourceKind("catalog")

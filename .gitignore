@@ -2,5 +2,5 @@
 .env
 node_modules/
 .pnpm-store/
-media/
-output/
+/media/
+/output/

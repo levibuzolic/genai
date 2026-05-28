@@ -411,6 +411,7 @@ main {
 
 .create-studio {
   @apply mb-5 rounded-3xl border border-primary/20 bg-[linear-gradient(135deg,oklch(0.79_0.135_152_/_0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-4 shadow-2xl shadow-black/30 backdrop-blur-2xl md:p-5;
+  scroll-margin-top: 6rem;
 }
 
 .createHeader {
@@ -426,7 +427,7 @@ main {
 }
 
 .createLayout {
-  @apply grid gap-4 pt-4 xl:grid-cols-[390px_minmax(0,1fr)];
+  @apply grid gap-4 pt-4 xl:grid-cols-[390px_minmax(0,1fr)_340px];
 }
 
 .createPanel {
@@ -434,7 +435,7 @@ main {
 }
 
 .createResult {
-  @apply grid gap-3 lg:grid-cols-[minmax(220px,0.72fr)_minmax(320px,1.28fr)];
+  @apply grid gap-3 2xl:grid-cols-[minmax(220px,0.72fr)_minmax(320px,1.28fr)];
 }
 
 .createTabs {
@@ -489,7 +490,105 @@ main {
 
 .createResult .detailFacts,
 .createResult .dialogActions {
-  @apply lg:col-span-2;
+  @apply 2xl:col-span-2;
+}
+
+.creationHistory {
+  @apply rounded-2xl border border-white/10 bg-black/20 p-3;
+}
+
+.creationHistoryHeader {
+  @apply flex flex-col gap-3 md:flex-row md:items-center md:justify-between;
+}
+
+.creationHistoryHeader h3 {
+  @apply mt-2 text-lg font-semibold tracking-tight;
+}
+
+.creationHistoryHeader p,
+.creationHistoryStatus {
+  @apply mt-1 text-sm text-muted-foreground;
+}
+
+.creationHistorySections {
+  @apply mt-3 grid gap-3;
+}
+
+.creationHistoryGroup {
+  @apply grid content-start gap-2;
+}
+
+.creationHistoryEyebrow {
+  @apply px-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground;
+}
+
+.creationHistoryRow {
+  @apply grid min-h-16 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] p-2;
+}
+
+.creationHistoryRow.is-active {
+  @apply border-amber-300/25 bg-amber-300/8;
+}
+
+.creationHistoryMain {
+  @apply grid min-w-0 gap-1 rounded-lg bg-transparent p-1 text-left hover:bg-white/[0.045];
+}
+
+.creationHistoryTitle {
+  @apply truncate text-sm font-medium;
+}
+
+.creationHistoryMeta {
+  @apply truncate text-xs text-muted-foreground;
+}
+
+.creationHistoryEmpty {
+  @apply rounded-xl border border-dashed border-white/10 bg-white/[0.025] p-4 text-sm text-muted-foreground;
+}
+
+.creationDetailDialog {
+  @apply max-w-[900px] border-white/10 bg-card;
+}
+
+.creationDetailBody {
+  @apply grid max-h-[calc(100dvh-9rem)] gap-4 overflow-auto p-5;
+}
+
+.creationDetailBody h4 {
+  @apply mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground;
+}
+
+.creationDetailSummary {
+  @apply grid gap-3 rounded-2xl border border-white/10 bg-black/20 p-3;
+}
+
+.creationDetailSummary p {
+  @apply text-sm leading-6;
+}
+
+.creationTimeline {
+  @apply grid gap-2 rounded-2xl border border-white/10 bg-black/20 p-3;
+}
+
+.creationTimeline li {
+  @apply grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-2 text-sm;
+}
+
+.creationTimeline svg {
+  @apply mt-1 text-muted-foreground;
+}
+
+.creationTimeline strong {
+  @apply block font-medium;
+}
+
+.creationTimeline span,
+.creationTimeline time {
+  @apply text-xs text-muted-foreground;
+}
+
+.creationJson {
+  @apply max-h-52 overflow-auto rounded-2xl border border-white/10 bg-black/35 p-3 text-xs text-muted-foreground;
 }
 
 .detailFacts {
@@ -634,6 +733,10 @@ main {
 
   .createResultPreview {
     @apply h-[280px];
+  }
+
+  .creationHistoryRow {
+    @apply grid-cols-1;
   }
 
   .media-grid {
