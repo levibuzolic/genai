@@ -6,14 +6,13 @@
 - `public/` contains the built React app served by the Node server.
 - `client/src/` contains the React 19 + Vite source app.
 - `extension/` contains the unpacked Chrome extension **GP Auth Helper**, now a fallback auth helper.
-- `media/catalog.sqlite` stores the local catalog and create-template registry; legacy `media/catalog.json` and `media/create-templates.json` are one-time migration inputs and are moved into `MEDIA_DIR/_legacy_json/` after import or ignore.
+- `media/catalog.sqlite` stores the local catalog and create-template registry.
 - Media files are saved under date-based folders inside `MEDIA_DIR`.
 - `MEDIA_DIR` can point outside the repo, including mounted remote drives or cloud-synced folders; `catalog.sqlite` stays alongside the media.
 - Catalog items can store `sha256`, `fileSize`, and `verifiedAt` after a library verification pass.
 - Duplicate media is marked directly on catalog items with `duplicateGroupSize` and `duplicateOf`.
 - Orphan local media files are tracked in `catalog.orphanFiles`.
-- Catalog backups are timestamped JSON snapshots under `MEDIA_DIR/_catalog_backups`.
-- JSON remains the interchange format for export, backup, and restore, but SQLite is the source of truth.
+- Catalog backups are timestamped SQLite snapshots under `MEDIA_DIR/_catalog_backups`.
 - `.mise.toml` pins Node.js and pnpm. `pnpm-workspace.yaml` holds project package-manager settings and security defaults.
 - `environment.toml` defines Codex local environment setup plus actions for starting the server and running tests.
 
@@ -90,10 +89,39 @@ The server stores bearer tokens in memory only. The persistent browser profile c
 - Item details open in a dialog with larger preview, full prompt, metadata, and copy actions.
 - Keyboard shortcuts: `/` focuses search; left/right arrows page through results when not typing.
 
-## Future Ideas
+## Future Work
 
-- Add prompt tags or manual notes in a sidecar metadata file.
-- Add keyboard shortcuts for browsing/copying prompts.
-- Add explicit import of external catalog JSON files.
+### Creation API QA
+
+- Exercise the live creation API end to end for gallery image sources, image uploads, pasted images, image URLs, video uploads, and video URLs.
+- Confirm job polling, failed-job states, result download, and catalog merge behavior against real API responses.
+- Capture any remaining custom-mode API shapes as stable mocked fixtures before expanding UI affordances.
+
+### Auth UX
+
+- Make reconnect and refresh states more explicit when the auth browser profile can no longer refresh.
+- Add a confirmed destructive action for deleting the persisted auth browser profile when a full logout/reset is needed.
+- Keep the extension path as a fallback, but make the backend-owned auth browser the normal path in UI copy and troubleshooting.
+
+### Background Sync UX
+
+- Add a visible pause/resume control for automatic sync when we want to work locally without background jobs starting.
+- Consider delaying the boot sync until auth refresh has either succeeded or clearly failed, so authenticated API scans start cleanly.
+- Track the last automatic sync outcome separately from manual syncs if users need a clearer operational history.
+
+### Templates And Creation Workflow
+
+- Build a custom template manager for labels, seed job IDs, prompts, source requirements, and quality defaults.
+- Turn history-prompt import into a polished template creation flow rather than a utility-style form.
+- Add a creation queue/history area for active jobs, failed jobs, retries, downloads, and recently created media.
+
+### Privacy Mode
+
+- Extend the current media blur toggle into a broader privacy mode that can also hide prompts, filenames, URLs, and explicit metadata while screen-sharing.
+- Make privacy mode state obvious in the header so users do not accidentally assume sensitive text is hidden when only visuals are blurred.
+
+### Performance And Test Shape
+
 - Normalize the SQLite schema further for server-side filtering/sorting once catalog size makes in-memory filtering noticeably slow.
 - Split browser smoke coverage into smaller focused UI tests if the single smoke test becomes hard to diagnose.
+- Add keyboard shortcuts for browsing, copying prompts, and moving between detail views once the core flows stabilize.

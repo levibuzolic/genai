@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 
 import { chromium } from "@playwright/test"
@@ -52,7 +53,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
       "Connect account",
       "Refresh token",
       "Close browser",
-      "Export catalog",
+      "Export database",
     ])
     await page.keyboard.press("Escape")
 
@@ -242,20 +243,59 @@ async function writeFixtureCatalog(mediaDir) {
     })
   }
 
-  await writeFile(
-    path.join(mediaDir, "catalog.json"),
-    `${JSON.stringify(
-      {
-        items,
-        downloadedJobIds: items.filter((item) => item.localFile).map((item) => item.id),
-        orphanFiles: [],
-        lastSeenJobId: items[0].id,
-        updatedAt: new Date().toISOString(),
-      },
-      null,
-      2,
-    )}\n`,
-  )
+  writeFixtureCatalogDb(mediaDir, {
+    items,
+    downloadedJobIds: items.filter((item) => item.localFile).map((item) => item.id),
+    orphanFiles: [],
+    lastSeenJobId: items[0].id,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+function writeFixtureCatalogDb(mediaDir, catalog) {
+  const db = new DatabaseSync(path.join(mediaDir, "catalog.sqlite"))
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS catalog_meta (
+        key TEXT PRIMARY KEY,
+        value_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS media_items (
+        id TEXT PRIMARY KEY,
+        item_json TEXT NOT NULL,
+        created_at INTEGER,
+        updated_at TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS media_items_created_at_idx ON media_items(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS downloaded_job_ids (
+        id TEXT PRIMARY KEY,
+        position INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS orphan_files (
+        local_file TEXT PRIMARY KEY,
+        file_json TEXT NOT NULL
+      );
+    `)
+
+    const insertItem = db.prepare("INSERT INTO media_items (id, item_json, created_at, updated_at) VALUES (?, ?, ?, ?)")
+    for (const item of catalog.items) {
+      insertItem.run(item.id, JSON.stringify(item), Number(item.createdAt || 0), item.updatedAt || null)
+    }
+
+    const insertDownloaded = db.prepare("INSERT INTO downloaded_job_ids (id, position) VALUES (?, ?)")
+    catalog.downloadedJobIds.forEach((id, index) => insertDownloaded.run(id, index))
+
+    const upsertMeta = db.prepare("INSERT INTO catalog_meta (key, value_json) VALUES (?, ?)")
+    upsertMeta.run("lastSeenJobId", JSON.stringify(catalog.lastSeenJobId || null))
+    upsertMeta.run("updatedAt", JSON.stringify(catalog.updatedAt || null))
+    upsertMeta.run("lastRun", JSON.stringify(catalog.lastRun || null))
+  } finally {
+    db.close()
+  }
 }
 
 async function importServer(mediaDir) {

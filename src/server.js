@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto"
 import { createReadStream, readFileSync } from "node:fs"
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
 import path from "node:path"
-import { DatabaseSync } from "node:sqlite"
+import { DatabaseSync, backup as backupSqliteDatabase } from "node:sqlite"
 import { fileURLToPath } from "node:url"
 
 import { createAuthBrowserService } from "./auth-browser.js"
@@ -20,12 +20,9 @@ const APP_LOGIN_URL = process.env.GENERATEPORN_APP_URL || "https://app.generatep
 const PAGE_LIMIT = Number(process.env.GENERATEPORN_PAGE_LIMIT || 1000)
 const CREATE_HISTORY_PAGE_LIMIT = Number(process.env.GENERATEPORN_CREATE_HISTORY_PAGE_LIMIT || 20)
 const MEDIA_DIR = resolveMediaDir(process.env.MEDIA_DIR || "media")
-const CATALOG_PATH = path.join(MEDIA_DIR, "catalog.json")
 const CATALOG_DB_PATH = path.join(MEDIA_DIR, "catalog.sqlite")
 const BACKUP_DIR = path.join(MEDIA_DIR, "_catalog_backups")
-const LEGACY_JSON_DIR = path.join(MEDIA_DIR, "_legacy_json")
 const THUMBNAIL_DIR = getThumbnailDir(MEDIA_DIR)
-const CREATE_TEMPLATES_PATH = path.join(MEDIA_DIR, "create-templates.json")
 const AUTH_BROWSER_PROFILE_DIR = path.resolve(process.env.AUTH_BROWSER_PROFILE_DIR || path.join(MEDIA_DIR, "_auth_browser_profile"))
 const PUBLIC_DIR = path.join(ROOT_DIR, "public")
 const SYNC_DELAY_MS = Number(process.env.SYNC_DELAY_MS || 150)
@@ -104,8 +101,6 @@ const autoSyncState = {
 let autoSyncTimer = null
 
 let catalogDb = null
-let catalogJsonMigrationChecked = false
-let createTemplateJsonMigrationChecked = false
 
 await mkdir(MEDIA_DIR, { recursive: true })
 
@@ -1716,8 +1711,6 @@ function isActiveCreationStatus(status) {
 }
 
 async function loadCreateTemplateRegistry() {
-  await ensureCreateTemplateJsonMigrated()
-
   return normalizeCreateTemplateRegistry(readCatalogMeta("createTemplateRegistry") || {})
 }
 
@@ -1729,28 +1722,6 @@ async function saveCreateTemplateRegistry(registry) {
   }
   writeCatalogMeta("createTemplateRegistry", body)
   return body
-}
-
-async function ensureCreateTemplateJsonMigrated() {
-  if (createTemplateJsonMigrationChecked) {
-    await archiveLegacyJsonFile(CREATE_TEMPLATES_PATH, "ignored")
-    return
-  }
-
-  createTemplateJsonMigrationChecked = true
-
-  if (!(await fileExists(CREATE_TEMPLATES_PATH))) {
-    return
-  }
-
-  if (!readCatalogMeta("createTemplateRegistry")) {
-    const parsed = JSON.parse(await readFile(CREATE_TEMPLATES_PATH, "utf8"))
-    writeCatalogMeta("createTemplateRegistry", normalizeCreateTemplateRegistry(parsed))
-    await archiveLegacyJsonFile(CREATE_TEMPLATES_PATH, "migrated")
-    return
-  }
-
-  await archiveLegacyJsonFile(CREATE_TEMPLATES_PATH, "ignored")
 }
 
 function normalizeCreateTemplateRegistry(registry = {}) {
@@ -2101,8 +2072,6 @@ function clamp(value, min, max) {
 }
 
 async function loadCatalog() {
-  await ensureCatalogJsonMigrated()
-
   const catalog = readCatalogFromDb()
   const changed = await reconcileCatalogWithLocalFiles(catalog)
 
@@ -2391,29 +2360,6 @@ function normalizeJob(job) {
   }
 }
 
-async function ensureCatalogJsonMigrated() {
-  if (catalogJsonMigrationChecked) {
-    await archiveLegacyJsonFile(CATALOG_PATH, "ignored")
-    return
-  }
-
-  catalogJsonMigrationChecked = true
-  const db = getCatalogDb()
-
-  if (!(await fileExists(CATALOG_PATH))) {
-    return
-  }
-
-  if (isCatalogDbEmpty(db)) {
-    const parsed = JSON.parse(await readFile(CATALOG_PATH, "utf8"))
-    writeCatalogToDb(normalizeCatalog(parsed))
-    await archiveLegacyJsonFile(CATALOG_PATH, "migrated")
-    return
-  }
-
-  await archiveLegacyJsonFile(CATALOG_PATH, "ignored")
-}
-
 function getCatalogDb() {
   if (catalogDb) {
     return catalogDb
@@ -2493,14 +2439,6 @@ function ensureCatalogSchema(db) {
 
     CREATE INDEX IF NOT EXISTS creation_events_creation_id_idx ON creation_events(creation_id, id ASC);
   `)
-}
-
-function isCatalogDbEmpty(db) {
-  const mediaCount = db.prepare("SELECT COUNT(*) AS count FROM media_items").get().count
-  const metaCount = db
-    .prepare("SELECT COUNT(*) AS count FROM catalog_meta WHERE key IN ('lastSeenJobId', 'updatedAt', 'lastRun')")
-    .get().count
-  return Number(mediaCount || 0) === 0 && Number(metaCount || 0) === 0
 }
 
 function readCatalogFromDb() {
@@ -2844,29 +2782,12 @@ function normalizeCatalog(catalog = {}) {
   }
 }
 
-function stringifyCatalog(catalog) {
-  return `${JSON.stringify(normalizeCatalog(catalog), null, 2)}\n`
-}
-
 function parseJson(value, fallback) {
   try {
     return JSON.parse(value)
   } catch {
     return fallback
   }
-}
-
-async function archiveLegacyJsonFile(filePath, reason) {
-  if (!(await fileExists(filePath))) {
-    return null
-  }
-
-  await mkdir(LEGACY_JSON_DIR, { recursive: true })
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
-  const filename = `${timestamp}_${sanitizePathPart(reason).toLowerCase()}_${path.basename(filePath)}`
-  const archivePath = path.join(LEGACY_JSON_DIR, filename)
-  await rename(filePath, archivePath)
-  return archivePath
 }
 
 async function saveCatalog(catalog) {
@@ -2882,14 +2803,13 @@ async function createCatalogBackup(reason = "manual", { allowEmpty = false } = {
   }
 
   await mkdir(BACKUP_DIR, { recursive: true })
-  const raw = stringifyCatalog(catalog)
   const timestamp = new Date().toISOString()
   const safeReason = sanitizePathPart(reason).toLowerCase()
-  const filename = `${timestamp.replace(/[:.]/g, "-")}_${safeReason}.json`
+  const filename = `${timestamp.replace(/[:.]/g, "-")}_${safeReason}.sqlite`
   const backupPath = path.join(BACKUP_DIR, filename)
-  await writeFile(backupPath, raw)
+  await backupSqliteDatabase(getCatalogDb(), backupPath)
 
-  return backupSummaryFromRaw(filename, raw, timestamp, safeReason)
+  return backupSummaryFromSqliteFile(filename, backupPath, timestamp, safeReason)
 }
 
 async function listCatalogBackups() {
@@ -2904,13 +2824,12 @@ async function listCatalogBackups() {
   const backups = []
 
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) {
+    if (!entry.isFile() || !entry.name.endsWith(".sqlite")) {
       continue
     }
 
     const filePath = path.join(BACKUP_DIR, entry.name)
-    const [fileStat, raw] = await Promise.all([stat(filePath), readFile(filePath, "utf8")])
-    backups.push(backupSummaryFromRaw(entry.name, raw, fileStat.mtime.toISOString()))
+    backups.push(await backupSummaryFromSqliteFile(entry.name, filePath))
   }
 
   return backups.toSorted((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")))
@@ -2918,17 +2837,17 @@ async function listCatalogBackups() {
 
 async function restoreCatalogBackup(filename) {
   const backupPath = resolveCatalogBackupPath(filename)
-  const raw = await readFile(backupPath, "utf8")
-  const parsed = JSON.parse(raw)
 
-  if (!Array.isArray(parsed.items)) {
+  if (!(await isValidCatalogDatabase(backupPath))) {
     throw new Error("Selected backup is not a valid catalog.")
   }
 
   await createCatalogBackup("before-restore", { allowEmpty: true })
-  await saveCatalog(normalizeCatalog(parsed))
+  closeCatalogDb()
+  await copyFile(backupPath, CATALOG_DB_PATH)
+  getCatalogDb()
 
-  return backupSummaryFromRaw(path.basename(backupPath), raw)
+  return backupSummaryFromSqliteFile(path.basename(backupPath), backupPath)
 }
 
 async function sendCatalogExport(response) {
@@ -2938,18 +2857,26 @@ async function sendCatalogExport(response) {
     return sendJson(response, { error: "No catalog exists yet." }, 404)
   }
 
-  const raw = stringifyCatalog(catalog)
-  const filename = `catalog-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`
+  const filename = `catalog-export-${new Date().toISOString().replace(/[:.]/g, "-")}.sqlite`
+  const exportPath = path.join(BACKUP_DIR, `.${filename}.${process.pid}.tmp`)
+  await mkdir(BACKUP_DIR, { recursive: true })
+  await backupSqliteDatabase(getCatalogDb(), exportPath)
+
   response.writeHead(200, {
-    "content-type": "application/json; charset=utf-8",
+    "content-type": "application/vnd.sqlite3",
     "content-disposition": `attachment; filename="${filename}"`,
     "access-control-allow-origin": "*",
   })
-  response.end(raw)
+
+  const stream = createReadStream(exportPath)
+  stream.on("close", () => {
+    rm(exportPath, { force: true }).catch(() => {})
+  })
+  stream.pipe(response)
 }
 
 function resolveCatalogBackupPath(filename) {
-  if (!filename || path.basename(filename) !== filename || !filename.endsWith(".json")) {
+  if (!filename || path.basename(filename) !== filename || !filename.endsWith(".sqlite")) {
     throw new Error("Invalid backup filename.")
   }
 
@@ -2963,28 +2890,68 @@ function resolveCatalogBackupPath(filename) {
   return backupPath
 }
 
-function backupSummaryFromRaw(filename, raw, fallbackCreatedAt = null, fallbackReason = null) {
-  let parsed = null
-
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    parsed = null
-  }
-
-  const match = filename.match(/^(.+?)_([a-z0-9_-]+)\.json$/i)
+async function backupSummaryFromSqliteFile(filename, filePath, fallbackCreatedAt = null, fallbackReason = null) {
+  const fileStat = await stat(filePath)
+  const match = filename.match(/^(.+?)_([a-z0-9_-]+)\.sqlite$/i)
   const createdAt = match?.[1]
     ? match[1].replace(/^(\d{4}-\d{2}-\d{2}T\d{2})-(\d{2})-(\d{2})-(\d{3})Z$/, "$1:$2:$3.$4Z")
     : fallbackCreatedAt
+  const metadata = readCatalogDatabaseSummary(filePath)
 
   return {
     file: filename,
     reason: fallbackReason || match?.[2] || "unknown",
-    createdAt,
-    size: Buffer.byteLength(raw),
-    itemCount: Array.isArray(parsed?.items) ? parsed.items.length : null,
-    catalogUpdatedAt: parsed?.updatedAt || null,
+    createdAt: createdAt || fileStat.mtime.toISOString(),
+    size: fileStat.size,
+    itemCount: metadata.itemCount,
+    catalogUpdatedAt: metadata.catalogUpdatedAt,
   }
+}
+
+function readCatalogDatabaseSummary(filePath) {
+  let db
+
+  try {
+    db = new DatabaseSync(filePath, { readOnly: true })
+    const itemCount = db.prepare("SELECT COUNT(*) AS count FROM media_items").get().count
+    const updatedAt = db.prepare("SELECT value_json FROM catalog_meta WHERE key = 'updatedAt'").get()?.value_json
+
+    return {
+      itemCount: Number(itemCount || 0),
+      catalogUpdatedAt: updatedAt ? parseJson(updatedAt, null) : null,
+    }
+  } catch {
+    return {
+      itemCount: null,
+      catalogUpdatedAt: null,
+    }
+  } finally {
+    db?.close()
+  }
+}
+
+async function isValidCatalogDatabase(filePath) {
+  let db
+
+  try {
+    db = new DatabaseSync(filePath, { readOnly: true })
+    db.prepare("SELECT COUNT(*) AS count FROM media_items").get()
+    db.prepare("SELECT COUNT(*) AS count FROM catalog_meta").get()
+    return true
+  } catch {
+    return false
+  } finally {
+    db?.close()
+  }
+}
+
+function closeCatalogDb() {
+  if (!catalogDb) {
+    return
+  }
+
+  catalogDb.close()
+  catalogDb = null
 }
 
 function sortItems(items) {

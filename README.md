@@ -48,7 +48,7 @@ The server stores downloaded files in `media/` by default. It stores app catalog
 media/catalog.sqlite
 ```
 
-If older `media/catalog.json` or `media/create-templates.json` files exist, the server treats them as one-time migration inputs. When SQLite has no matching data yet, it imports them and then moves the JSON files into `media/_legacy_json/`. When SQLite already has data, it moves those JSON files into `media/_legacy_json/` and ignores them. JSON is still used for exports and backups. Catalog backups are stored beside the database:
+SQLite is the only app-data store. Catalog backups are SQLite snapshots stored beside the database:
 
 ```text
 media/_catalog_backups/
@@ -101,7 +101,7 @@ Prefer the in-app auth browser for auth. Static tokens expire quickly.
 
 The persisted browser profile survives server restarts as long as `AUTH_BROWSER_PROFILE_DIR` is not deleted. On startup, the server attempts a headless refresh from that profile. If the saved session can no longer refresh, use **Connect account** again.
 
-The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.sqlite`, JSON exports, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
+The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.sqlite`, SQLite exports/backups, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
 
 ## Auth Helper Extension
 
@@ -122,6 +122,10 @@ When the server starts, it schedules an incremental sync after `AUTO_SYNC_STARTU
 
 If API auth is not active yet, the scheduled sync still downloads known missing files from existing catalog URLs. Once auth refresh succeeds, later scheduled syncs scan the API for new jobs.
 
+## Roadmap
+
+Near-term project direction is tracked in `PLANNING.md`. The main themes are live creation API QA, stronger auth and auto-sync controls, custom template management, creation queue/history, broader privacy mode, and performance/testing cleanup as the catalog grows.
+
 ## Using The App
 
 In the local web UI:
@@ -133,8 +137,8 @@ In the local web UI:
 - **Verify library** hashes local media, refreshes file sizes, marks duplicate catalog items, and reports orphan files in the media directory.
 - **Cancel** appears while a sync, download, thumbnail, or verification job is running and stops after the current API page or file finishes.
 - **Full API rescan** scans the API from page 1.
-- **Export catalog** downloads the current catalog as JSON.
-- **Create backup** writes a timestamped catalog snapshot under `_catalog_backups`.
+- **Export database** downloads the current SQLite catalog database.
+- **Create backup** writes a timestamped SQLite catalog snapshot under `_catalog_backups`.
 - **Restore backup** restores a selected snapshot and first creates a `before-restore` backup of the current catalog.
 - Search and filters are stored in the URL so reloads preserve your place.
 - Use media/status filters, including duplicates and unverified files, sort order, page size, and grid/list view to browse larger collections.

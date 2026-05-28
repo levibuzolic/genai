@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
 import http from "node:http"
 import os from "node:os"
 import path from "node:path"
@@ -99,96 +99,6 @@ test("sync downloads known missing catalog files without API auth", async () => 
   } finally {
     globalThis.fetch = originalFetch
   }
-})
-
-test("catalog migrates from legacy JSON into SQLite storage", async () => {
-  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-sqlite-"))
-  const id = "10101010-1010-4010-8010-101010101010"
-  await writeCatalog(mediaDir, {
-    items: [
-      {
-        id,
-        type: "edit",
-        status: "done",
-        outputUrl: "https://assets.example/sqlite.png",
-        createdAt: 1779769825,
-        prompt: "sqlite prompt",
-      },
-    ],
-    downloadedJobIds: [],
-    orphanFiles: [],
-    lastSeenJobId: id,
-    updatedAt: "2026-05-27T00:00:00.000Z",
-  })
-
-  const server = await importServer(mediaDir)
-  const catalog = await server.getItems(new URLSearchParams())
-  const stored = await readCatalog(mediaDir)
-
-  assert.equal(existsSync(path.join(mediaDir, "catalog.sqlite")), true)
-  assert.equal(existsSync(path.join(mediaDir, "catalog.json")), false)
-  assert.equal(
-    (await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_catalog.json")),
-    true,
-  )
-  assert.equal(catalog.items[0].id, id)
-  assert.equal(stored.items[0].prompt, "sqlite prompt")
-  assert.equal(stored.lastSeenJobId, id)
-})
-
-test("legacy catalog JSON is archived without overwriting existing SQLite data", async () => {
-  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-sqlite-ignore-"))
-  const sqliteId = "20202020-2020-4020-8020-202020202020"
-  const jsonId = "21212121-2121-4121-8121-212121212121"
-  const server = await importServer(mediaDir)
-
-  await server.getItems(new URLSearchParams())
-  await writeCatalog(mediaDir, {
-    items: [
-      {
-        id: sqliteId,
-        type: "edit",
-        status: "done",
-        outputUrl: "https://assets.example/sqlite-source.png",
-        createdAt: 1779769825,
-      },
-    ],
-    downloadedJobIds: [],
-    lastSeenJobId: sqliteId,
-  })
-  await writeFile(
-    path.join(mediaDir, "catalog.json"),
-    `${JSON.stringify(
-      {
-        items: [
-          {
-            id: jsonId,
-            type: "edit",
-            status: "done",
-            outputUrl: "https://assets.example/json-source.png",
-            createdAt: 1779769826,
-          },
-        ],
-        downloadedJobIds: [],
-        lastSeenJobId: jsonId,
-      },
-      null,
-      2,
-    )}\n`,
-  )
-
-  await server.getItems(new URLSearchParams())
-
-  const stored = await readCatalog(mediaDir)
-  const archived = await readdir(path.join(mediaDir, "_legacy_json"))
-
-  assert.equal(existsSync(path.join(mediaDir, "catalog.json")), false)
-  assert.equal(stored.items.length, 1)
-  assert.equal(stored.items[0].id, sqliteId)
-  assert.equal(
-    archived.some((name) => name.endsWith("_ignored_catalog.json")),
-    true,
-  )
 })
 
 test("incremental sync refreshes a previously seen pending job before stopping", async () => {
@@ -717,41 +627,6 @@ test("template import reads prompt fields from mocked API history", async () => 
   } finally {
     globalThis.fetch = originalFetch
   }
-})
-
-test("create template registry migrates from legacy JSON into SQLite", async () => {
-  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-sqlite-"))
-  await writeFile(
-    path.join(mediaDir, "create-templates.json"),
-    `${JSON.stringify(
-      {
-        templates: [
-          {
-            id: "legacy-template",
-            label: "Legacy Template",
-            prompt: "legacy template prompt",
-            endpoint: "video",
-            mediaType: "video",
-          },
-        ],
-        updatedAt: "2026-05-27T00:00:00.000Z",
-      },
-      null,
-      2,
-    )}\n`,
-  )
-
-  const server = await importServer(mediaDir)
-  const registry = await server.loadCreateTemplateRegistry()
-
-  assert.equal(existsSync(path.join(mediaDir, "catalog.sqlite")), true)
-  assert.equal(existsSync(path.join(mediaDir, "create-templates.json")), false)
-  assert.equal(
-    (await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_create-templates.json")),
-    true,
-  )
-  assert.equal(registry.templates.length, 1)
-  assert.equal(registry.templates[0].id, "legacy-template")
 })
 
 test("creation job submit and download use mocked API and merge into catalog", async () => {
@@ -1516,29 +1391,42 @@ test("catalog backups can be created, listed, and restored safely", async () => 
 
   const server = await importServer(mediaDir)
   const backup = await server.createCatalogBackup("manual test")
+  assert.equal(backup.file.endsWith(".sqlite"), true)
+  assert.equal(backup.itemCount, 1)
+  const listener = await listenOnRandomPort(server.server)
 
-  await writeCatalog(mediaDir, {
-    items: [],
-    downloadedJobIds: [],
-    lastSeenJobId: null,
-  })
+  try {
+    const exported = await requestRaw(listener.port, "/api/catalog/export")
+    assert.equal(exported.headers["content-type"], "application/vnd.sqlite3")
+    assert.match(exported.headers["content-disposition"], /\.sqlite"/)
+    assert.equal(exported.body.subarray(0, 16).toString("utf8"), "SQLite format 3\u0000")
 
-  const listed = await server.listCatalogBackups()
-  const restored = await server.restoreCatalogBackup(backup.file)
-  const catalog = await readCatalog(mediaDir)
+    await writeCatalog(mediaDir, {
+      items: [],
+      downloadedJobIds: [],
+      lastSeenJobId: null,
+    })
 
-  assert.equal(
-    listed.some((entry) => entry.file === backup.file),
-    true,
-  )
-  assert.equal(restored.file, backup.file)
-  assert.equal(catalog.items.length, 1)
-  assert.equal(catalog.items[0].id, id)
-  assert.equal(
-    (await server.listCatalogBackups()).some((entry) => entry.reason === "before-restore"),
-    true,
-  )
-  await assert.rejects(() => server.restoreCatalogBackup("../catalog.json"), /Invalid backup filename/)
+    const listed = await server.listCatalogBackups()
+    const restored = await server.restoreCatalogBackup(backup.file)
+    const catalog = await readCatalog(mediaDir)
+
+    assert.equal(
+      listed.some((entry) => entry.file === backup.file),
+      true,
+    )
+    assert.equal(restored.file, backup.file)
+    assert.equal(restored.itemCount, 1)
+    assert.equal(catalog.items.length, 1)
+    assert.equal(catalog.items[0].id, id)
+    assert.equal(
+      (await server.listCatalogBackups()).some((entry) => entry.reason === "before-restore"),
+      true,
+    )
+    await assert.rejects(() => server.restoreCatalogBackup("../backup.sqlite"), /Invalid backup filename/)
+  } finally {
+    await listener.close()
+  }
 })
 
 test("mutating long jobs create a catalog backup before changing verification metadata", async () => {
@@ -1570,7 +1458,7 @@ test("mutating long jobs create a catalog backup before changing verification me
   const backups = await server.listCatalogBackups()
   const backup = backups.find((entry) => entry.reason === "before-library-verification")
   assert.equal(Boolean(backup), true)
-  const backupCatalog = JSON.parse(await readFile(path.join(mediaDir, "_catalog_backups", backup.file), "utf8"))
+  const backupCatalog = await readCatalogFromDbFile(path.join(mediaDir, "_catalog_backups", backup.file))
   const verifiedCatalog = await readCatalog(mediaDir)
 
   assert.equal(backupCatalog.items[0].sha256, undefined)
@@ -1653,12 +1541,6 @@ async function importServer(mediaDir, env = {}) {
 
 async function writeCatalog(mediaDir, catalog) {
   const dbPath = path.join(mediaDir, "catalog.sqlite")
-
-  if (!existsSync(dbPath)) {
-    await writeFile(path.join(mediaDir, "catalog.json"), `${JSON.stringify(catalog, null, 2)}\n`)
-    return
-  }
-
   const db = new DatabaseSync(dbPath)
   const normalized = {
     items: Array.isArray(catalog.items) ? catalog.items : [],
@@ -1670,6 +1552,7 @@ async function writeCatalog(mediaDir, catalog) {
   }
 
   try {
+    ensureTestCatalogSchema(db)
     db.exec("BEGIN IMMEDIATE")
     db.exec("DELETE FROM media_items")
     db.exec("DELETE FROM downloaded_job_ids")
@@ -1706,12 +1589,10 @@ async function writeCatalog(mediaDir, catalog) {
 }
 
 async function readCatalog(mediaDir) {
-  const dbPath = path.join(mediaDir, "catalog.sqlite")
+  return readCatalogFromDbFile(path.join(mediaDir, "catalog.sqlite"))
+}
 
-  if (!existsSync(dbPath)) {
-    return JSON.parse(await readFile(path.join(mediaDir, "catalog.json"), "utf8"))
-  }
-
+async function readCatalogFromDbFile(dbPath) {
   const db = new DatabaseSync(dbPath, { readOnly: true })
   try {
     const metaRows = db.prepare("SELECT key, value_json FROM catalog_meta").all()
@@ -1737,6 +1618,34 @@ async function readCatalog(mediaDir) {
   } finally {
     db.close()
   }
+}
+
+function ensureTestCatalogSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS catalog_meta (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS media_items (
+      id TEXT PRIMARY KEY,
+      item_json TEXT NOT NULL,
+      created_at INTEGER,
+      updated_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS media_items_created_at_idx ON media_items(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS downloaded_job_ids (
+      id TEXT PRIMARY KEY,
+      position INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS orphan_files (
+      local_file TEXT PRIMARY KEY,
+      file_json TEXT NOT NULL
+    );
+  `)
 }
 
 function deferred() {

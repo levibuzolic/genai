@@ -131,7 +131,7 @@ export function AppShell({
                 <DropdownMenuSeparator />
                 <DropdownMenuItem asChild>
                   <a href="/api/catalog/export" download>
-                    Export catalog
+                    Export database
                   </a>
                 </DropdownMenuItem>
               </DropdownMenuContent>
