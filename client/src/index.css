@@ -1,0 +1,679 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root,
+.dark {
+  color-scheme: dark;
+  --radius: 0.72rem;
+  --background: oklch(0.115 0.008 260);
+  --foreground: oklch(0.956 0.012 255);
+  --card: oklch(0.16 0.011 260);
+  --card-foreground: oklch(0.956 0.012 255);
+  --popover: oklch(0.145 0.011 260);
+  --popover-foreground: oklch(0.956 0.012 255);
+  --primary: oklch(0.79 0.135 152);
+  --primary-foreground: oklch(0.12 0.018 152);
+  --secondary: oklch(0.22 0.015 260);
+  --secondary-foreground: oklch(0.93 0.012 255);
+  --muted: oklch(0.21 0.012 260);
+  --muted-foreground: oklch(0.68 0.02 255);
+  --accent: oklch(0.28 0.022 252);
+  --accent-foreground: oklch(0.94 0.012 255);
+  --destructive: oklch(0.64 0.22 28);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 13%);
+  --ring: oklch(0.72 0.11 206);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    background: var(--background);
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-width: 320px;
+    min-height: 100vh;
+    font-family:
+      Inter,
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
+    letter-spacing: 0;
+  }
+
+  body::before {
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    content: "";
+    background:
+      radial-gradient(circle at 18% 0%, oklch(0.55 0.12 206 / 0.16), transparent 34rem),
+      radial-gradient(circle at 82% -4%, oklch(0.66 0.16 152 / 0.13), transparent 30rem),
+      linear-gradient(180deg, oklch(0.16 0.012 260), var(--background) 28rem);
+  }
+
+  body::after {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    content: "";
+    opacity: 0.32;
+    background-image:
+      linear-gradient(to right, oklch(1 0 0 / 0.045) 1px, transparent 1px),
+      linear-gradient(to bottom, oklch(1 0 0 / 0.035) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: linear-gradient(to bottom, black, transparent 78%);
+  }
+
+  button,
+  select,
+  input,
+  textarea {
+    font: inherit;
+  }
+}
+
+.app-rail {
+  @apply fixed inset-y-0 left-0 z-40 hidden w-[76px] flex-col items-center gap-3 border-r border-white/10 bg-black/25 px-3 py-4 backdrop-blur-2xl lg:flex;
+}
+
+.rail-logo {
+  @apply mb-3 grid size-11 place-items-center rounded-2xl border border-primary/25 bg-primary/15 text-primary shadow-[0_0_38px_oklch(0.79_0.135_152_/_0.18)];
+}
+
+.rail-button {
+  @apply grid size-11 place-items-center rounded-2xl border border-transparent text-muted-foreground transition-all hover:border-white/10 hover:bg-white/[0.055] hover:text-foreground;
+}
+
+.rail-button.is-active {
+  @apply border-primary/25 bg-primary/12 text-primary shadow-[inset_0_1px_0_rgba(255,255,255,0.08)];
+}
+
+.app-shell {
+  @apply min-h-screen lg:pl-[76px];
+}
+
+.topbar {
+  @apply sticky top-0 z-30 flex min-h-20 items-center justify-between gap-4 border-b border-white/10 bg-background/72 px-4 py-3 backdrop-blur-2xl lg:px-7;
+}
+
+.topbar h1 {
+  @apply m-0 text-xl font-semibold tracking-tight;
+}
+
+#configLine {
+  @apply mt-1 max-w-[42rem] text-xs text-muted-foreground;
+}
+
+.top-actions {
+  @apply flex shrink-0 items-center gap-2;
+}
+
+main {
+  @apply px-4 py-4 lg:px-7 lg:py-6;
+}
+
+.library-grid {
+  @apply grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px];
+}
+
+.library-main {
+  @apply min-w-0 space-y-4;
+}
+
+.inspector-panel {
+  @apply hidden xl:block;
+}
+
+.panel-card {
+  @apply sticky top-28 border-white/10 bg-white/[0.035] backdrop-blur-xl;
+}
+
+.hero-panel {
+  @apply grid gap-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.045] p-4 shadow-2xl shadow-black/20 backdrop-blur-xl md:grid-cols-[minmax(0,1fr)_280px] md:p-5;
+}
+
+.hero-panel h2 {
+  @apply mt-3 max-w-3xl text-2xl font-semibold tracking-tight text-balance md:text-4xl;
+}
+
+.hero-panel p {
+  @apply mt-2 max-w-2xl text-sm leading-6 text-muted-foreground;
+}
+
+.hero-meter {
+  @apply grid content-center gap-4 rounded-xl border border-white/10 bg-black/25 p-4;
+}
+
+.hero-meter span {
+  @apply text-4xl font-semibold;
+}
+
+.hero-meter p {
+  @apply m-0 text-xs uppercase tracking-[0.2em] text-muted-foreground;
+}
+
+.toolbar {
+  @apply sticky top-20 z-20 grid grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-background/78 p-2 backdrop-blur-2xl md:grid-cols-[minmax(260px,1fr)_150px_180px_140px_96px];
+}
+
+.search-shell {
+  @apply col-span-2 flex items-center gap-2 rounded-xl border border-input bg-black/20 px-3 md:col-span-1;
+}
+
+.search-shell input {
+  @apply h-10 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0;
+}
+
+.native-select-field {
+  @apply grid gap-1;
+}
+
+.native-select-field span,
+.field > label {
+  @apply px-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground;
+}
+
+.native-select {
+  @apply h-10 w-full rounded-xl border border-input bg-black/20 px-3 text-sm text-foreground shadow-xs outline-none transition-all focus:border-ring focus:ring-2 focus:ring-ring/40;
+}
+
+.summary-strip {
+  @apply grid grid-cols-2 gap-2 md:grid-cols-4;
+}
+
+.summaryCard {
+  @apply flex min-h-16 items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.035] px-4 text-left transition-all hover:-translate-y-0.5 hover:bg-white/[0.06];
+}
+
+.summaryCard strong {
+  @apply text-xl font-semibold;
+}
+
+.summaryCard span {
+  @apply text-sm text-muted-foreground;
+}
+
+.summaryCard svg {
+  @apply text-muted-foreground;
+}
+
+.summaryCard.is-active {
+  @apply border-primary/35 bg-primary/12;
+}
+
+.tone-warning svg {
+  @apply text-amber-300;
+}
+
+.tone-info svg {
+  @apply text-sky-300;
+}
+
+.tone-success svg {
+  @apply text-emerald-300;
+}
+
+.filter-chips {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.filter-chips.hidden {
+  display: none;
+}
+
+.chip {
+  @apply rounded-full;
+}
+
+.status-line {
+  @apply flex min-h-9 items-center justify-between gap-3 rounded-xl border border-white/10 bg-black/20 px-3 text-sm text-muted-foreground;
+}
+
+#syncStatus {
+  @apply min-w-0;
+}
+
+#libraryStatus {
+  @apply shrink-0 tabular-nums;
+}
+
+.pager {
+  @apply flex flex-wrap items-center justify-between gap-3;
+}
+
+#pageStatus {
+  @apply text-sm text-muted-foreground;
+}
+
+.viewToggle {
+  @apply ml-auto flex rounded-xl border border-white/10 bg-black/20 p-1;
+}
+
+.createDock {
+  @apply flex flex-col gap-3 rounded-2xl border border-primary/20 bg-primary/8 p-4 md:flex-row md:items-center md:justify-between;
+}
+
+.createDock strong {
+  @apply block text-sm font-semibold;
+}
+
+.createDock span {
+  @apply mt-1 block text-sm text-muted-foreground;
+}
+
+.createDockActions {
+  @apply grid grid-cols-3 gap-2 md:flex;
+}
+
+.media-grid {
+  @apply grid grid-cols-2 gap-3 md:grid-cols-[repeat(auto-fill,minmax(220px,1fr))] md:gap-4;
+}
+
+.media-grid.is-list {
+  @apply grid-cols-1;
+}
+
+.media-card {
+  @apply overflow-hidden border-white/10 bg-white/[0.035] shadow-black/20 transition-all duration-200 hover:-translate-y-1 hover:border-white/20 hover:bg-white/[0.055] hover:shadow-2xl;
+  content-visibility: auto;
+  contain-intrinsic-size: 360px;
+}
+
+.media-card.is-list {
+  @apply grid md:grid-cols-[220px_minmax(0,1fr)];
+}
+
+.preview {
+  @apply relative grid aspect-square place-items-center overflow-hidden bg-black/55 text-sm text-muted-foreground;
+}
+
+.media-card.is-list .preview {
+  @apply md:aspect-auto md:min-h-44;
+}
+
+.preview img,
+.preview video,
+.createSourcePreview img,
+.createSourcePreview video,
+.createResultPreview img,
+.createResultPreview video,
+.detailPreview img,
+.detailPreview video {
+  @apply h-full w-full object-contain;
+}
+
+.media-blurred .preview img,
+.media-blurred .preview video,
+.media-blurred .createSourcePreview img,
+.media-blurred .createSourcePreview video,
+.media-blurred .createResultPreview img,
+.media-blurred .createResultPreview video,
+.media-blurred .detailPreview img,
+.media-blurred .detailPreview video {
+  filter: blur(22px) saturate(0.55) brightness(0.75);
+  transform: scale(1.035);
+  transition:
+    filter 160ms ease,
+    transform 160ms ease;
+}
+
+.missing-preview {
+  @apply grid place-items-center gap-2 p-4 text-center text-muted-foreground;
+}
+
+.durationBadge {
+  @apply absolute right-2 bottom-2 rounded-md border border-white/10 bg-black/70 px-1.5 py-1 text-xs text-foreground backdrop-blur;
+}
+
+.previewLink,
+.openLink {
+  @apply text-inherit no-underline;
+}
+
+.cardBody {
+  @apply grid gap-2.5 p-3;
+}
+
+.cardMeta {
+  @apply min-h-4 truncate text-xs text-muted-foreground;
+}
+
+.prompt {
+  @apply line-clamp-3 min-h-12 text-sm leading-5 text-foreground;
+}
+
+.media-card.is-list .prompt {
+  @apply md:line-clamp-4;
+}
+
+.cardFooter,
+.cardActions {
+  @apply flex items-center justify-end gap-1.5;
+}
+
+.cardActions {
+  @apply w-full flex-wrap;
+}
+
+.cardActions button,
+.cardActions a {
+  @apply h-8 px-2 text-xs;
+}
+
+.cardCreateButton {
+  @apply border-primary/25 bg-primary/10 text-primary hover:bg-primary/15;
+}
+
+.empty-state {
+  @apply grid min-h-72 place-items-center rounded-2xl border border-dashed border-white/15 bg-white/[0.025] p-8 text-center text-muted-foreground;
+}
+
+.empty-state h2 {
+  @apply mt-3 text-lg font-semibold text-foreground;
+}
+
+.create-studio {
+  @apply mb-5 rounded-3xl border border-primary/20 bg-[linear-gradient(135deg,oklch(0.79_0.135_152_/_0.10),transparent_34%),linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0.025))] p-4 shadow-2xl shadow-black/30 backdrop-blur-2xl md:p-5;
+}
+
+.createHeader {
+  @apply flex flex-col gap-3 border-b border-white/10 pb-4 md:flex-row md:items-center md:justify-between;
+}
+
+.createHeader h2 {
+  @apply mt-2 text-2xl font-semibold tracking-tight;
+}
+
+.createHeader p {
+  @apply mt-1 text-sm text-muted-foreground;
+}
+
+.createLayout {
+  @apply grid gap-4 pt-4 xl:grid-cols-[390px_minmax(0,1fr)];
+}
+
+.createPanel {
+  @apply grid gap-3 rounded-2xl border border-white/10 bg-black/20 p-3;
+}
+
+.createResult {
+  @apply grid gap-3 lg:grid-cols-[minmax(220px,0.72fr)_minmax(320px,1.28fr)];
+}
+
+.createTabs {
+  @apply h-10 w-full bg-black/25;
+}
+
+.sourcePanel,
+.templateImport {
+  @apply grid gap-3;
+}
+
+.field {
+  @apply grid gap-2;
+}
+
+.uploadDropZone {
+  @apply grid min-h-28 cursor-pointer place-items-center gap-1 rounded-2xl border border-dashed border-sky-300/35 bg-sky-300/8 p-4 text-center transition-all hover:border-sky-300/70 hover:bg-sky-300/12;
+}
+
+.uploadDropZone span {
+  @apply text-xs text-muted-foreground;
+}
+
+.uploadDropZone.is-dragging {
+  @apply -translate-y-0.5 border-primary bg-primary/15;
+}
+
+.createActions {
+  @apply grid grid-cols-[1fr_auto] gap-2;
+}
+
+.templateTools {
+  @apply overflow-hidden rounded-2xl border border-white/10 bg-white/[0.035];
+}
+
+.templateTools summary {
+  @apply cursor-pointer px-3 py-2 text-sm font-medium;
+}
+
+.templateImport {
+  @apply p-3 pt-1;
+}
+
+.createSourcePreview,
+.createResultPreview {
+  @apply grid h-[260px] place-items-center overflow-hidden rounded-2xl border border-white/10 bg-black/45 text-sm text-muted-foreground lg:h-[360px];
+}
+
+.createResultPreview {
+  @apply lg:h-[360px];
+}
+
+.createResult .detailFacts,
+.createResult .dialogActions {
+  @apply lg:col-span-2;
+}
+
+.detailFacts {
+  @apply grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-2 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs;
+}
+
+.detailFacts dt {
+  @apply text-muted-foreground;
+}
+
+.detailFacts dd {
+  @apply min-w-0 break-words text-foreground;
+}
+
+.dialogActions {
+  @apply flex flex-wrap items-center gap-2;
+}
+
+.detailDialog {
+  @apply max-w-[1180px] border-white/10 bg-card p-0;
+}
+
+.dialogHeader {
+  @apply border-b border-white/10 bg-white/[0.025] pb-4;
+}
+
+.dialogBody {
+  @apply grid max-h-[calc(100dvh-8rem)] overflow-auto lg:grid-cols-[minmax(320px,58%)_minmax(300px,1fr)];
+}
+
+.detailPreview {
+  @apply grid min-h-[360px] place-items-center bg-black/55 lg:min-h-[620px];
+}
+
+.detailPanel {
+  @apply grid content-start gap-4 overflow-auto p-5;
+}
+
+.detailPanel h3 {
+  @apply mb-2 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground;
+}
+
+.detailText {
+  @apply whitespace-pre-wrap text-sm leading-6;
+}
+
+.metric-grid {
+  @apply grid grid-cols-2 gap-2;
+}
+
+.metric {
+  @apply rounded-xl border border-white/10 bg-black/20 p-3;
+}
+
+.metric strong {
+  @apply block text-2xl font-semibold tabular-nums;
+}
+
+.metric span {
+  @apply text-xs text-muted-foreground;
+}
+
+.copy-toast {
+  @apply fixed right-4 bottom-4 z-50 rounded-xl border border-white/10 bg-popover px-4 py-2 text-sm shadow-xl;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 860px) {
+  .topbar {
+    @apply static flex-col items-stretch;
+  }
+
+  .top-actions {
+    @apply grid grid-cols-[1fr_1fr_auto] gap-2;
+  }
+
+  .top-actions > button:not([aria-label]) {
+    @apply w-full;
+  }
+
+  main {
+    @apply px-3 py-3;
+  }
+
+  .hero-panel {
+    @apply hidden;
+  }
+
+  .toolbar {
+    @apply static grid-cols-2 rounded-2xl;
+  }
+
+  .sortFilter,
+  .pageSizeFilter,
+  .viewToggle {
+    @apply hidden;
+  }
+
+  .status-line {
+    @apply grid gap-1;
+  }
+
+  #syncStatus {
+    @apply line-clamp-2 whitespace-normal;
+  }
+
+  #libraryStatus {
+    @apply text-left;
+  }
+
+  .pager {
+    @apply grid grid-cols-[1fr_auto_1fr];
+  }
+
+  .pager .viewToggle {
+    display: none;
+  }
+
+  .createDockActions {
+    @apply grid grid-cols-3;
+  }
+
+  .createLayout,
+  .createResult {
+    @apply grid-cols-1;
+  }
+
+  .createSourcePreview {
+    @apply h-[220px];
+  }
+
+  .createResultPreview {
+    @apply h-[280px];
+  }
+
+  .media-grid {
+    @apply gap-2;
+  }
+
+  .cardBody {
+    @apply p-2;
+  }
+
+  .cardMeta {
+    @apply line-clamp-2 whitespace-normal text-[11px];
+  }
+
+  .prompt {
+    @apply line-clamp-2 min-h-10 text-xs leading-5;
+  }
+
+  .cardActions {
+    @apply grid grid-cols-2;
+  }
+
+  .cardActions a {
+    @apply col-span-2;
+  }
+
+  .detailDialog {
+    @apply h-[100dvh] max-w-none rounded-none;
+    width: 100dvw !important;
+  }
+
+  .dialogBody {
+    @apply max-h-[calc(100dvh-5rem)] grid-cols-1;
+  }
+
+  .detailPreview {
+    @apply min-h-[320px];
+  }
+
+  .detailFacts {
+    @apply grid-cols-1;
+  }
+}

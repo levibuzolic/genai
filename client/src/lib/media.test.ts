@@ -1,0 +1,25 @@
+import { describe, expect, it } from "vitest"
+
+import { encodeURIPath, isImageItem, isImageUrl, isVideoItem, isVideoUrl, mediaUrlForItem } from "./media"
+
+describe("media helpers", () => {
+  it("builds local media URLs by encoding path segments only", () => {
+    expect(encodeURIPath("folder/name with space#1.png")).toBe("folder/name%20with%20space%231.png")
+    expect(mediaUrlForItem({ id: "local", localFile: "folder/name with space#1.png", outputUrl: "https://remote/image.png" })).toBe(
+      "/media/folder/name%20with%20space%231.png",
+    )
+  })
+
+  it("falls back to output URLs when no local file exists", () => {
+    expect(mediaUrlForItem({ id: "remote", outputUrl: "https://example.com/output.webp" })).toBe("https://example.com/output.webp")
+    expect(mediaUrlForItem(null)).toBeNull()
+  })
+
+  it("detects image and video URLs with query strings and data URLs", () => {
+    expect(isImageUrl("https://example.com/a.JPG?token=1")).toBe(true)
+    expect(isImageUrl("data:image/png;base64,abc")).toBe(true)
+    expect(isVideoUrl("https://example.com/a.mp4#preview")).toBe(true)
+    expect(isImageItem({ id: "img", localFile: "x.webp" })).toBe(true)
+    expect(isVideoItem({ id: "vid", outputUrl: "https://example.com/x.mp4?download=1" })).toBe(true)
+  })
+})

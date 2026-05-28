@@ -1,0 +1,91 @@
+import * as React from "react"
+
+import { fetchJson } from "@/lib/api"
+import type { SyncStatus } from "@/types/domain"
+
+const ACTIVE_POLL_MS = 1400
+const IDLE_POLL_MS = 9500
+
+const defaultSyncStatus: SyncStatus = {
+  running: false,
+  status: "idle",
+  currentPage: 0,
+  scanned: 0,
+  downloaded: 0,
+  skipped: 0,
+  errors: [],
+  cancelRequested: false,
+  message: "Idle.",
+}
+
+export function useSyncOperations(onSettled: () => void) {
+  const [syncStatus, setSyncStatus] = React.useState<SyncStatus>(defaultSyncStatus)
+  const onSettledRef = React.useRef(onSettled)
+
+  React.useEffect(() => {
+    onSettledRef.current = onSettled
+  }, [onSettled])
+
+  React.useEffect(() => {
+    let cancelled = false
+    let timer: number | null = null
+
+    const poll = async () => {
+      try {
+        const next = await fetchJson<SyncStatus>("/api/sync/status")
+        if (cancelled) return
+        setSyncStatus(next)
+        timer = window.setTimeout(poll, next.running ? ACTIVE_POLL_MS : IDLE_POLL_MS)
+        if (!next.running && next.finishedAt) onSettledRef.current()
+      } catch {
+        timer = window.setTimeout(poll, IDLE_POLL_MS)
+      }
+    }
+
+    void poll()
+    return () => {
+      cancelled = true
+      if (timer) window.clearTimeout(timer)
+    }
+  }, [])
+
+  async function startSync(incremental: boolean) {
+    const data = await fetchJson<{ ok: boolean }>("/api/sync/start", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ incremental }),
+    })
+    if (data.ok) {
+      setSyncStatus((current) => ({ ...current, running: true, status: "syncing", message: "Sync started." }))
+    }
+  }
+
+  async function startDownload(modeName: "missing" | "retry-errors") {
+    const endpoint = modeName === "missing" ? "/api/download/missing" : "/api/download/retry-errors"
+    await fetchJson(endpoint, { method: "POST" })
+    setSyncStatus((current) => ({ ...current, running: true, status: modeName, message: "Download queued." }))
+  }
+
+  async function startThumbnailGeneration() {
+    await fetchJson("/api/thumbnails/generate", { method: "POST" })
+    setSyncStatus((current) => ({ ...current, running: true, status: "thumbnails", message: "Thumbnail generation queued." }))
+  }
+
+  async function startLibraryVerification() {
+    await fetchJson("/api/library/verify", { method: "POST" })
+    setSyncStatus((current) => ({ ...current, running: true, status: "verify", message: "Verification queued." }))
+  }
+
+  async function cancelSync() {
+    setSyncStatus(await fetchJson<SyncStatus>("/api/sync/cancel", { method: "POST" }))
+  }
+
+  return {
+    syncStatus,
+    startSync,
+    startDownload,
+    startThumbnailGeneration,
+    startLibraryVerification,
+    cancelSync,
+  }
+}

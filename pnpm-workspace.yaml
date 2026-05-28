@@ -14,7 +14,7 @@ trustLockfile: false
 
 strictDepBuilds: true
 dangerouslyAllowAllBuilds: false
-allowBuilds: {}
+allowBuilds: { esbuild: true }
 
 managePackageManagerVersions: false
 packageManagerStrict: true

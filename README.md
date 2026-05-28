@@ -1,14 +1,14 @@
 # Local Media Library
 
-Local-only Node.js web app for syncing generated media metadata, downloading media files to disk, and browsing the local collection with prompt text.
+Local-only Node.js web app for syncing generated media metadata, downloading media files to disk, creating new media from existing assets/uploads/URLs, and browsing the local collection with prompt text.
 
-The companion Chrome extension, **GP Auth Helper**, only forwards a fresh browser auth token to the local server. All media sync and downloading happens in the Node app.
+Auth is owned by the local Node app. It can open a visible Playwright/Chrome login window once, persist that browser profile under the media directory, and refresh short-lived Clerk tokens headlessly on later runs. The companion Chrome extension, **GP Auth Helper**, remains as a fallback token forwarder.
 
 ## Requirements
 
 - [mise](https://mise.jdx.dev/) for the pinned Node.js and pnpm versions
-- Chrome, for the unpacked auth helper extension
-- A logged-in browser session on the source site
+- Chrome, for the app-owned auth browser and optional unpacked auth helper extension
+- A source-site account that can complete email/password/OTP login
 
 ## Tooling
 
@@ -81,11 +81,31 @@ Useful settings:
 - `PORT`: local web server port, defaults to `5177`
 - `MEDIA_DIR`: download/catalog directory, defaults to `media`; absolute and `~` paths are supported
 - `GENERATEPORN_PAGE_LIMIT`: max API pages to scan
+- `GENERATEPORN_APP_URL`: visible/headless auth browser URL, defaults to `https://app.generateporn.ai/`
+- `AUTH_BROWSER_PROFILE_DIR`: persistent auth browser profile directory, defaults to `MEDIA_DIR/_auth_browser_profile`
+- `AUTH_BROWSER_REFRESH_MS`: fallback headless refresh interval, defaults to 15 minutes
+- `AUTO_SYNC_ENABLED`: run background incremental syncs while the server is running, defaults to `true`
+- `AUTO_SYNC_STARTUP_DELAY_MS`: delay before the boot sync, defaults to 10 seconds
+- `AUTO_SYNC_INTERVAL_MS`: delay between background sync attempts, defaults to 1 hour
 - `GENERATEPORN_AUTHORIZATION`: optional short-lived fallback bearer token
 
-Prefer the Chrome extension for auth. Static tokens expire quickly.
+Prefer the in-app auth browser for auth. Static tokens expire quickly.
+
+## Auth Browser
+
+1. Start the local app.
+2. Open the **More** menu in the top bar.
+3. Choose **Auth browser > Connect account**.
+4. Complete the source-site login in the visible browser window, including the email OTP step.
+5. The server captures the Clerk session token, closes the visible window, and keeps the persistent browser profile for future headless refreshes.
+
+The persisted browser profile survives server restarts as long as `AUTH_BROWSER_PROFILE_DIR` is not deleted. On startup, the server attempts a headless refresh from that profile. If the saved session can no longer refresh, use **Connect account** again.
+
+The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.json`, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
 
 ## Auth Helper Extension
+
+The extension is now a fallback path when the app-owned auth browser is not suitable.
 
 1. Open `chrome://extensions`.
 2. Enable **Developer mode**.
@@ -96,7 +116,11 @@ Prefer the Chrome extension for auth. Static tokens expire quickly.
 
 The extension refreshes auth every 30 seconds while the logged-in tab is open. You can also press **Send auth to local app** to force an immediate refresh.
 
-The local server keeps the token in memory only. It is not written to `.env` or `media/catalog.json`.
+## Background Sync
+
+When the server starts, it schedules an incremental sync after `AUTO_SYNC_STARTUP_DELAY_MS`, then repeats every `AUTO_SYNC_INTERVAL_MS`. Scheduled syncs skip themselves if another sync, download, thumbnail, or verification job is already running.
+
+If API auth is not active yet, the scheduled sync still downloads known missing files from existing catalog URLs. Once auth refresh succeeds, later scheduled syncs scan the API for new jobs.
 
 ## Using The App
 

@@ -3,8 +3,9 @@
 ## Current Shape
 
 - `src/server.js` is a dependency-light Node HTTP server.
-- `public/` contains the browser UI: HTML, CSS, and vanilla JavaScript.
-- `extension/` contains the unpacked Chrome extension **GP Auth Helper**.
+- `public/` contains the built React app served by the Node server.
+- `client/src/` contains the React 19 + Vite source app.
+- `extension/` contains the unpacked Chrome extension **GP Auth Helper**, now a fallback auth helper.
 - `media/catalog.json` stores the local catalog and is repaired from files on disk when loaded.
 - Media files are saved under date-based folders inside `MEDIA_DIR`.
 - `MEDIA_DIR` can point outside the repo, including mounted remote drives or cloud-synced folders; `catalog.json` stays alongside the media.
@@ -29,13 +30,22 @@ The token is sent to the API as:
 Authorization: Bearer <token>
 ```
 
-The extension reads that token from the logged-in page and posts it to:
+The app-owned auth browser is the primary auth path:
+
+- `POST /api/auth/browser/connect` opens a visible persistent Chrome profile for the user-driven email/password/OTP login.
+- Once Clerk is signed in, the backend captures `window.Clerk?.session?.getToken()`, stores the bearer token in memory, closes the visible browser, and schedules refresh.
+- The persistent profile lives at `AUTH_BROWSER_PROFILE_DIR`, defaulting to `MEDIA_DIR/_auth_browser_profile`, so it can survive server restarts.
+- On startup, if that profile exists, the server attempts a headless refresh in the background.
+- `POST /api/auth/browser/refresh` forces a headless token refresh.
+- `POST /api/auth/browser/disconnect` closes the managed browser and optionally removes the profile when `deleteProfile` is true.
+
+The fallback extension reads that token from a logged-in browser page and posts it to:
 
 ```text
 POST http://localhost:5177/api/auth/token
 ```
 
-The server stores the token in memory only. Token refresh is automatic every 30 seconds while the source tab is open.
+The server stores bearer tokens in memory only. The persistent browser profile contains normal browser session state and must be treated as sensitive local data. Extension token refresh is automatic every 30 seconds while the source tab is open.
 
 ## Sync Behavior
 
@@ -46,6 +56,7 @@ The server stores the token in memory only. Token refresh is automatic every 30 
 - Known missing local files can be downloaded without fresh API auth if their `outputUrl` is already present in the catalog.
 - Catalog repair scans local media filenames for job UUIDs and reattaches existing files to catalog items.
 - Dedicated local download actions can download missing catalog files or retry previous download errors without scanning the API.
+- Background sync is enabled by default for the CLI server: one incremental sync shortly after boot, then another attempt every hour. It skips when another long-running library job is active.
 - Long-running API scans, download queues, and thumbnail jobs support cooperative cancellation between pages/files.
 - Video thumbnails are generated as local JPG posters under `MEDIA_DIR/_thumbnails` using `ffmpeg` when available; missing ffmpeg is non-fatal.
 - Library verification scans local PNG/MP4 files, hashes them, repairs catalog file metadata, marks duplicate groups, and records orphan files.
@@ -53,7 +64,7 @@ The server stores the token in memory only. Token refresh is automatic every 30 
 
 ## Test Coverage
 
-- `mise exec -- pnpm test` runs Node's built-in test runner.
+- `mise exec -- pnpm test` runs strict typechecking, the Vite build, focused Vitest unit tests, and Node/browser smoke tests.
 - Server tests stub Clerk/API auth, paginated API responses, and media downloads.
 - Current coverage checks missing-file downloads, authenticated API scans, cancellation, thumbnail generation, duplicate detection, orphan tracking, catalog backup/restore safety, and module-scope helper exports used by sync.
 - The UI smoke test uses Playwright with the locally installed Chrome channel against a temporary server and fixture media directory.
@@ -61,7 +72,7 @@ The server stores the token in memory only. Token refresh is automatic every 30 
 ## Package Management
 
 - Node.js `26.2.0` and pnpm `11.3.0` are pinned through mise.
-- pnpm is activated through mise's `npm:pnpm` backend because this local mise build could not resolve pnpm 11's renamed darwin release assets through the default aqua backend.
+- pnpm is pinned directly through mise. Use `mise exec -- pnpm ...` for all package, build, lint, and test commands.
 - pnpm security settings include strict engine checks, strict peer dependency checks, a 24-hour minimum release age, strict dependency build approval, and package-manager version strictness.
 
 ## UI Behavior

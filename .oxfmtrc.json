@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "printWidth": 140,
+  "tabWidth": 2,
+  "useTabs": false,
+  "semi": false,
+  "singleQuote": false,
+  "jsxSingleQuote": false,
+  "trailingComma": "all",
+  "bracketSpacing": true,
+  "bracketSameLine": false,
+  "arrowParens": "always",
+  "insertFinalNewline": true,
+  "endOfLine": "lf",
+  "sortImports": true,
+  "sortPackageJson": true,
+  "ignorePatterns": ["node_modules/**", "public/**", "media/**", "output/**", "research/**", "extension/**", "*.har"]
+}

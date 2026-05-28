@@ -1,0 +1,45 @@
+import type * as React from "react"
+
+import type { CatalogItem, CreateField, CreateJob, CreateMode, SourceKind, UploadSource } from "@/types/domain"
+
+export type CreateStudioProps = {
+  sourceKind: SourceKind
+  setSourceKind: (kind: SourceKind) => void
+  sourceSearch: string
+  setSourceSearch: (value: string) => void
+  sourceItems: CatalogItem[]
+  selectedSource: CatalogItem | null
+  selectedSourceId: string
+  setSelectedSourceId: (id: string) => void
+  uploadMeta: string
+  uploadedDataUrl: string | null
+  uploadedName: string
+  sourceUrl: string
+  setSourceUrl: (value: string) => void
+  modes: CreateMode[]
+  modeId: string
+  setModeId: (id: string) => void
+  prompt: string
+  setPrompt: (value: string) => void
+  promptField: CreateField | undefined
+  quality: string
+  setQuality: (value: string) => void
+  qualityField: CreateField | undefined
+  createStatus: string
+  createResult: CreateJob | null
+  createSubmitting: boolean
+  isDraggingUpload: boolean
+  setIsDraggingUpload: (value: boolean) => void
+  fileInputRef: React.RefObject<HTMLInputElement | null>
+  onUploadFile: (file: File | null, source: UploadSource) => Promise<void>
+  onSubmit: () => Promise<void>
+  onReset: () => void
+  onClose: () => void
+  onDownload: () => Promise<void>
+  onAnimate: () => void
+  templateJobId: string
+  setTemplateJobId: (value: string) => void
+  templateLabel: string
+  setTemplateLabel: (value: string) => void
+  onImportTemplate: () => Promise<void>
+}
