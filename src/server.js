@@ -3,6 +3,7 @@ import { createReadStream, readFileSync } from "node:fs"
 import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises"
 import http from "node:http"
 import path from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import { fileURLToPath } from "node:url"
 
 import { createAuthBrowserService } from "./auth-browser.js"
@@ -20,7 +21,9 @@ const PAGE_LIMIT = Number(process.env.GENERATEPORN_PAGE_LIMIT || 1000)
 const CREATE_HISTORY_PAGE_LIMIT = Number(process.env.GENERATEPORN_CREATE_HISTORY_PAGE_LIMIT || 20)
 const MEDIA_DIR = resolveMediaDir(process.env.MEDIA_DIR || "media")
 const CATALOG_PATH = path.join(MEDIA_DIR, "catalog.json")
+const CATALOG_DB_PATH = path.join(MEDIA_DIR, "catalog.sqlite")
 const BACKUP_DIR = path.join(MEDIA_DIR, "_catalog_backups")
+const LEGACY_JSON_DIR = path.join(MEDIA_DIR, "_legacy_json")
 const THUMBNAIL_DIR = getThumbnailDir(MEDIA_DIR)
 const CREATE_TEMPLATES_PATH = path.join(MEDIA_DIR, "create-templates.json")
 const AUTH_BROWSER_PROFILE_DIR = path.resolve(process.env.AUTH_BROWSER_PROFILE_DIR || path.join(MEDIA_DIR, "_auth_browser_profile"))
@@ -99,6 +102,9 @@ const autoSyncState = {
 let autoSyncTimer = null
 
 const createJobState = new Map()
+let catalogDb = null
+let catalogJsonMigrationChecked = false
+let createTemplateJsonMigrationChecked = false
 
 await mkdir(MEDIA_DIR, { recursive: true })
 
@@ -1351,18 +1357,9 @@ function toPublicCreateJob(job) {
 }
 
 async function loadCreateTemplateRegistry() {
-  try {
-    const parsed = JSON.parse(await readFile(CREATE_TEMPLATES_PATH, "utf8"))
-    return {
-      templates: Array.isArray(parsed.templates) ? parsed.templates.map(normalizeCreateTemplate).filter(Boolean) : [],
-      updatedAt: parsed.updatedAt || null,
-    }
-  } catch {
-    return {
-      templates: [],
-      updatedAt: null,
-    }
-  }
+  await ensureCreateTemplateJsonMigrated()
+
+  return normalizeCreateTemplateRegistry(readCatalogMeta("createTemplateRegistry") || {})
 }
 
 async function saveCreateTemplateRegistry(registry) {
@@ -1371,10 +1368,37 @@ async function saveCreateTemplateRegistry(registry) {
     templates: registry.templates.map(normalizeCreateTemplate).filter(Boolean),
     updatedAt: new Date().toISOString(),
   }
-  const tempPath = `${CREATE_TEMPLATES_PATH}.tmp`
-  await writeFile(tempPath, `${JSON.stringify(body, null, 2)}\n`)
-  await rename(tempPath, CREATE_TEMPLATES_PATH)
+  writeCatalogMeta("createTemplateRegistry", body)
   return body
+}
+
+async function ensureCreateTemplateJsonMigrated() {
+  if (createTemplateJsonMigrationChecked) {
+    await archiveLegacyJsonFile(CREATE_TEMPLATES_PATH, "ignored")
+    return
+  }
+
+  createTemplateJsonMigrationChecked = true
+
+  if (!(await fileExists(CREATE_TEMPLATES_PATH))) {
+    return
+  }
+
+  if (!readCatalogMeta("createTemplateRegistry")) {
+    const parsed = JSON.parse(await readFile(CREATE_TEMPLATES_PATH, "utf8"))
+    writeCatalogMeta("createTemplateRegistry", normalizeCreateTemplateRegistry(parsed))
+    await archiveLegacyJsonFile(CREATE_TEMPLATES_PATH, "migrated")
+    return
+  }
+
+  await archiveLegacyJsonFile(CREATE_TEMPLATES_PATH, "ignored")
+}
+
+function normalizeCreateTemplateRegistry(registry = {}) {
+  return {
+    templates: Array.isArray(registry.templates) ? registry.templates.map(normalizeCreateTemplate).filter(Boolean) : [],
+    updatedAt: registry.updatedAt || null,
+  }
 }
 
 function normalizeCreateTemplate(template) {
@@ -1718,34 +1742,17 @@ function clamp(value, min, max) {
 }
 
 async function loadCatalog() {
-  try {
-    const parsed = JSON.parse(await readFile(CATALOG_PATH, "utf8"))
-    const catalog = {
-      items: Array.isArray(parsed.items) ? parsed.items : [],
-      downloadedJobIds: Array.isArray(parsed.downloadedJobIds) ? parsed.downloadedJobIds : [],
-      orphanFiles: Array.isArray(parsed.orphanFiles) ? parsed.orphanFiles : [],
-      lastSeenJobId: parsed.lastSeenJobId || null,
-      updatedAt: parsed.updatedAt || null,
-      lastRun: parsed.lastRun || null,
-    }
-    const changed = await reconcileCatalogWithLocalFiles(catalog)
+  await ensureCatalogJsonMigrated()
 
-    if (changed) {
-      catalog.updatedAt = new Date().toISOString()
-      await saveCatalog(catalog)
-    }
+  const catalog = readCatalogFromDb()
+  const changed = await reconcileCatalogWithLocalFiles(catalog)
 
-    return catalog
-  } catch {
-    return {
-      items: [],
-      downloadedJobIds: [],
-      orphanFiles: [],
-      lastSeenJobId: null,
-      updatedAt: null,
-      lastRun: null,
-    }
+  if (changed) {
+    catalog.updatedAt = new Date().toISOString()
+    await saveCatalog(catalog)
   }
+
+  return catalog
 }
 
 async function reconcileCatalogWithLocalFiles(catalog) {
@@ -2025,20 +2032,208 @@ function normalizeJob(job) {
   }
 }
 
-async function saveCatalog(catalog) {
-  await mkdir(MEDIA_DIR, { recursive: true })
-  const tempPath = `${CATALOG_PATH}.tmp`
-  await writeFile(tempPath, `${JSON.stringify(catalog, null, 2)}\n`)
-  await rename(tempPath, CATALOG_PATH)
+async function ensureCatalogJsonMigrated() {
+  if (catalogJsonMigrationChecked) {
+    await archiveLegacyJsonFile(CATALOG_PATH, "ignored")
+    return
+  }
+
+  catalogJsonMigrationChecked = true
+  const db = getCatalogDb()
+
+  if (!(await fileExists(CATALOG_PATH))) {
+    return
+  }
+
+  if (isCatalogDbEmpty(db)) {
+    const parsed = JSON.parse(await readFile(CATALOG_PATH, "utf8"))
+    writeCatalogToDb(normalizeCatalog(parsed))
+    await archiveLegacyJsonFile(CATALOG_PATH, "migrated")
+    return
+  }
+
+  await archiveLegacyJsonFile(CATALOG_PATH, "ignored")
 }
 
-async function createCatalogBackup(reason = "manual") {
-  if (!(await fileExists(CATALOG_PATH))) {
+function getCatalogDb() {
+  if (catalogDb) {
+    return catalogDb
+  }
+
+  catalogDb = new DatabaseSync(CATALOG_DB_PATH)
+  catalogDb.exec("PRAGMA journal_mode = DELETE")
+  catalogDb.exec("PRAGMA foreign_keys = ON")
+  catalogDb.exec("PRAGMA busy_timeout = 5000")
+  ensureCatalogSchema(catalogDb)
+  return catalogDb
+}
+
+function ensureCatalogSchema(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS catalog_meta (
+      key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS media_items (
+      id TEXT PRIMARY KEY,
+      item_json TEXT NOT NULL,
+      created_at INTEGER,
+      updated_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS media_items_created_at_idx ON media_items(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS downloaded_job_ids (
+      id TEXT PRIMARY KEY,
+      position INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS orphan_files (
+      local_file TEXT PRIMARY KEY,
+      file_json TEXT NOT NULL
+    );
+  `)
+}
+
+function isCatalogDbEmpty(db) {
+  const mediaCount = db.prepare("SELECT COUNT(*) AS count FROM media_items").get().count
+  const metaCount = db
+    .prepare("SELECT COUNT(*) AS count FROM catalog_meta WHERE key IN ('lastSeenJobId', 'updatedAt', 'lastRun')")
+    .get().count
+  return Number(mediaCount || 0) === 0 && Number(metaCount || 0) === 0
+}
+
+function readCatalogFromDb() {
+  const db = getCatalogDb()
+  const metaRows = db.prepare("SELECT key, value_json FROM catalog_meta").all()
+  const meta = new Map(metaRows.map((row) => [row.key, parseJson(row.value_json, null)]))
+  const itemRows = db.prepare("SELECT item_json FROM media_items ORDER BY created_at DESC, id ASC").all()
+  const downloadedRows = db.prepare("SELECT id FROM downloaded_job_ids ORDER BY position ASC").all()
+  const orphanRows = db.prepare("SELECT file_json FROM orphan_files ORDER BY local_file ASC").all()
+
+  return normalizeCatalog({
+    items: itemRows.map((row) => parseJson(row.item_json, null)).filter(Boolean),
+    downloadedJobIds: downloadedRows.map((row) => row.id),
+    orphanFiles: orphanRows.map((row) => parseJson(row.file_json, null)).filter(Boolean),
+    lastSeenJobId: meta.get("lastSeenJobId") || null,
+    updatedAt: meta.get("updatedAt") || null,
+    lastRun: meta.get("lastRun") || null,
+  })
+}
+
+function writeCatalogToDb(catalog) {
+  const db = getCatalogDb()
+  const normalized = normalizeCatalog(catalog)
+
+  db.exec("BEGIN IMMEDIATE")
+  try {
+    db.exec("DELETE FROM media_items")
+    db.exec("DELETE FROM downloaded_job_ids")
+    db.exec("DELETE FROM orphan_files")
+
+    const insertItem = db.prepare("INSERT INTO media_items (id, item_json, created_at, updated_at) VALUES (?, ?, ?, ?)")
+    for (const item of normalized.items) {
+      if (!item?.id) {
+        continue
+      }
+
+      insertItem.run(item.id, JSON.stringify(item), Number(item.createdAt || 0), item.updatedAt || null)
+    }
+
+    const insertDownloaded = db.prepare("INSERT INTO downloaded_job_ids (id, position) VALUES (?, ?)")
+    normalized.downloadedJobIds.forEach((id, index) => {
+      insertDownloaded.run(id, index)
+    })
+
+    const insertOrphan = db.prepare("INSERT INTO orphan_files (local_file, file_json) VALUES (?, ?)")
+    for (const file of normalized.orphanFiles) {
+      if (file?.localFile) {
+        insertOrphan.run(file.localFile, JSON.stringify(file))
+      }
+    }
+
+    const upsertMeta = db.prepare(`
+      INSERT INTO catalog_meta (key, value_json)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+    `)
+    upsertMeta.run("lastSeenJobId", JSON.stringify(normalized.lastSeenJobId || null))
+    upsertMeta.run("updatedAt", JSON.stringify(normalized.updatedAt || null))
+    upsertMeta.run("lastRun", JSON.stringify(normalized.lastRun || null))
+
+    db.exec("COMMIT")
+  } catch (error) {
+    db.exec("ROLLBACK")
+    throw error
+  }
+}
+
+function readCatalogMeta(key) {
+  const row = getCatalogDb().prepare("SELECT value_json FROM catalog_meta WHERE key = ?").get(key)
+  return row ? parseJson(row.value_json, null) : null
+}
+
+function writeCatalogMeta(key, value) {
+  getCatalogDb()
+    .prepare(`
+      INSERT INTO catalog_meta (key, value_json)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+    `)
+    .run(key, JSON.stringify(value))
+}
+
+function normalizeCatalog(catalog = {}) {
+  return {
+    items: Array.isArray(catalog.items) ? catalog.items : [],
+    downloadedJobIds: Array.isArray(catalog.downloadedJobIds) ? catalog.downloadedJobIds : [],
+    orphanFiles: Array.isArray(catalog.orphanFiles) ? catalog.orphanFiles : [],
+    lastSeenJobId: catalog.lastSeenJobId || null,
+    updatedAt: catalog.updatedAt || null,
+    lastRun: catalog.lastRun || null,
+  }
+}
+
+function stringifyCatalog(catalog) {
+  return `${JSON.stringify(normalizeCatalog(catalog), null, 2)}\n`
+}
+
+function parseJson(value, fallback) {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return fallback
+  }
+}
+
+async function archiveLegacyJsonFile(filePath, reason) {
+  if (!(await fileExists(filePath))) {
+    return null
+  }
+
+  await mkdir(LEGACY_JSON_DIR, { recursive: true })
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+  const filename = `${timestamp}_${sanitizePathPart(reason).toLowerCase()}_${path.basename(filePath)}`
+  const archivePath = path.join(LEGACY_JSON_DIR, filename)
+  await rename(filePath, archivePath)
+  return archivePath
+}
+
+async function saveCatalog(catalog) {
+  await mkdir(MEDIA_DIR, { recursive: true })
+  writeCatalogToDb(catalog)
+}
+
+async function createCatalogBackup(reason = "manual", { allowEmpty = false } = {}) {
+  const catalog = await loadCatalog()
+
+  if (!allowEmpty && !catalog.items.length && !catalog.updatedAt) {
     return null
   }
 
   await mkdir(BACKUP_DIR, { recursive: true })
-  const raw = await readFile(CATALOG_PATH, "utf8")
+  const raw = stringifyCatalog(catalog)
   const timestamp = new Date().toISOString()
   const safeReason = sanitizePathPart(reason).toLowerCase()
   const filename = `${timestamp.replace(/[:.]/g, "-")}_${safeReason}.json`
@@ -2081,20 +2276,20 @@ async function restoreCatalogBackup(filename) {
     throw new Error("Selected backup is not a valid catalog.")
   }
 
-  await createCatalogBackup("before-restore")
-  const tempPath = `${CATALOG_PATH}.tmp`
-  await writeFile(tempPath, `${JSON.stringify(parsed, null, 2)}\n`)
-  await rename(tempPath, CATALOG_PATH)
+  await createCatalogBackup("before-restore", { allowEmpty: true })
+  await saveCatalog(normalizeCatalog(parsed))
 
   return backupSummaryFromRaw(path.basename(backupPath), raw)
 }
 
 async function sendCatalogExport(response) {
-  if (!(await fileExists(CATALOG_PATH))) {
+  const catalog = await loadCatalog()
+
+  if (!catalog.items.length && !catalog.updatedAt) {
     return sendJson(response, { error: "No catalog exists yet." }, 404)
   }
 
-  const raw = await readFile(CATALOG_PATH, "utf8")
+  const raw = stringifyCatalog(catalog)
   const filename = `catalog-export-${new Date().toISOString().replace(/[:.]/g, "-")}.json`
   response.writeHead(200, {
     "content-type": "application/json; charset=utf-8",

@@ -6,13 +6,14 @@
 - `public/` contains the built React app served by the Node server.
 - `client/src/` contains the React 19 + Vite source app.
 - `extension/` contains the unpacked Chrome extension **GP Auth Helper**, now a fallback auth helper.
-- `media/catalog.json` stores the local catalog and is repaired from files on disk when loaded.
+- `media/catalog.sqlite` stores the local catalog and create-template registry; legacy `media/catalog.json` and `media/create-templates.json` are one-time migration inputs and are moved into `MEDIA_DIR/_legacy_json/` after import or ignore.
 - Media files are saved under date-based folders inside `MEDIA_DIR`.
-- `MEDIA_DIR` can point outside the repo, including mounted remote drives or cloud-synced folders; `catalog.json` stays alongside the media.
+- `MEDIA_DIR` can point outside the repo, including mounted remote drives or cloud-synced folders; `catalog.sqlite` stays alongside the media.
 - Catalog items can store `sha256`, `fileSize`, and `verifiedAt` after a library verification pass.
 - Duplicate media is marked directly on catalog items with `duplicateGroupSize` and `duplicateOf`.
 - Orphan local media files are tracked in `catalog.orphanFiles`.
 - Catalog backups are timestamped JSON snapshots under `MEDIA_DIR/_catalog_backups`.
+- JSON remains the interchange format for export, backup, and restore, but SQLite is the source of truth.
 - `.mise.toml` pins Node.js and pnpm. `pnpm-workspace.yaml` holds project package-manager settings and security defaults.
 - `environment.toml` defines Codex local environment setup plus actions for starting the server and running tests.
 
@@ -93,5 +94,6 @@ The server stores bearer tokens in memory only. The persistent browser profile c
 
 - Add prompt tags or manual notes in a sidecar metadata file.
 - Add keyboard shortcuts for browsing/copying prompts.
-- Add import of external `catalog.json` files.
+- Add explicit import of external catalog JSON files.
+- Normalize the SQLite schema further for server-side filtering/sorting once catalog size makes in-memory filtering noticeably slow.
 - Split browser smoke coverage into smaller focused UI tests if the single smoke test becomes hard to diagnose.

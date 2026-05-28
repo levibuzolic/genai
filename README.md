@@ -42,13 +42,13 @@ Then open:
 http://localhost:5177
 ```
 
-The server stores downloaded files in `media/` by default. It also writes the local catalog to:
+The server stores downloaded files in `media/` by default. It stores app catalog data in SQLite:
 
 ```text
-media/catalog.json
+media/catalog.sqlite
 ```
 
-Catalog backups are stored beside the catalog:
+If older `media/catalog.json` or `media/create-templates.json` files exist, the server treats them as one-time migration inputs. When SQLite has no matching data yet, it imports them and then moves the JSON files into `media/_legacy_json/`. When SQLite already has data, it moves those JSON files into `media/_legacy_json/` and ignores them. JSON is still used for exports and backups. Catalog backups are stored beside the database:
 
 ```text
 media/_catalog_backups/
@@ -66,7 +66,7 @@ Home-relative paths are also supported:
 MEDIA_DIR=~/Library/CloudStorage/Dropbox/gp-media-library
 ```
 
-The remote drive should be mounted before starting the server. `catalog.json` lives in the same directory as the downloaded media so the library can stay separate from the project checkout.
+The remote drive should be mounted before starting the server. `catalog.sqlite` lives in the same directory as the downloaded media so the library can stay separate from the project checkout.
 
 ## Configuration
 
@@ -101,7 +101,7 @@ Prefer the in-app auth browser for auth. Static tokens expire quickly.
 
 The persisted browser profile survives server restarts as long as `AUTH_BROWSER_PROFILE_DIR` is not deleted. On startup, the server attempts a headless refresh from that profile. If the saved session can no longer refresh, use **Connect account** again.
 
-The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.json`, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
+The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.sqlite`, JSON exports, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
 
 ## Auth Helper Extension
 
@@ -133,16 +133,16 @@ In the local web UI:
 - **Verify library** hashes local media, refreshes file sizes, marks duplicate catalog items, and reports orphan files in the media directory.
 - **Cancel** appears while a sync, download, thumbnail, or verification job is running and stops after the current API page or file finishes.
 - **Full API rescan** scans the API from page 1.
-- **Export catalog** downloads the current `catalog.json`.
+- **Export catalog** downloads the current catalog as JSON.
 - **Create backup** writes a timestamped catalog snapshot under `_catalog_backups`.
 - **Restore backup** restores a selected snapshot and first creates a `before-restore` backup of the current catalog.
 - Search and filters are stored in the URL so reloads preserve your place.
 - Use media/status filters, including duplicates and unverified files, sort order, page size, and grid/list view to browse larger collections.
 - Each item has a **Copy prompt** button.
 
-Videos use local poster thumbnails when available. Without a poster, videos are rendered with `preload="metadata"`; with a poster, they use `preload="none"` to avoid eagerly loading video files in the gallery.
+Videos use local poster thumbnails when available and render with `preload="metadata"` so durations can be shown without eagerly loading entire files.
 
-Verification stores `sha256`, `fileSize`, and `verifiedAt` on catalog items. Duplicate groups are marked with `duplicateGroupSize` and `duplicateOf`; files in `MEDIA_DIR` that do not map to a catalog item are listed in `catalog.json` under `orphanFiles`.
+Verification stores `sha256`, `fileSize`, and `verifiedAt` on catalog items. Duplicate groups are marked with `duplicateGroupSize` and `duplicateOf`; files in `MEDIA_DIR` that do not map to a catalog item are listed in the catalog under `orphanFiles`.
 
 The server automatically creates a catalog backup before sync, download, thumbnail generation, library verification, history reset, and restore operations.
 

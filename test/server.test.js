@@ -1,9 +1,10 @@
 import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises"
 import http from "node:http"
 import os from "node:os"
 import path from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 
 import { ensureVideoThumbnail, getThumbnailRelativePath, setThumbnailProcessRunnerForTests } from "../src/thumbnails.js"
@@ -98,6 +99,83 @@ test("sync downloads known missing catalog files without API auth", async () => 
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test("catalog migrates from legacy JSON into SQLite storage", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-sqlite-"))
+  const id = "10101010-1010-4010-8010-101010101010"
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/sqlite.png",
+        createdAt: 1779769825,
+        prompt: "sqlite prompt",
+      },
+    ],
+    downloadedJobIds: [],
+    orphanFiles: [],
+    lastSeenJobId: id,
+    updatedAt: "2026-05-27T00:00:00.000Z",
+  })
+
+  const server = await importServer(mediaDir)
+  const catalog = await server.getItems(new URLSearchParams())
+  const stored = await readCatalog(mediaDir)
+
+  assert.equal(existsSync(path.join(mediaDir, "catalog.sqlite")), true)
+  assert.equal(existsSync(path.join(mediaDir, "catalog.json")), false)
+  assert.equal((await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_catalog.json")), true)
+  assert.equal(catalog.items[0].id, id)
+  assert.equal(stored.items[0].prompt, "sqlite prompt")
+  assert.equal(stored.lastSeenJobId, id)
+})
+
+test("legacy catalog JSON is archived without overwriting existing SQLite data", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-sqlite-ignore-"))
+  const sqliteId = "20202020-2020-4020-8020-202020202020"
+  const jsonId = "21212121-2121-4121-8121-212121212121"
+  const server = await importServer(mediaDir)
+
+  await server.getItems(new URLSearchParams())
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: sqliteId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/sqlite-source.png",
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [],
+    lastSeenJobId: sqliteId,
+  })
+  await writeFile(path.join(mediaDir, "catalog.json"), `${JSON.stringify({
+    items: [
+      {
+        id: jsonId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/json-source.png",
+        createdAt: 1779769826,
+      },
+    ],
+    downloadedJobIds: [],
+    lastSeenJobId: jsonId,
+  }, null, 2)}\n`)
+
+  await server.getItems(new URLSearchParams())
+
+  const stored = await readCatalog(mediaDir)
+  const archived = await readdir(path.join(mediaDir, "_legacy_json"))
+
+  assert.equal(existsSync(path.join(mediaDir, "catalog.json")), false)
+  assert.equal(stored.items.length, 1)
+  assert.equal(stored.items[0].id, sqliteId)
+  assert.equal(archived.some((name) => name.endsWith("_ignored_catalog.json")), true)
 })
 
 test("incremental sync refreshes a previously seen pending job before stopping", async () => {
@@ -626,6 +704,34 @@ test("template import reads prompt fields from mocked API history", async () => 
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test("create template registry migrates from legacy JSON into SQLite", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-sqlite-"))
+  await writeFile(
+    path.join(mediaDir, "create-templates.json"),
+    `${JSON.stringify({
+      templates: [
+        {
+          id: "legacy-template",
+          label: "Legacy Template",
+          prompt: "legacy template prompt",
+          endpoint: "video",
+          mediaType: "video",
+        },
+      ],
+      updatedAt: "2026-05-27T00:00:00.000Z",
+    }, null, 2)}\n`,
+  )
+
+  const server = await importServer(mediaDir)
+  const registry = await server.loadCreateTemplateRegistry()
+
+  assert.equal(existsSync(path.join(mediaDir, "catalog.sqlite")), true)
+  assert.equal(existsSync(path.join(mediaDir, "create-templates.json")), false)
+  assert.equal((await readdir(path.join(mediaDir, "_legacy_json"))).some((name) => name.endsWith("_migrated_create-templates.json")), true)
+  assert.equal(registry.templates.length, 1)
+  assert.equal(registry.templates[0].id, "legacy-template")
 })
 
 test("creation job submit and download use mocked API and merge into catalog", async () => {
@@ -1337,11 +1443,82 @@ async function importServer(mediaDir, env = {}) {
 }
 
 async function writeCatalog(mediaDir, catalog) {
-  await writeFile(path.join(mediaDir, "catalog.json"), `${JSON.stringify(catalog, null, 2)}\n`)
+  const dbPath = path.join(mediaDir, "catalog.sqlite")
+
+  if (!existsSync(dbPath)) {
+    await writeFile(path.join(mediaDir, "catalog.json"), `${JSON.stringify(catalog, null, 2)}\n`)
+    return
+  }
+
+  const db = new DatabaseSync(dbPath)
+  const normalized = {
+    items: Array.isArray(catalog.items) ? catalog.items : [],
+    downloadedJobIds: Array.isArray(catalog.downloadedJobIds) ? catalog.downloadedJobIds : [],
+    orphanFiles: Array.isArray(catalog.orphanFiles) ? catalog.orphanFiles : [],
+    lastSeenJobId: catalog.lastSeenJobId || null,
+    updatedAt: catalog.updatedAt || null,
+    lastRun: catalog.lastRun || null,
+  }
+
+  try {
+    db.exec("BEGIN IMMEDIATE")
+    db.exec("DELETE FROM media_items")
+    db.exec("DELETE FROM downloaded_job_ids")
+    db.exec("DELETE FROM orphan_files")
+
+    const insertItem = db.prepare("INSERT INTO media_items (id, item_json, created_at, updated_at) VALUES (?, ?, ?, ?)")
+    for (const item of normalized.items) {
+      insertItem.run(item.id, JSON.stringify(item), Number(item.createdAt || 0), item.updatedAt || null)
+    }
+
+    const insertDownloaded = db.prepare("INSERT INTO downloaded_job_ids (id, position) VALUES (?, ?)")
+    normalized.downloadedJobIds.forEach((id, index) => insertDownloaded.run(id, index))
+
+    const insertOrphan = db.prepare("INSERT INTO orphan_files (local_file, file_json) VALUES (?, ?)")
+    for (const file of normalized.orphanFiles) {
+      if (file?.localFile) insertOrphan.run(file.localFile, JSON.stringify(file))
+    }
+
+    const upsertMeta = db.prepare(`
+      INSERT INTO catalog_meta (key, value_json)
+      VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+    `)
+    upsertMeta.run("lastSeenJobId", JSON.stringify(normalized.lastSeenJobId))
+    upsertMeta.run("updatedAt", JSON.stringify(normalized.updatedAt))
+    upsertMeta.run("lastRun", JSON.stringify(normalized.lastRun))
+    db.exec("COMMIT")
+  } catch (error) {
+    db.exec("ROLLBACK")
+    throw error
+  } finally {
+    db.close()
+  }
 }
 
 async function readCatalog(mediaDir) {
-  return JSON.parse(await readFile(path.join(mediaDir, "catalog.json"), "utf8"))
+  const dbPath = path.join(mediaDir, "catalog.sqlite")
+
+  if (!existsSync(dbPath)) {
+    return JSON.parse(await readFile(path.join(mediaDir, "catalog.json"), "utf8"))
+  }
+
+  const db = new DatabaseSync(dbPath, { readOnly: true })
+  try {
+    const metaRows = db.prepare("SELECT key, value_json FROM catalog_meta").all()
+    const meta = new Map(metaRows.map((row) => [row.key, JSON.parse(row.value_json)]))
+
+    return {
+      items: db.prepare("SELECT item_json FROM media_items ORDER BY created_at DESC, id ASC").all().map((row) => JSON.parse(row.item_json)),
+      downloadedJobIds: db.prepare("SELECT id FROM downloaded_job_ids ORDER BY position ASC").all().map((row) => row.id),
+      orphanFiles: db.prepare("SELECT file_json FROM orphan_files ORDER BY local_file ASC").all().map((row) => JSON.parse(row.file_json)),
+      lastSeenJobId: meta.get("lastSeenJobId") || null,
+      updatedAt: meta.get("updatedAt") || null,
+      lastRun: meta.get("lastRun") || null,
+    }
+  } finally {
+    db.close()
+  }
 }
 
 function deferred() {
