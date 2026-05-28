@@ -1,4 +1,4 @@
-import { Clock3, CopyPlus, ExternalLink, History, Loader2, RefreshCw } from "lucide-react"
+import { Clock3, CopyPlus, ExternalLink, History, Loader2, RefreshCw, Save } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -48,6 +48,7 @@ export function CreationHistoryPanel({
   onDetails,
   onCloseDetails,
   onDuplicate,
+  onSaveTemplate,
 }: {
   creations: Creation[]
   activeCount: number
@@ -59,6 +60,7 @@ export function CreationHistoryPanel({
   onDetails: (creation: Creation) => Promise<void>
   onCloseDetails: () => void
   onDuplicate: (creation: Creation) => Promise<void>
+  onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
   const active = creations.filter((creation) => creation.active)
   const recent = creations.filter((creation) => !creation.active).slice(0, 8)
@@ -74,7 +76,7 @@ export function CreationHistoryPanel({
           <h3>Queue</h3>
           <p>{activeCount > 0 ? `${activeCount} generation${activeCount === 1 ? "" : "s"} still running` : "No active generations"}</p>
         </div>
-        <Button variant="glass" size="sm" onClick={() => void onRefresh()} disabled={loading}>
+        <Button variant="outline" size="sm" onClick={() => void onRefresh()} disabled={loading}>
           {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
           Refresh
         </Button>
@@ -87,7 +89,14 @@ export function CreationHistoryPanel({
           <span className="creationHistoryEyebrow">Active</span>
           {active.length ? (
             active.map((creation) => (
-              <CreationHistoryRow key={creation.id} creation={creation} prominent onDetails={onDetails} onDuplicate={onDuplicate} />
+              <CreationHistoryRow
+                key={creation.id}
+                creation={creation}
+                prominent
+                onDetails={onDetails}
+                onDuplicate={onDuplicate}
+                onSaveTemplate={onSaveTemplate}
+              />
             ))
           ) : (
             <div className="creationHistoryEmpty">Submitted generations will appear here while they run.</div>
@@ -98,7 +107,13 @@ export function CreationHistoryPanel({
           <span className="creationHistoryEyebrow">Recent</span>
           {recent.length ? (
             recent.map((creation) => (
-              <CreationHistoryRow key={creation.id} creation={creation} onDetails={onDetails} onDuplicate={onDuplicate} />
+              <CreationHistoryRow
+                key={creation.id}
+                creation={creation}
+                onDetails={onDetails}
+                onDuplicate={onDuplicate}
+                onSaveTemplate={onSaveTemplate}
+              />
             ))
           ) : (
             <div className="creationHistoryEmpty">Finished and failed generations will collect here.</div>
@@ -127,8 +142,12 @@ export function CreationHistoryPanel({
                       <CopyPlus />
                       Copy settings
                     </Button>
+                    <Button variant="outline" onClick={() => void onSaveTemplate(selectedCreation)}>
+                      <Save />
+                      Save template
+                    </Button>
                     {selectedCreation.outputUrl && (
-                      <Button variant="glass" asChild>
+                      <Button variant="outline" asChild>
                         <a href={selectedCreation.outputUrl} target="_blank" rel="noreferrer">
                           <ExternalLink />
                           Open output
@@ -190,11 +209,13 @@ function CreationHistoryRow({
   prominent = false,
   onDetails,
   onDuplicate,
+  onSaveTemplate,
 }: {
   creation: Creation
   prominent?: boolean
   onDetails: (creation: Creation) => Promise<void>
   onDuplicate: (creation: Creation) => Promise<void>
+  onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
   return (
     <article className={prominent ? "creationHistoryRow is-active" : "creationHistoryRow"}>
@@ -205,9 +226,13 @@ function CreationHistoryRow({
         </span>
       </button>
       <Badge variant={statusVariant(creation.status)}>{statusLabel(creation.status)}</Badge>
-      <Button variant="glass" size="sm" onClick={() => void onDuplicate(creation)}>
+      <Button variant="outline" size="sm" onClick={() => void onDuplicate(creation)}>
         <CopyPlus />
         Copy
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => void onSaveTemplate(creation)}>
+        <Save />
+        Save
       </Button>
     </article>
   )

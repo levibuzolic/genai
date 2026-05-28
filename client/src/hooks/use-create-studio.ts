@@ -9,6 +9,8 @@ import type {
   CreateField,
   CreateJob,
   CreateMode,
+  CreateTemplate,
+  CreateTemplateType,
   CreationSource,
   ItemsResponse,
   SourceKind,
@@ -37,6 +39,9 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   const [submitting, setSubmitting] = React.useState(false)
   const [templateJobId, setTemplateJobId] = React.useState("")
   const [templateLabel, setTemplateLabel] = React.useState("")
+  const [selectedTemplateId, setSelectedTemplateId] = React.useState("")
+  const [templateSearch, setTemplateSearch] = React.useState("")
+  const [templateType, setTemplateType] = React.useState<CreateTemplateType>("video")
   const [isDraggingUpload, setIsDraggingUpload] = React.useState(false)
   const panelRef = React.useRef<HTMLElement | null>(null)
   const fileInputRef = React.useRef<HTMLInputElement | null>(null)
@@ -131,9 +136,11 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
       prompt?: string | undefined
       modeId?: string | undefined
       params?: Record<string, string> | undefined
+      templateId?: string | undefined
     } = {},
   ) {
     setOpen(true)
+    if (options.templateId) setSelectedTemplateId(options.templateId)
     if (options.sourceKind) setSourceKind(options.sourceKind)
     if (options.prompt) setPrompt(options.prompt)
     if (options.modeId) setModeId(options.modeId)
@@ -192,6 +199,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           modeId,
+          templateId: selectedTemplateId || undefined,
           source: buildCreateSourcePayload(),
           params: buildCreateParamsPayload(),
         }),
@@ -235,6 +243,54 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     setStatus(`Imported ${response.template.label}.`)
   }
 
+  function applyTemplate(template: CreateTemplate) {
+    const settings = template.settings
+    setSelectedTemplateId(template.id)
+    setTemplateType(template.type)
+    if (settings.modeId) setModeId(settings.modeId)
+    if (settings.params?.["prompt"] !== undefined) setPrompt(settings.params["prompt"])
+    if (settings.params?.["quality"] !== undefined) setQuality(settings.params["quality"])
+    applyCreationSource(settings.source)
+    setStatus(`Using template ${template.label}. Overrides apply only to this run.`)
+  }
+
+  function clearTemplate() {
+    setSelectedTemplateId("")
+    setStatus("Template cleared.")
+  }
+
+  function buildTemplateDraft(label: string, type: CreateTemplateType = templateType) {
+    const settings = {
+      modeId,
+      source: buildReusableTemplateSource(),
+      params: buildCreateParamsPayload(),
+    }
+
+    return {
+      label,
+      type,
+      settings,
+      workflow:
+        type === "combo"
+          ? [
+              {
+                modeId: "custom-image",
+                params: {
+                  prompt: settings.params["prompt"] || "",
+                },
+              },
+              {
+                modeId: "custom-video",
+                params: {
+                  prompt: settings.params["prompt"] || "",
+                  quality: settings.params["quality"] || "720p-4",
+                },
+              },
+            ]
+          : [settings],
+    }
+  }
+
   function buildCreateSourcePayload() {
     if (sourceKind === "catalog") {
       if (!selectedSource) throw new Error("Choose a collection image.")
@@ -253,6 +309,35 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     if (promptField) params["prompt"] = prompt.trim()
     if (qualityField) params["quality"] = quality
     return params
+  }
+
+  function buildReusableTemplateSource(): CreationSource | null {
+    if (sourceKind === "catalog" && selectedSource) {
+      return selectedSource.outputUrl
+        ? { kind: "catalog", itemId: selectedSource.id, url: selectedSource.outputUrl }
+        : { kind: "catalog", itemId: selectedSource.id }
+    }
+    if (sourceKind === "url" && sourceUrl.trim()) {
+      return { kind: "url", url: sourceUrl.trim() }
+    }
+    if (sourceKind === "upload") {
+      return { kind: "upload" }
+    }
+
+    return null
+  }
+
+  function applyCreationSource(source: CreationSource | null | undefined) {
+    if (source?.kind === "url" && typeof source.url === "string") {
+      setSourceKind("url")
+      setSourceUrl(source.url)
+    } else if (source?.kind === "catalog" && typeof source.itemId === "string") {
+      setSourceKind("catalog")
+      setSelectedSourceId(source.itemId)
+    } else if (source?.kind === "upload") {
+      setSourceKind("upload")
+      setUploadMeta("Choose, drop, or paste the source image again.")
+    }
   }
 
   function resetCreateForm() {
@@ -309,6 +394,12 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     setTemplateJobId,
     templateLabel,
     setTemplateLabel,
+    selectedTemplateId,
+    setSelectedTemplateId,
+    templateSearch,
+    setTemplateSearch,
+    templateType,
+    setTemplateType,
     isDraggingUpload,
     setIsDraggingUpload,
     openCreator,
@@ -316,6 +407,9 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     submitCreateJob,
     downloadCreateJob,
     importTemplate,
+    applyTemplate,
+    clearTemplate,
+    buildTemplateDraft,
     resetCreateForm,
     animateCreateResult,
   }

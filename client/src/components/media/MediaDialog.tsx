@@ -1,4 +1,4 @@
-import { Copy } from "lucide-react"
+import { Copy, ExternalLink, ImageIcon, Play, WandSparkles } from "lucide-react"
 
 import { Fact } from "@/components/common/Fact"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,8 @@ export function MediaDialog({
   onUsePrompt: (item: CatalogItem) => void
 }) {
   const mediaUrl = mediaUrlForItem(item)
+  const canUsePrompt = Boolean(item?.prompt)
+  const canUseImage = Boolean(item && isImageItem(item))
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -42,7 +44,9 @@ export function MediaDialog({
                   item.size ? formatBytes(item.size) : "",
                   item.status,
                   item.localFile ? "downloaded" : "not local",
-                ].filter(Boolean).join(" · ")}
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </DialogDescription>
             </DialogHeader>
             <div className="dialogBody">
@@ -56,12 +60,16 @@ export function MediaDialog({
               <div className="detailPanel">
                 <section>
                   <h3>Prompt</h3>
-                  <p id="detailPrompt" className="detailText">{item.prompt || "No prompt text"}</p>
+                  <p id="detailPrompt" className="detailText">
+                    {item.prompt || "No prompt text"}
+                  </p>
                 </section>
                 {item.negativePrompt && (
                   <section id="negativePromptSection">
                     <h3>Negative prompt</h3>
-                    <p id="detailNegativePrompt" className="detailText">{item.negativePrompt}</p>
+                    <p id="detailNegativePrompt" className="detailText">
+                      {item.negativePrompt}
+                    </p>
                   </section>
                 )}
                 <dl id="detailFacts" className="detailFacts">
@@ -80,21 +88,50 @@ export function MediaDialog({
                   <Fact label="Duplicate of" value={item.duplicateOf} />
                   <Fact label="Output URL" value={item.outputUrl} />
                 </dl>
-                <div className="dialogActions">
-                  <Button id="detailCopyPromptButton" onClick={() => onCopy(item.prompt, "Prompt copied")} disabled={!item.prompt}>
-                    <Copy />
-                    Copy prompt
-                  </Button>
-                  <Button id="detailCopyIdButton" variant="glass" onClick={() => onCopy(item.id, "ID copied")}>Copy ID</Button>
-                  <Button id="detailCopyUrlButton" variant="glass" onClick={() => onCopy(item.outputUrl, "URL copied")} disabled={!item.outputUrl}>
-                    Copy output URL
-                  </Button>
-                  <Button id="detailCreateButton" variant="glass" onClick={() => onCreate(item)} disabled={!isImageItem(item)}>Create from image</Button>
-                  <Button id="detailAnimateButton" variant="glass" onClick={() => onAnimate(item)} disabled={!isImageItem(item)}>Animate image</Button>
-                  <Button id="detailUsePromptButton" variant="glass" onClick={() => onUsePrompt(item)} disabled={!item.prompt}>Use prompt</Button>
-                  <Button id="detailOpenLink" className="openLink" variant="glass" asChild>
-                    <a href={mediaUrl || "#"} target="_blank" rel="noreferrer">Open media</a>
-                  </Button>
+                <div className="dialogActions" aria-label="Media actions">
+                  <div className="detailActionGroup" aria-label="Create actions">
+                    {canUsePrompt && (
+                      <Button id="detailUsePromptButton" size="sm" onClick={() => onUsePrompt(item)}>
+                        <WandSparkles />
+                        Use prompt
+                      </Button>
+                    )}
+                    {canUseImage && (
+                      <>
+                        <Button id="detailCreateButton" size="sm" variant="outline" onClick={() => onCreate(item)}>
+                          <ImageIcon />
+                          Create
+                        </Button>
+                        <Button id="detailAnimateButton" size="sm" variant="outline" onClick={() => onAnimate(item)}>
+                          <Play />
+                          Animate
+                        </Button>
+                      </>
+                    )}
+                    {mediaUrl && (
+                      <Button id="detailOpenLink" className="openLink" size="sm" variant="outline" asChild>
+                        <a href={mediaUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink />
+                          Open
+                        </a>
+                      </Button>
+                    )}
+                  </div>
+
+                  <div className="detailActionGroup detailActionSecondary" aria-label="Copy actions">
+                    <Button id="detailCopyPromptButton" size="sm" variant="ghost" onClick={() => onCopy(item.prompt, "Prompt copied")} disabled={!item.prompt}>
+                      <Copy />
+                      Prompt
+                    </Button>
+                    <Button id="detailCopyIdButton" size="sm" variant="ghost" onClick={() => onCopy(item.id, "ID copied")}>
+                      ID
+                    </Button>
+                    {item.outputUrl && (
+                      <Button id="detailCopyUrlButton" size="sm" variant="ghost" onClick={() => onCopy(item.outputUrl, "URL copied")}>
+                        URL
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>

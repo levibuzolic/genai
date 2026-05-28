@@ -2,18 +2,21 @@ import { ChevronLeft, ChevronRight } from "lucide-react"
 import type * as React from "react"
 
 import { Button } from "@/components/ui/button"
-import type { ViewMode } from "@/types/domain"
+import { formatNumber, formatRange } from "@/lib/format"
+import type { ItemsResponse, ViewMode } from "@/types/domain"
 
 export function PagerControls({
   page,
   setPage,
   pageCount,
+  itemsData,
   view,
   setView,
 }: {
   page: number
   setPage: React.Dispatch<React.SetStateAction<number>>
   pageCount: number
+  itemsData: ItemsResponse | null
   view: ViewMode
   setView: (value: ViewMode) => void
 }) {
@@ -21,7 +24,7 @@ export function PagerControls({
     <section className="pager" aria-label="Library pages">
       <Button
         id="prevPageButton"
-        variant="glass"
+        variant="outline"
         size="sm"
         disabled={page <= 1}
         onClick={() => setPage((current) => Math.max(1, current - 1))}
@@ -32,7 +35,14 @@ export function PagerControls({
       <span id="pageStatus">
         Page {page} of {pageCount}
       </span>
-      <Button id="nextPageButton" variant="glass" size="sm" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)}>
+      <span id="libraryStatus">{itemsData ? `${formatRange(itemsData)} of ${formatNumber(itemsData.total)}` : "Loading..."}</span>
+      <Button
+        id="nextPageButton"
+        variant="outline"
+        size="sm"
+        disabled={page >= pageCount}
+        onClick={() => setPage((current) => current + 1)}
+      >
         Next
         <ChevronRight />
       </Button>

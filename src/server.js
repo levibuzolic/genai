@@ -131,7 +131,15 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/create/templates") {
-      return sendJson(response, await loadCreateTemplateRegistry())
+      return sendJson(response, await getCreateTemplateRegistryResponse())
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/create/templates") {
+      const body = await readJsonBody(request)
+      return sendJson(response, {
+        ok: true,
+        template: await saveCreateTemplateFromRequest(body),
+      })
     }
 
     if (request.method === "POST" && url.pathname === "/api/create/templates/import") {
@@ -140,6 +148,21 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         template: await importCreateTemplateFromHistory(body),
       })
+    }
+
+    const createTemplateMatch = url.pathname.match(/^\/api\/create\/templates\/([^/]+)$/)
+    if (createTemplateMatch) {
+      if (request.method === "PUT") {
+        const body = await readJsonBody(request)
+        return sendJson(response, {
+          ok: true,
+          template: await saveCreateTemplateFromRequest({ ...body, id: createTemplateMatch[1] }),
+        })
+      }
+
+      if (request.method === "DELETE") {
+        return sendJson(response, await deleteCreateTemplate(createTemplateMatch[1]))
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/api/create/jobs") {
@@ -169,6 +192,15 @@ const server = http.createServer(async (request, response) => {
     const creationDuplicateMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/duplicate$/)
     if (request.method === "POST" && creationDuplicateMatch) {
       return sendJson(response, await duplicateCreation(creationDuplicateMatch[1]))
+    }
+
+    const creationTemplateMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/template$/)
+    if (request.method === "POST" && creationTemplateMatch) {
+      const body = await readJsonBody(request)
+      return sendJson(response, {
+        ok: true,
+        template: await saveCreateTemplateFromCreation(creationTemplateMatch[1], body),
+      })
     }
 
     if (request.method === "POST" && url.pathname === "/api/creations/refresh") {
@@ -988,24 +1020,187 @@ async function getCreateModes() {
 }
 
 function templateToCreateMode(template) {
+  const settings = getPrimaryTemplateSettings(template)
+  const params = settings.params || {}
+  const quality = getQualityFromTemplateParams(params)
+
   return {
     id: template.id,
     label: template.label,
     kind: "template",
-    mediaType: template.mediaType || "video",
-    endpoint: template.endpoint || "video",
+    mediaType: template.type === "image" ? "image" : "video",
+    endpoint: template.type === "image" ? "edit" : "video",
     source: {
       required: true,
       acceptedKinds: ["catalog", "upload", "url"],
     },
     fixed: {
-      prompt: template.prompt,
-      negativePrompt: template.negativePrompt || "",
-      resolution: template.resolution || "720p",
-      duration: Number(template.duration || 4),
+      prompt: params.prompt,
+      negativePrompt: params.negativePrompt || "",
+      resolution: quality.resolution,
+      duration: quality.duration,
     },
     seedJobId: template.seedJobId || null,
+    templateId: template.id,
     fields: [],
+  }
+}
+
+async function prepareCreateSubmission(requestBody = {}) {
+  const registry = await loadCreateTemplateRegistry()
+  const modes = getCreateModeDefinitions(registry.templates)
+  const template = requestBody.templateId
+    ? registry.templates.find((entry) => entry.id === sanitizePathPart(requestBody.templateId).toLowerCase())
+    : null
+
+  if (requestBody.templateId && !template) {
+    throw new Error("Template was not found.")
+  }
+
+  if (template) {
+    const settings = getPrimaryTemplateSettings(template)
+    const modeId = requestBody.modeId || settings.modeId
+    const mode = modes.find((entry) => entry.id === modeId)
+
+    return {
+      modes,
+      mode,
+      template,
+      sourceRequest: requestBody.source || settings.source,
+      params: {
+        ...settings.params,
+        ...requestBody.params,
+      },
+    }
+  }
+
+  return {
+    modes,
+    mode: modes.find((entry) => entry.id === requestBody?.modeId),
+    template: null,
+    sourceRequest: requestBody.source,
+    params: requestBody.params || {},
+  }
+}
+
+async function createTemplateWorkflowJob(submission, { attemptId, requestStartedAt }) {
+  const { modes, template, sourceRequest } = submission
+  const source = await resolveCreateSource(sourceRequest)
+  const firstStep = template.workflow[0]
+  const firstMode = modes.find((entry) => entry.id === firstStep.modeId)
+
+  if (!firstMode || firstMode.disabled) {
+    throw new Error("Template first step is not available.")
+  }
+
+  const liveRequest = buildCreateApiRequest(firstMode, source, firstStep.params || {})
+  const workflow = {
+    templateId: template.id,
+    currentStep: 0,
+    activeJobId: null,
+    steps: template.workflow,
+    jobs: [],
+    overrides: submission.params || {},
+  }
+  const baseRecord = {
+    id: attemptId,
+    status: "submitted",
+    modeId: `template:${template.id}`,
+    modeLabel: template.label,
+    mediaType: "video",
+    templateId: template.id,
+    templateLabel: template.label,
+    source: source.publicSource,
+    params: submission.params || {},
+    request: liveRequest.publicRequest,
+    requestBody: liveRequest.body,
+    workflow,
+    createdLocallyAt: requestStartedAt,
+    submittedAt: requestStartedAt,
+    updatedAt: requestStartedAt,
+  }
+
+  saveCreationJob(baseRecord, {
+    eventStatus: "submitted",
+    eventMessage: "Submitted template workflow.",
+  })
+
+  let response
+  let body
+  try {
+    response = await fetch(`${getJobsApiBaseUrl()}/${firstMode.endpoint}`, {
+      method: "POST",
+      headers: buildApiHeaders(),
+      body: JSON.stringify(liveRequest.body),
+    })
+    body = await response.json().catch(() => ({}))
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    saveCreationJob(
+      {
+        ...baseRecord,
+        status: "error",
+        error: message,
+        finishedAt: new Date().toISOString(),
+      },
+      {
+        eventStatus: "error",
+        eventMessage: message,
+      },
+    )
+    throw error
+  }
+
+  if (!response.ok || !body?.job_id) {
+    const error =
+      body?.error ||
+      (!body?.job_id ? "Create response did not include a job_id." : `Create request failed: ${response.status} ${response.statusText}`)
+    saveCreationJob(
+      {
+        ...baseRecord,
+        status: "error",
+        response: body,
+        error,
+        finishedAt: new Date().toISOString(),
+      },
+      {
+        eventStatus: "error",
+        eventMessage: error,
+        eventData: body,
+      },
+    )
+    const wrapped = new Error(error)
+    wrapped.statusCode = response.status
+    throw wrapped
+  }
+
+  const workflowCreation = {
+    ...baseRecord,
+    id: body.job_id,
+    previousId: attemptId,
+    jobId: body.job_id,
+    response: body,
+    workflow: {
+      ...workflow,
+      activeJobId: body.job_id,
+      jobs: [{ stepIndex: 0, jobId: body.job_id, modeId: firstMode.id }],
+    },
+    status: "pending",
+    updatedAt: new Date().toISOString(),
+  }
+
+  moveCreationJob(attemptId, workflowCreation)
+  addCreationEvent(body.job_id, "pending", "Workflow first step accepted.", body)
+
+  return {
+    ok: true,
+    jobId: body.job_id,
+    modeId: workflowCreation.modeId,
+    modeLabel: template.label,
+    source: source.publicSource,
+    request: liveRequest.publicRequest,
+    templateId: template.id,
+    pollMs: CREATE_POLL_MS,
   }
 }
 
@@ -1017,9 +1212,15 @@ async function createMediaJob(requestBody) {
     throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
   }
 
-  const registry = await loadCreateTemplateRegistry()
-  const modes = getCreateModeDefinitions(registry.templates)
-  const mode = modes.find((entry) => entry.id === requestBody?.modeId)
+  const submission = await prepareCreateSubmission(requestBody)
+  if (submission.template?.type === "combo" && submission.template.workflow.length > 1) {
+    return createTemplateWorkflowJob(submission, {
+      attemptId,
+      requestStartedAt,
+    })
+  }
+
+  const { mode, sourceRequest, params, template } = submission
 
   if (!mode) {
     throw new Error("Unknown creation mode.")
@@ -1029,8 +1230,8 @@ async function createMediaJob(requestBody) {
     throw new Error(mode.disabledReason || "Creation mode is disabled.")
   }
 
-  const source = await resolveCreateSource(requestBody.source)
-  const liveRequest = buildCreateApiRequest(mode, source, requestBody.params || {})
+  const source = await resolveCreateSource(sourceRequest)
+  const liveRequest = buildCreateApiRequest(mode, source, params)
   const url = `${getJobsApiBaseUrl()}/${mode.endpoint}`
   const baseRecord = {
     id: attemptId,
@@ -1038,8 +1239,10 @@ async function createMediaJob(requestBody) {
     modeId: mode.id,
     modeLabel: mode.label,
     mediaType: mode.mediaType || null,
+    templateId: template?.id || mode.templateId || null,
+    templateLabel: template?.label || null,
     source: source.publicSource,
-    params: requestBody.params || {},
+    params,
     request: liveRequest.publicRequest,
     requestBody: liveRequest.body,
     createdLocallyAt: requestStartedAt,
@@ -1125,7 +1328,9 @@ async function createMediaJob(requestBody) {
     modeId: mode.id,
     modeLabel: mode.label,
     source: source.publicSource,
-    params: requestBody.params || {},
+    params,
+    templateId: template?.id || mode.templateId || null,
+    templateLabel: template?.label || null,
     request: liveRequest.publicRequest,
     requestBody: liveRequest.body,
     response: body,
@@ -1150,9 +1355,14 @@ async function createMediaJob(requestBody) {
 }
 
 async function pollCreateJob(jobId) {
+  const existing = findCreationJob(jobId)
+  if (existing?.workflow?.steps?.length > 1) {
+    return pollCreateWorkflowJob(existing)
+  }
+
   const job = await fetchCreateJob(jobId)
   const creation = saveCreationFromJob(job, {
-    existing: findCreationJob(jobId),
+    existing,
     eventMessage: `Job ${job.status || "updated"}.`,
   })
 
@@ -1163,8 +1373,163 @@ async function pollCreateJob(jobId) {
   }
 }
 
+async function pollCreateWorkflowJob(creation) {
+  const workflow = creation.workflow
+  const job = await fetchCreateJob(workflow.activeJobId)
+  const publicJob = toPublicCreateJob(job)
+  const now = new Date().toISOString()
+  const isLastStep = workflow.currentStep >= workflow.steps.length - 1
+
+  if (job.status === "done" && job.output_url && !isLastStep) {
+    const nextStepIndex = workflow.currentStep + 1
+    const registry = await loadCreateTemplateRegistry()
+    const modes = getCreateModeDefinitions(registry.templates)
+    const nextStep = workflow.steps[nextStepIndex]
+    const nextMode = modes.find((entry) => entry.id === nextStep.modeId)
+
+    if (!nextMode || nextMode.disabled) {
+      throw new Error("Template next step is not available.")
+    }
+
+    const liveRequest = buildCreateApiRequest(
+      nextMode,
+      {
+        value: validateCreateSourceUrl(job.output_url),
+        isDataUrl: false,
+        publicSource: {
+          kind: "url",
+          url: job.output_url,
+        },
+      },
+      {
+        ...nextStep.params,
+        ...workflow.overrides,
+      },
+    )
+    const response = await fetch(`${getJobsApiBaseUrl()}/${nextMode.endpoint}`, {
+      method: "POST",
+      headers: buildApiHeaders(),
+      body: JSON.stringify(liveRequest.body),
+    })
+    const body = await response.json().catch(() => ({}))
+
+    if (!response.ok || !body?.job_id) {
+      const error =
+        body?.error ||
+        (!body?.job_id ? "Create response did not include a job_id." : `Create request failed: ${response.status} ${response.statusText}`)
+      saveCreationJob(
+        {
+          ...creation,
+          status: "error",
+          response: body,
+          error,
+          job: publicJob,
+          workflow: {
+            ...workflow,
+            jobs: [...workflow.jobs, { stepIndex: workflow.currentStep, jobId: job.id, modeId: nextStep.modeId, status: job.status }],
+          },
+          updatedAt: now,
+          finishedAt: now,
+        },
+        {
+          eventStatus: "error",
+          eventMessage: error,
+          eventData: body,
+        },
+      )
+      const wrapped = new Error(error)
+      wrapped.statusCode = response.status
+      throw wrapped
+    }
+
+    const nextWorkflow = {
+      ...workflow,
+      currentStep: nextStepIndex,
+      activeJobId: body.job_id,
+      jobs: [
+        ...workflow.jobs.filter((entry) => entry.jobId !== job.id),
+        { stepIndex: workflow.currentStep, jobId: job.id, modeId: workflow.steps[workflow.currentStep]?.modeId, status: job.status },
+        { stepIndex: nextStepIndex, jobId: body.job_id, modeId: nextMode.id },
+      ],
+    }
+
+    const nextCreation = saveCreationJob(
+      {
+        ...creation,
+        jobId: body.job_id,
+        status: "pending",
+        request: liveRequest.publicRequest,
+        requestBody: liveRequest.body,
+        response: body,
+        job: publicJob,
+        outputUrl: null,
+        workflow: nextWorkflow,
+        updatedAt: now,
+        finishedAt: null,
+      },
+      {
+        eventStatus: "pending",
+        eventMessage: `Workflow step ${nextStepIndex + 1} accepted.`,
+        eventData: body,
+      },
+    )
+
+    return {
+      job: {
+        ...publicJob,
+        id: nextCreation.id,
+        status: "pending",
+        outputUrl: null,
+      },
+      createState: toPublicCreation(nextCreation),
+      pollMs: CREATE_POLL_MS,
+    }
+  }
+
+  const status = publicJob.status || creation.status || "pending"
+  const nextCreation = saveCreationJob(
+    {
+      ...creation,
+      jobId: workflow.activeJobId,
+      status,
+      job: publicJob,
+      inputUrl: publicJob.inputUrl,
+      outputUrl: publicJob.outputUrl,
+      externalTaskId: publicJob.externalTaskId,
+      error: publicJob.error,
+      createdAt: publicJob.createdAt || creation.createdAt,
+      createdAtIso: publicJob.createdAtIso || creation.createdAtIso,
+      updatedAt: now,
+      finishedAt: isTerminalCreationStatus(status) ? creation.finishedAt || now : null,
+      workflow: {
+        ...workflow,
+        jobs: [
+          ...workflow.jobs.filter((entry) => entry.jobId !== job.id),
+          { stepIndex: workflow.currentStep, jobId: job.id, modeId: workflow.steps[workflow.currentStep]?.modeId, status },
+        ],
+      },
+    },
+    {
+      eventStatus: status,
+      eventMessage: `Workflow job ${status}.`,
+      eventData: publicJob,
+    },
+  )
+
+  return {
+    job: {
+      ...publicJob,
+      id: nextCreation.id,
+    },
+    createState: toPublicCreation(nextCreation),
+    pollMs: CREATE_POLL_MS,
+  }
+}
+
 async function downloadCreateJob(jobId) {
-  const job = await fetchCreateJob(jobId)
+  const createState = findCreationJob(jobId)
+  const activeJobId = createState?.workflow?.activeJobId || jobId
+  const job = await fetchCreateJob(activeJobId)
 
   if (job.status !== "done" || !job.output_url) {
     throw new Error("Creation job is not ready to download.")
@@ -1172,17 +1537,19 @@ async function downloadCreateJob(jobId) {
 
   const catalog = await loadCatalog()
   const existing = catalog.items.find((item) => item.id === job.id)
-  const createState = findCreationJob(job.id)
+  const creationState = createState || findCreationJob(job.id)
   const downloaded = await downloadJob(job)
   const nextItem = toCatalogItem(job, {
     ...existing,
     ...downloaded,
     downloadError: null,
-    createModeId: createState?.modeId || existing?.createModeId || null,
-    sourceKind: createState?.source?.kind || existing?.sourceKind || null,
-    sourceItemId: createState?.source?.itemId || existing?.sourceItemId || null,
-    sourceUrl: createState?.source?.url || existing?.sourceUrl || null,
-    createdLocallyAt: createState?.createdLocallyAt || existing?.createdLocallyAt || null,
+    createModeId: creationState?.modeId || existing?.createModeId || null,
+    templateId: creationState?.templateId || existing?.templateId || null,
+    templateLabel: creationState?.templateLabel || existing?.templateLabel || null,
+    sourceKind: creationState?.source?.kind || existing?.sourceKind || null,
+    sourceItemId: creationState?.source?.itemId || existing?.sourceItemId || null,
+    sourceUrl: creationState?.source?.url || existing?.sourceUrl || null,
+    createdLocallyAt: creationState?.createdLocallyAt || existing?.createdLocallyAt || null,
   })
   const itemById = new Map(catalog.items.map((item) => [item.id, item]))
   itemById.set(job.id, nextItem)
@@ -1195,7 +1562,7 @@ async function downloadCreateJob(jobId) {
   catalog.updatedAt = new Date().toISOString()
   await saveCatalog(catalog)
   saveCreationFromJob(job, {
-    existing: createState,
+    existing: creationState,
     downloadedItemId: nextItem.id,
     eventMessage: "Downloaded to library.",
   })
@@ -1256,6 +1623,8 @@ async function duplicateCreation(id) {
     modeId: creation.modeId,
     modeLabel: creation.modeLabel,
     mediaType: creation.mediaType,
+    templateId: creation.templateId,
+    templateLabel: creation.templateLabel,
     source: getReusableCreationSource(creation.source),
     params: creation.params || {},
     createdLocallyAt: now,
@@ -1272,6 +1641,7 @@ async function duplicateCreation(id) {
     draft: toPublicCreation(draft),
     form: {
       modeId: draft.modeId,
+      templateId: draft.templateId,
       source: draft.source,
       params: draft.params,
     },
@@ -1383,7 +1753,7 @@ function buildCreateApiRequest(mode, source, params = {}) {
     body.resolution = quality.resolution
     body.duration = quality.duration
 
-    const negativePrompt = mode.fixed?.negativePrompt ?? mode.fixed?.negative_prompt
+    const negativePrompt = mode.fixed?.negativePrompt ?? mode.fixed?.negative_prompt ?? params.negativePrompt
     if (negativePrompt) {
       assertCreateTextAllowed(negativePrompt, "Negative prompt")
       body.negative_prompt = negativePrompt
@@ -1618,9 +1988,12 @@ function saveCreationFromJob(job, options = {}) {
     modeId: existing?.modeId || inferCreateModeId(job),
     modeLabel: existing?.modeLabel || inferCreateModeLabel(job),
     mediaType: existing?.mediaType || (job.type === "video" ? "video" : "image"),
+    templateId: existing?.templateId || null,
+    templateLabel: existing?.templateLabel || null,
     source: existing?.source || sourceFromCreateJob(job),
     params: existing?.params || paramsFromCreateJob(job),
     response: existing?.response || null,
+    workflow: existing?.workflow || null,
     job: publicJob,
     error: job.error || null,
     inputUrl: job.input_url || null,
@@ -1714,6 +2087,15 @@ async function loadCreateTemplateRegistry() {
   return normalizeCreateTemplateRegistry(readCatalogMeta("createTemplateRegistry") || {})
 }
 
+async function getCreateTemplateRegistryResponse() {
+  const registry = await loadCreateTemplateRegistry()
+
+  return {
+    ...registry,
+    templates: registry.templates.map((template) => Object.assign({}, template, { previews: getCreateTemplatePreviews(template.id) })),
+  }
+}
+
 async function saveCreateTemplateRegistry(registry) {
   await mkdir(MEDIA_DIR, { recursive: true })
   const body = {
@@ -1732,27 +2114,225 @@ function normalizeCreateTemplateRegistry(registry = {}) {
 }
 
 function normalizeCreateTemplate(template) {
-  if (!template?.id || !template?.label || !template?.prompt) {
+  if (!template?.label && !template?.id) {
     return null
   }
 
-  assertCreateTextAllowed(template.prompt, "Template prompt")
-  assertCreateTextAllowed(template.negativePrompt || template.negative_prompt, "Template negative prompt")
+  const legacyParams = {}
+  if (template.prompt) legacyParams.prompt = String(template.prompt)
+  if (template.negativePrompt || template.negative_prompt)
+    legacyParams.negativePrompt = String(template.negativePrompt || template.negative_prompt)
+  if (template.resolution || template.duration) legacyParams.quality = `${template.resolution || "720p"}-${Number(template.duration || 4)}`
+
+  const settings = normalizeTemplateSettings({
+    modeId:
+      template.settings?.modeId ||
+      template.modeId ||
+      (template.mediaType === "image" || template.endpoint === "edit" ? "custom-image" : "custom-video"),
+    source: template.settings?.source || template.source || null,
+    params: {
+      ...legacyParams,
+      ...template.settings?.params,
+      ...template.params,
+    },
+  })
+  const rawWorkflow = Array.isArray(template.workflow) && template.workflow.length ? template.workflow : [settings]
+  const workflow = rawWorkflow.map(normalizeTemplateStep).filter(Boolean)
+  const type = normalizeTemplateType(
+    template.type || template.templateType || (workflow.length > 1 ? "combo" : inferTemplateTypeFromSettings(settings)),
+  )
+
+  for (const step of workflow) {
+    assertCreateTextAllowed(step.params?.prompt, "Template prompt")
+    assertCreateTextAllowed(step.params?.negativePrompt, "Template negative prompt")
+  }
+
+  const quality = getQualityFromTemplateParams(settings.params)
 
   return {
-    id: sanitizePathPart(template.id).toLowerCase(),
-    label: String(template.label).trim(),
-    endpoint: template.endpoint || "video",
-    mediaType: template.mediaType || "video",
-    prompt: String(template.prompt),
-    negativePrompt: template.negativePrompt || template.negative_prompt || "",
-    resolution: template.resolution || "720p",
-    duration: Number(template.duration || 4),
+    id: sanitizePathPart(template.id || template.label).toLowerCase(),
+    label: String(template.label || template.id).trim(),
+    description: template.description ? String(template.description).trim() : "",
+    type,
+    settings,
+    workflow: type === "combo" && workflow.length === 1 ? buildDefaultComboWorkflow(settings) : workflow,
+    prompt: settings.params.prompt || "",
+    negativePrompt: settings.params.negativePrompt || "",
+    resolution: quality.resolution,
+    duration: quality.duration,
     sourcePolicy: template.sourcePolicy || "image",
     seedJobId: template.seedJobId || null,
+    sourceCreationId: template.sourceCreationId || template.source_creation_id || null,
     createdAt: template.createdAt || new Date().toISOString(),
     updatedAt: template.updatedAt || new Date().toISOString(),
   }
+}
+
+function normalizeTemplateSettings(settings = {}) {
+  return {
+    modeId: settings.modeId || "custom-video",
+    source: getReusableCreationSource(settings.source) || null,
+    params: normalizeTemplateParams(settings.params || {}),
+  }
+}
+
+function normalizeTemplateStep(step = {}) {
+  if (!step.modeId) {
+    return null
+  }
+
+  return {
+    modeId: String(step.modeId),
+    params: normalizeTemplateParams(step.params || {}),
+  }
+}
+
+function normalizeTemplateParams(params = {}) {
+  const next = {}
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null) {
+      continue
+    }
+
+    next[key] = String(value)
+  }
+
+  return next
+}
+
+function normalizeTemplateType(value) {
+  if (value === "image" || value === "video" || value === "combo") {
+    return value
+  }
+
+  return "video"
+}
+
+function inferTemplateTypeFromSettings(settings) {
+  return settings.modeId === "custom-image" ? "image" : "video"
+}
+
+function getPrimaryTemplateSettings(template) {
+  return (
+    template.settings ||
+    template.workflow?.[0] || {
+      modeId: template.type === "image" ? "custom-image" : "custom-video",
+      source: null,
+      params: {},
+    }
+  )
+}
+
+function buildDefaultComboWorkflow(settings) {
+  return [
+    {
+      modeId: "custom-image",
+      params: {
+        prompt: settings.params?.prompt || "",
+      },
+    },
+    {
+      modeId: "custom-video",
+      params: {
+        prompt: settings.params?.prompt || "",
+        quality: settings.params?.quality || "720p-4",
+      },
+    },
+  ]
+}
+
+function getQualityFromTemplateParams(params = {}) {
+  const [resolution, duration] = String(params.quality || "720p-4").split("-")
+
+  return {
+    resolution: resolution || "720p",
+    duration: Number(duration || 4),
+  }
+}
+
+async function saveCreateTemplateFromRequest(body = {}) {
+  const registry = await loadCreateTemplateRegistry()
+  const now = new Date().toISOString()
+  const id = sanitizePathPart(body.id || body.label || `template-${randomUUID()}`).toLowerCase()
+  const existing = registry.templates.find((entry) => entry.id === id)
+  const template = normalizeCreateTemplate({
+    ...existing,
+    ...body,
+    id,
+    createdAt: existing?.createdAt || body.createdAt || now,
+    updatedAt: now,
+  })
+
+  if (!template) {
+    throw new Error("Template label is required.")
+  }
+
+  const nextTemplates = registry.templates.filter((entry) => entry.id !== template.id)
+  nextTemplates.push(template)
+  await saveCreateTemplateRegistry({
+    templates: nextTemplates,
+  })
+
+  return {
+    ...template,
+    previews: getCreateTemplatePreviews(template.id),
+  }
+}
+
+async function saveCreateTemplateFromCreation(id, body = {}) {
+  const creation = findCreationJob(id)
+
+  if (!creation) {
+    const error = new Error("Creation was not found.")
+    error.statusCode = 404
+    throw error
+  }
+
+  return saveCreateTemplateFromRequest({
+    id: body.id,
+    label: body.label || `${creation.modeLabel || "Creation"} ${String(creation.jobId || creation.id).slice(0, 8)}`,
+    description: body.description || "",
+    type: creation.mediaType === "image" ? "image" : "video",
+    settings: {
+      modeId: creation.modeId,
+      source: getReusableCreationSource(creation.source),
+      params: creation.params || {},
+    },
+    sourceCreationId: creation.id,
+  })
+}
+
+async function deleteCreateTemplate(id) {
+  const templateId = sanitizePathPart(id).toLowerCase()
+  const registry = await loadCreateTemplateRegistry()
+  const nextTemplates = registry.templates.filter((entry) => entry.id !== templateId)
+
+  if (nextTemplates.length === registry.templates.length) {
+    const error = new Error("Template was not found.")
+    error.statusCode = 404
+    throw error
+  }
+
+  await saveCreateTemplateRegistry({
+    templates: nextTemplates,
+  })
+
+  return {
+    ok: true,
+    id: templateId,
+  }
+}
+
+function getCreateTemplatePreviews(templateId, limit = 6) {
+  const rows = getCatalogDb()
+    .prepare("SELECT item_json FROM media_items ORDER BY created_at DESC, id ASC")
+    .all()
+    .map((row) => parseJson(row.item_json, null))
+    .filter((item) => item?.templateId === templateId)
+    .slice(0, limit)
+
+  return rows.map(toPublicCatalogItem)
 }
 
 async function importCreateTemplateFromHistory(body) {
@@ -1775,10 +2355,15 @@ async function importCreateTemplateFromHistory(body) {
   const template = normalizeCreateTemplate({
     id: body.id || templateIdFromLabel(body.label) || templateIdFromJob(job),
     label: body.label || templateLabelFromJob(job),
-    prompt: job.prompt,
-    negativePrompt: job.negative_prompt || job.negativePrompt || "",
-    resolution: job.resolution || "720p",
-    duration: Number(job.duration || 4),
+    type: "video",
+    settings: {
+      modeId: "custom-video",
+      params: {
+        prompt: job.prompt,
+        negativePrompt: job.negative_prompt || job.negativePrompt || "",
+        quality: `${job.resolution || "720p"}-${Number(job.duration || 4)}`,
+      },
+    },
     seedJobId: job.id,
     createdAt: now,
     updatedAt: now,
@@ -2406,10 +2991,13 @@ function ensureCatalogSchema(db) {
       mode_id TEXT,
       mode_label TEXT,
       media_type TEXT,
+      template_id TEXT,
+      template_label TEXT,
       source_json TEXT,
       params_json TEXT,
       request_json TEXT,
       request_body_json TEXT,
+      workflow_json TEXT,
       response_json TEXT,
       job_json TEXT,
       error TEXT,
@@ -2439,6 +3027,18 @@ function ensureCatalogSchema(db) {
 
     CREATE INDEX IF NOT EXISTS creation_events_creation_id_idx ON creation_events(creation_id, id ASC);
   `)
+  ensureCatalogColumn(db, "creation_jobs", "template_id", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "template_label", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "workflow_json", "TEXT")
+}
+
+function ensureCatalogColumn(db, table, column, type) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all()
+  if (columns.some((entry) => entry.name === column)) {
+    return
+  }
+
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`)
 }
 
 function readCatalogFromDb() {
@@ -2538,10 +3138,13 @@ function saveCreationJob(creation, event = {}) {
       mode_id,
       mode_label,
       media_type,
+      template_id,
+      template_label,
       source_json,
       params_json,
       request_json,
       request_body_json,
+      workflow_json,
       response_json,
       job_json,
       error,
@@ -2556,17 +3159,20 @@ function saveCreationJob(creation, event = {}) {
       finished_at,
       downloaded_item_id
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       job_id = excluded.job_id,
       status = excluded.status,
       mode_id = excluded.mode_id,
       mode_label = excluded.mode_label,
       media_type = excluded.media_type,
+      template_id = excluded.template_id,
+      template_label = excluded.template_label,
       source_json = excluded.source_json,
       params_json = excluded.params_json,
       request_json = excluded.request_json,
       request_body_json = excluded.request_body_json,
+      workflow_json = excluded.workflow_json,
       response_json = excluded.response_json,
       job_json = excluded.job_json,
       error = excluded.error,
@@ -2587,10 +3193,13 @@ function saveCreationJob(creation, event = {}) {
     next.modeId,
     next.modeLabel,
     next.mediaType,
+    next.templateId,
+    next.templateLabel,
     stringifyNullable(next.source),
     stringifyNullable(next.params),
     stringifyNullable(next.request),
     stringifyNullable(next.requestBody ? redactCreateRequestBody(next.requestBody) : null),
+    stringifyNullable(next.workflow),
     stringifyNullable(next.response),
     stringifyNullable(next.job),
     next.error,
@@ -2686,10 +3295,13 @@ function normalizeCreationJob(creation = {}) {
     modeId: creation.modeId || creation.mode_id || null,
     modeLabel: creation.modeLabel || creation.mode_label || null,
     mediaType: creation.mediaType || creation.media_type || null,
+    templateId: creation.templateId || creation.template_id || null,
+    templateLabel: creation.templateLabel || creation.template_label || null,
     source: creation.source || null,
     params: creation.params || {},
     request: creation.request || null,
     requestBody: creation.requestBody || null,
+    workflow: creation.workflow || null,
     response: creation.response || null,
     job: creation.job || null,
     error: creation.error || null,
@@ -2714,10 +3326,13 @@ function creationJobFromRow(row) {
     modeId: row.mode_id,
     modeLabel: row.mode_label,
     mediaType: row.media_type,
+    templateId: row.template_id,
+    templateLabel: row.template_label,
     source: parseJson(row.source_json, null),
     params: parseJson(row.params_json, {}),
     request: parseJson(row.request_json, null),
     requestBody: parseJson(row.request_body_json, null),
+    workflow: parseJson(row.workflow_json, null),
     response: parseJson(row.response_json, null),
     job: parseJson(row.job_json, null),
     error: row.error,
@@ -2742,6 +3357,8 @@ function toPublicCreation(creation, { details = false } = {}) {
     modeId: creation.modeId,
     modeLabel: creation.modeLabel,
     mediaType: creation.mediaType,
+    templateId: creation.templateId,
+    templateLabel: creation.templateLabel,
     source: creation.source,
     params: creation.params || {},
     error: creation.error,
@@ -2762,6 +3379,7 @@ function toPublicCreation(creation, { details = false } = {}) {
     publicCreation.request = creation.request
     publicCreation.response = creation.response
     publicCreation.job = creation.job
+    publicCreation.workflow = creation.workflow
   }
 
   return publicCreation
@@ -3282,11 +3900,13 @@ export {
   buildCreateApiRequest,
   createCatalogBackup,
   createMediaJob,
+  deleteCreateTemplate,
   downloadCreateJob,
   findJobForTemplate,
   duplicateCreation,
   getCatalogDownloadQueue,
   getCreateModes,
+  getCreateTemplateRegistryResponse,
   getCreationDetails,
   getCreations,
   getThumbnailGenerationQueue,
@@ -3300,6 +3920,8 @@ export {
   normalizeJob,
   resolveCreateSource,
   saveCreateTemplateRegistry,
+  saveCreateTemplateFromCreation,
+  saveCreateTemplateFromRequest,
   applyDuplicateMetadata,
   reconcileCatalogWithLocalFiles,
   requestSyncCancellation,

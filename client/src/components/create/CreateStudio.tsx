@@ -36,12 +36,12 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
         <div>
           <Badge variant="muted">
             <WandSparkles className="size-3" />
-            Creation studio
+            Create
           </Badge>
-          <h2>Create media</h2>
+          <h2 id="createTitle">Create</h2>
           <p id="createStatus">{props.createStatus}</p>
         </div>
-        <Button id="libraryViewButton" variant="glass" onClick={props.onClose}>
+        <Button id="hideCreateButton" variant="outline" onClick={props.onClose}>
           Hide creator
         </Button>
       </div>
@@ -101,7 +101,7 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
               {props.createSubmitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
               Create
             </Button>
-            <Button id="createResetButton" variant="glass" onClick={props.onReset}>
+            <Button id="createResetButton" variant="outline" onClick={props.onReset}>
               Reset
             </Button>
           </div>
@@ -129,6 +129,7 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
           onDetails={props.onCreationDetails}
           onCloseDetails={props.onCloseCreationDetails}
           onDuplicate={props.onDuplicateCreation}
+          onSaveTemplate={props.onSaveCreationTemplate}
         />
       </div>
     </section>

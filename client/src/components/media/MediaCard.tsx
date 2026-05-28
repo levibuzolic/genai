@@ -31,7 +31,7 @@ export function MediaCard({
     >
       <a className="previewLink preview" href={mediaUrl || "#"} target="_blank" rel="noreferrer">
         {isVideo && mediaUrl ? (
-          <video src={mediaUrl} poster={item.posterUrl} muted playsInline preload="metadata" controls />
+          <video src={mediaUrl} poster={item.posterUrl} muted playsInline preload="metadata" controls aria-label={item.prompt || item.id} />
         ) : isImage && mediaUrl ? (
           <img src={mediaUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
         ) : (
@@ -51,23 +51,27 @@ export function MediaCard({
             item.size ? formatBytes(item.size) : "",
             item.createModeId ? "created here" : "",
             item.localFile && !item.sha256 ? "unverified" : "",
-          ].filter(Boolean).join(" · ")}
+          ]
+            .filter(Boolean)
+            .join(" · ")}
         </div>
         <p className="prompt">{item.prompt || "No prompt text"}</p>
         <div className="cardFooter">
           <div className="cardActions">
             {isImage && (
-              <Button className="cardCreateButton" size="sm" variant="glass" onClick={onCreate}>
+              <Button className="cardCreateButton" size="sm" variant="outline" onClick={onCreate}>
                 <Sparkles />
                 Create
               </Button>
             )}
-            <Button className="detailsButton" size="sm" variant="glass" onClick={onDetails}>Details</Button>
-            <Button className="copyPromptButton" size="sm" variant="glass" disabled={!item.prompt} onClick={onCopyPrompt}>
+            <Button className="detailsButton" size="sm" variant="outline" onClick={onDetails}>
+              Details
+            </Button>
+            <Button className="copyPromptButton" size="sm" variant="outline" disabled={!item.prompt} onClick={onCopyPrompt}>
               <Copy />
               Prompt
             </Button>
-            <Button className="openLink" size="sm" variant="glass" asChild>
+            <Button className="openLink" size="sm" variant="outline" asChild>
               <a href={mediaUrl || "#"} target="_blank" rel="noreferrer">
                 <ExternalLink />
                 Open

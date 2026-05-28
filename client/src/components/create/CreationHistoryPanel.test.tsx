@@ -50,6 +50,7 @@ describe("CreationHistoryPanel", () => {
         onDetails={vi.fn<(creation: Creation) => Promise<void>>()}
         onCloseDetails={vi.fn<() => void>()}
         onDuplicate={vi.fn<(creation: Creation) => Promise<void>>()}
+        onSaveTemplate={vi.fn<(creation: Creation) => Promise<void>>()}
       />,
     )
 
@@ -70,6 +71,7 @@ describe("CreationHistoryPanel", () => {
       onDetails: vi.fn<(creation: Creation) => Promise<void>>(),
       onCloseDetails: vi.fn<() => void>(),
       onDuplicate,
+      onSaveTemplate: vi.fn<(creation: Creation) => Promise<void>>(),
     }
     const { rerender } = render(<CreationHistoryPanel {...props} selectedCreation={null} />)
 

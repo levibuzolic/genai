@@ -53,12 +53,17 @@ export function CreateResultPanel({
           <Download />
           Download to library
         </Button>
-        <Button id="createAnimateButton" variant="glass" disabled={!result?.outputUrl || !isImageUrl(result.outputUrl)} onClick={onAnimate}>
+        <Button
+          id="createAnimateButton"
+          variant="outline"
+          disabled={!result?.outputUrl || !isImageUrl(result.outputUrl)}
+          onClick={onAnimate}
+        >
           <Clapperboard />
           Animate this
         </Button>
         {result?.outputUrl && (
-          <Button id="createOpenLink" variant="glass" asChild>
+          <Button id="createOpenLink" variant="outline" asChild>
             <a href={result.outputUrl} target="_blank" rel="noreferrer">
               <ExternalLink />
               Open result

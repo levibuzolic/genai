@@ -30,8 +30,15 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     await page.waitForSelector(".card", { timeout: 10000 })
 
     assert.equal(await page.locator(".card").count(), 48)
-    assert.deepEqual(await visibleTopActions(page), ["Create", "Sync & download", "Blur", "More"])
+    assert.equal(await page.locator("#emptyState").count(), 0)
+    assert.deepEqual(await visibleTopActions(page), ["Sync & download", "Blur", "More"])
     assert.deepEqual(await page.locator(".summaryCard span").allTextContents(), ["Missing", "Unverified", "Favorited", "Orphans"])
+
+    await page.locator("#templateViewButton").click()
+    await page.waitForSelector(".templateBrowser", { timeout: 5000 })
+    assert.equal(await page.getByRole("heading", { name: "Templates", exact: true }).isVisible(), true)
+    await page.getByRole("button", { name: "Library" }).click()
+    await page.waitForSelector(".card", { timeout: 10000 })
 
     await page.locator("#mediaBlurButton").click()
     assert.notEqual(
@@ -99,7 +106,25 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.equal(videoStayedMounted, true)
 
     await page.locator("#createViewButton").click()
-    await page.waitForSelector("#createArea:not([hidden])", { timeout: 5000 })
+    await page.waitForSelector(".createOverlay #createArea:not([hidden])", { timeout: 5000 })
+    const createOverlay = await page.evaluate(() => {
+      const overlay = document.querySelector(".createOverlay")
+      const backdrop = document.querySelector(".createOverlayBackdrop")
+      const panel = document.querySelector("#createArea")
+      const panelRect = panel?.getBoundingClientRect()
+      return {
+        overlayPosition: overlay ? getComputedStyle(overlay).position : "",
+        backdropFilter: backdrop ? getComputedStyle(backdrop).backdropFilter || getComputedStyle(backdrop).webkitBackdropFilter : "",
+        panelWidth: panelRect?.width || 0,
+        panelHeight: panelRect?.height || 0,
+        viewportWidth: innerWidth,
+        viewportHeight: innerHeight,
+      }
+    })
+    assert.equal(createOverlay.overlayPosition, "fixed")
+    assert.match(createOverlay.backdropFilter, /blur/)
+    assert.ok(createOverlay.panelWidth > createOverlay.viewportWidth * 0.9)
+    assert.ok(createOverlay.panelHeight > createOverlay.viewportHeight * 0.9)
     assert.equal(await page.locator("#libraryArea").isHidden(), false)
     assert.equal(await page.locator("#createModeSelect").isVisible(), true)
     await page.waitForFunction(() => document.querySelector("#createCatalogSelect")?.options.length > 0)
@@ -132,7 +157,8 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
       )
     })
     await page.waitForFunction(() => document.querySelector("#createUploadMeta")?.textContent.includes("Pasted paste.png"))
-    await page.locator("#libraryViewButton").click()
+    await page.locator("#hideCreateButton").click()
+    await page.waitForSelector(".createOverlay", { state: "detached", timeout: 5000 })
     await page.waitForSelector("#libraryArea:not([hidden])", { timeout: 5000 })
 
     await page.selectOption("#statusSelect", "missing")

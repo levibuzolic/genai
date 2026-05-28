@@ -13,11 +13,16 @@ export function MediaPreview({
   label?: string | undefined
   fallback: string
 }) {
-  if (!url) return <div id={id} className={className}>{fallback}</div>
+  if (!url)
+    return (
+      <div id={id} className={className}>
+        {fallback}
+      </div>
+    )
   if (isVideoUrl(url)) {
     return (
       <div id={id} className={className}>
-        <video src={url} controls muted playsInline preload="metadata" />
+        <video src={url} controls muted playsInline preload="metadata" aria-label={label || "Media preview"} />
       </div>
     )
   }

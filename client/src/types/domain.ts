@@ -61,6 +61,8 @@ export type CatalogItem = {
   contentType?: string
   externalTaskId?: string
   createModeId?: string
+  templateId?: string | null
+  templateLabel?: string | null
   sourceKind?: string
   sourceItemId?: string
   sourceUrl?: string
@@ -116,6 +118,7 @@ export type CreateField = {
 export type CreateMode = {
   id: string
   label: string
+  kind?: string
   description?: string
   mediaType?: "image" | "video"
   endpoint?: string
@@ -123,6 +126,43 @@ export type CreateMode = {
   disabledReason?: string
   fields?: CreateField[]
   acceptedKinds?: string[]
+}
+
+export type CreateTemplateType = "image" | "video" | "combo"
+
+export type CreateTemplateSettings = {
+  modeId: string
+  source?: CreationSource | null
+  params: Record<string, string>
+}
+
+export type CreateTemplateStep = {
+  modeId: string
+  params: Record<string, string>
+}
+
+export type CreateTemplate = {
+  id: string
+  label: string
+  description?: string
+  type: CreateTemplateType
+  settings: CreateTemplateSettings
+  workflow: CreateTemplateStep[]
+  prompt?: string
+  negativePrompt?: string
+  resolution?: string
+  duration?: number
+  sourcePolicy?: string
+  seedJobId?: string | null
+  sourceCreationId?: string | null
+  createdAt?: string
+  updatedAt?: string
+  previews?: CatalogItem[]
+}
+
+export type CreateTemplatesResponse = {
+  templates: CreateTemplate[]
+  updatedAt?: string | null
 }
 
 export type CreateJob = {
@@ -149,6 +189,8 @@ export type Creation = {
   modeId?: string | null
   modeLabel?: string | null
   mediaType?: "image" | "video" | string | null
+  templateId?: string | null
+  templateLabel?: string | null
   source?: CreationSource | null
   params?: Record<string, string>
   error?: string | null

@@ -22,10 +22,7 @@ export function AutoSyncStatus({ autoSync, className }: AutoSyncStatusProps) {
 
   return (
     <section
-      className={cn(
-        "w-72 rounded-md border border-white/10 bg-black/35 p-3 text-sm text-foreground shadow-2xl shadow-black/30 backdrop-blur-xl",
-        className,
-      )}
+      className={cn("w-72 rounded-md border bg-popover p-3 text-sm text-popover-foreground shadow-md", className)}
       aria-label="Auto sync status"
     >
       <div className="flex items-center justify-between gap-3">
@@ -39,7 +36,7 @@ export function AutoSyncStatus({ autoSync, className }: AutoSyncStatusProps) {
         <Badge variant={badgeVariant}>{enabled ? "Enabled" : "Disabled"}</Badge>
       </div>
 
-      <Separator className="my-3 bg-white/10" />
+      <Separator className="my-3" />
 
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-xs">
         <StatusLabel>Next</StatusLabel>

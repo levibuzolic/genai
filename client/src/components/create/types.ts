@@ -1,6 +1,17 @@
 import type * as React from "react"
 
-import type { CatalogItem, CreateField, CreateJob, CreateMode, Creation, CreationEvent, SourceKind, UploadSource } from "@/types/domain"
+import type {
+  CatalogItem,
+  CreateField,
+  CreateJob,
+  CreateMode,
+  CreateTemplate,
+  CreateTemplateType,
+  Creation,
+  CreationEvent,
+  SourceKind,
+  UploadSource,
+} from "@/types/domain"
 
 export type CreateStudioProps = {
   sourceKind: SourceKind
@@ -37,6 +48,16 @@ export type CreateStudioProps = {
   onClose: () => void
   onDownload: () => Promise<void>
   onAnimate: () => void
+  templates: CreateTemplate[]
+  templateSearch: string
+  setTemplateSearch: (value: string) => void
+  selectedTemplateId: string
+  onApplyTemplate: (template: CreateTemplate) => void
+  onClearTemplate: () => void
+  templateType: CreateTemplateType
+  setTemplateType: (value: CreateTemplateType) => void
+  onSaveCurrentTemplate: (label: string, type: CreateTemplateType) => Promise<void>
+  onOpenTemplates: () => void
   templateJobId: string
   setTemplateJobId: (value: string) => void
   templateLabel: string
@@ -52,4 +73,5 @@ export type CreateStudioProps = {
   onCreationDetails: (creation: Creation) => Promise<void>
   onCloseCreationDetails: () => void
   onDuplicateCreation: (creation: Creation) => Promise<void>
+  onSaveCreationTemplate: (creation: Creation) => Promise<void>
 }

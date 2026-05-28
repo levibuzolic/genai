@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import http from "node:http"
 import os from "node:os"
 import path from "node:path"
@@ -624,6 +624,149 @@ test("template import reads prompt fields from mocked API history", async () => 
     assert.equal(mode.disabled, undefined)
     assert.equal(mode.fixed.prompt, "template prompt from history")
     assert.equal(mode.seedJobId, seedJobId)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("creation templates save all reusable settings and apply submission overrides without mutation", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-save-"))
+  const sourceId = "20202020-2020-4202-8202-202020202020"
+  const jobId = "21212121-2121-4212-8212-212121212121"
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: sourceId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/source.png",
+        createdAt: 1779893300,
+      },
+    ],
+    downloadedJobIds: [],
+    lastSeenJobId: sourceId,
+  })
+
+  let submitBody = null
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/video" && options.method === "POST") {
+      submitBody = JSON.parse(options.body)
+      return jsonResponse({ job_id: jobId })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const template = await server.saveCreateTemplateFromRequest({
+      label: "Reusable video",
+      type: "video",
+      settings: {
+        modeId: "custom-video",
+        source: {
+          kind: "catalog",
+          itemId: sourceId,
+        },
+        params: {
+          prompt: "template prompt",
+          quality: "720p-4",
+        },
+      },
+    })
+
+    await server.createMediaJob({
+      templateId: template.id,
+      params: {
+        prompt: "override prompt",
+      },
+    })
+    const registry = await server.loadCreateTemplateRegistry()
+    const details = await server.getCreationDetails(jobId)
+
+    assert.equal(template.settings.source.itemId, sourceId)
+    assert.equal(submitBody.input_url, "https://assets.example/source.png")
+    assert.equal(submitBody.prompt, "override prompt")
+    assert.equal(registry.templates[0].settings.params.prompt, "template prompt")
+    assert.equal(details.creation.templateId, template.id)
+    assert.equal(details.creation.params.prompt, "override prompt")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("downloaded media keeps the template association for preview lookup", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-preview-"))
+  const jobId = "22222222-2222-4222-8222-222222222222"
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/video" && options.method === "POST") {
+      return jsonResponse({ job_id: jobId })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${jobId}`) {
+      return jsonResponse({
+        id: jobId,
+        type: "video",
+        prompt: "template associated",
+        status: "done",
+        resolution: "720p",
+        duration: 4,
+        output_url: "https://assets.example/template-associated.mp4",
+        created_at: 1779893400,
+      })
+    }
+
+    if (href === "https://assets.example/template-associated.mp4") {
+      return new Response(new Uint8Array([2, 2, 2, 2]), {
+        status: 200,
+        headers: {
+          "content-type": "video/mp4",
+        },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const template = await server.saveCreateTemplateFromRequest({
+      label: "Preview template",
+      type: "video",
+      settings: {
+        modeId: "custom-video",
+        source: {
+          kind: "url",
+          url: "https://assets.example/source.png",
+        },
+        params: {
+          prompt: "template associated",
+          quality: "720p-4",
+        },
+      },
+    })
+
+    await server.createMediaJob({ templateId: template.id })
+    await server.downloadCreateJob(jobId)
+    const catalog = await readCatalog(mediaDir)
+    const registry = await server.getCreateTemplateRegistryResponse()
+    const item = catalog.items.find((entry) => entry.id === jobId)
+    const previewTemplate = registry.templates.find((entry) => entry.id === template.id)
+
+    assert.equal(item.templateId, template.id)
+    assert.equal(item.templateLabel, template.label)
+    assert.equal(previewTemplate.previews.length, 1)
+    assert.equal(previewTemplate.previews[0].id, jobId)
   } finally {
     globalThis.fetch = originalFetch
   }

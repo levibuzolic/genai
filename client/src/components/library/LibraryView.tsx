@@ -5,10 +5,7 @@ import { MediaCard } from "@/components/media/MediaCard"
 import { cn } from "@/lib/utils"
 
 import { ActiveFilters } from "./ActiveFilters"
-import { CreateDock } from "./CreateDock"
 import { InspectorPanel } from "./InspectorPanel"
-import { LibraryHero } from "./LibraryHero"
-import { LibraryStatusLine } from "./LibraryStatusLine"
 import { LibraryToolbar } from "./LibraryToolbar"
 import { PagerControls } from "./PagerControls"
 import { SummaryStrip } from "./SummaryStrip"
@@ -35,7 +32,6 @@ export function LibraryView({
   view,
   setView,
   clearFilters,
-  syncStatus,
   backups,
   selectedBackup,
   setSelectedBackup,
@@ -46,14 +42,11 @@ export function LibraryView({
   onCopyPrompt,
 }: LibraryViewProps) {
   const facets = itemsData?.facets || {}
-  const total = itemsData?.total || 0
-  const downloaded = facets.status?.downloaded || 0
-  const progressValue = total ? Math.round((downloaded / total) * 100) : 0
+  const showEmptyState = !itemsLoading && Boolean(itemsData) && (itemsData?.items.length || 0) === 0
 
   return (
     <section id="libraryArea" className="library-grid">
       <div className="library-main">
-        <LibraryHero total={total} progressValue={progressValue} />
         <LibraryToolbar
           searchDraft={searchDraft}
           setSearchDraft={setSearchDraft}
@@ -82,9 +75,14 @@ export function LibraryView({
           clearFilters={clearFilters}
         />
 
-        <LibraryStatusLine syncStatus={syncStatus} itemsData={itemsData} />
-        <PagerControls page={page} setPage={setPage} pageCount={itemsData?.pageCount || 1} view={view} setView={setView} />
-        <CreateDock onOpenCreate={onOpenCreate} />
+        <PagerControls
+          page={page}
+          setPage={setPage}
+          pageCount={itemsData?.pageCount || 1}
+          itemsData={itemsData}
+          view={view}
+          setView={setView}
+        />
 
         <section
           id="grid"
@@ -106,15 +104,16 @@ export function LibraryView({
               ))}
         </section>
 
-        <section id="emptyState" className={cn("empty-state", deferredItems.length > 0 && "hidden")}>
-          <Sparkles className="size-9 text-muted-foreground" />
-          <h2>No media found</h2>
-          <p>Adjust filters, sync the library, or start creating from an upload.</p>
-        </section>
+        {showEmptyState && (
+          <section id="emptyState" className="empty-state">
+            <Sparkles className="size-9 text-muted-foreground" />
+            <h2>No media found</h2>
+            <p>Adjust filters, sync the library, or start creating from an upload.</p>
+          </section>
+        )}
       </div>
 
       <InspectorPanel
-        syncStatus={syncStatus}
         backups={backups}
         selectedBackup={selectedBackup}
         setSelectedBackup={setSelectedBackup}
