@@ -9,6 +9,14 @@ export function getImageFileFromTransfer(transfer: DataTransfer | null) {
   return [...transfer.items].find((item) => item.kind === "file" && item.type.startsWith("image/"))?.getAsFile() || null
 }
 
+export function hasImageTransfer(transfer: DataTransfer | null) {
+  if (!transfer) return false
+  return (
+    [...transfer.files].some((entry) => entry.type.startsWith("image/")) ||
+    [...transfer.items].some((item) => item.type.startsWith("image/"))
+  )
+}
+
 export function fileToDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader()

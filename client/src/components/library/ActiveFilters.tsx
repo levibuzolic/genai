@@ -1,6 +1,5 @@
 import { FilterChip } from "@/components/common/FilterChip"
 import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
 
 export function ActiveFilters({
   query,
@@ -24,8 +23,10 @@ export function ActiveFilters({
   clearFilters: () => void
 }) {
   const active = Boolean(query || media !== "all" || status !== "all" || sort !== "newest")
+  if (!active) return null
+
   return (
-    <section id="activeFilters" className={cn("filter-chips", !active && "hidden")}>
+    <section id="activeFilters" className="filter-chips">
       {query && <FilterChip label={`Search: ${query}`} onClear={() => setSearchDraft("")} />}
       {media !== "all" && <FilterChip label={`Media: ${media}`} onClear={() => setMedia("all")} />}
       {status !== "all" && <FilterChip label={`Status: ${status}`} onClear={() => setStatus("all")} />}

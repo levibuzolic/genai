@@ -1,5 +1,6 @@
 import { Archive, RotateCcw } from "lucide-react"
 
+import { SelectControl } from "@/components/common/NativeSelect"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -31,12 +32,7 @@ export function InspectorPanel({
           </div>
           <div className="space-y-2">
             <Label htmlFor="backupSelect">Catalog backup</Label>
-            <select
-              id="backupSelect"
-              className="native-select"
-              value={selectedBackup}
-              onChange={(event) => setSelectedBackup(event.target.value)}
-            >
+            <SelectControl id="backupSelect" value={selectedBackup} onChange={setSelectedBackup}>
               {backups.length === 0 ? (
                 <option value="">No backups</option>
               ) : (
@@ -46,7 +42,7 @@ export function InspectorPanel({
                   </option>
                 ))
               )}
-            </select>
+            </SelectControl>
             <div className="grid grid-cols-2 gap-2">
               <Button variant="outline" size="sm" onClick={onCreateBackup}>
                 <Archive />

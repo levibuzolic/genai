@@ -49,10 +49,10 @@ export function AuthBrowserStatus({ config, pending, onConnect, onRefresh, onDis
 }
 
 function getAuthBadgeVariant(status: string, hasAuthorization: boolean, lastError?: string | null) {
-  if (lastError) return "danger"
-  if (hasAuthorization || status === "connected") return "success"
-  if (status === "awaiting-login" || status === "refreshing" || status === "starting") return "warning"
-  return "muted"
+  if (lastError) return "destructive"
+  if (hasAuthorization || status === "connected") return "default"
+  if (status === "awaiting-login" || status === "refreshing" || status === "starting") return "outline"
+  return "secondary"
 }
 
 function formatStatus(status: string, pending: boolean) {

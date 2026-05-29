@@ -2,7 +2,8 @@ import { Copy, ExternalLink, ImageIcon, Play, WandSparkles } from "lucide-react"
 
 import { Fact } from "@/components/common/Fact"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ButtonGroup } from "@/components/ui/button-group"
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { formatBytes, formatDate, formatDuration } from "@/lib/format"
 import { isImageItem, mediaUrlForItem } from "@/lib/media"
 import type { CatalogItem } from "@/types/domain"
@@ -29,26 +30,27 @@ export function MediaDialog({
   const mediaUrl = mediaUrlForItem(item)
   const canUsePrompt = Boolean(item?.prompt)
   const canUseImage = Boolean(item && isImageItem(item))
+  const dialogOpen = open && Boolean(item)
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent id="itemDialog" className="detailDialog" showCloseButton>
+    <Dialog open={dialogOpen} onOpenChange={onOpenChange}>
+      <DialogContent id="itemDialog" className="detailDialog" aria-describedby="detailMeta" aria-labelledby="detailTitle" showCloseButton>
         {item && (
           <>
-            <DialogHeader className="dialogHeader">
-              <DialogTitle id="detailTitle">{item.type ? `${item.type} media` : "Media details"}</DialogTitle>
-              <DialogDescription id="detailMeta">
-                {[
-                  formatDate(item.createdAtIso),
-                  formatDuration(item.duration),
-                  item.size ? formatBytes(item.size) : "",
-                  item.status,
-                  item.localFile ? "downloaded" : "not local",
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </DialogDescription>
-            </DialogHeader>
+            <DialogTitle id="detailTitle" className="sr-only">
+              {item.type ? `${item.type} media` : "Media details"}
+            </DialogTitle>
+            <DialogDescription id="detailMeta" className="sr-only">
+              {[
+                formatDate(item.createdAtIso),
+                formatDuration(item.duration),
+                item.size ? formatBytes(item.size) : "",
+                item.status,
+                item.localFile ? "downloaded" : "not local",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </DialogDescription>
             <div className="dialogBody">
               <MediaPreview
                 id="detailPreview"
@@ -89,7 +91,7 @@ export function MediaDialog({
                   <Fact label="Output URL" value={item.outputUrl} />
                 </dl>
                 <div className="dialogActions" aria-label="Media actions">
-                  <div className="detailActionGroup" aria-label="Create actions">
+                  <ButtonGroup className="detailActionGroup" aria-label="Create actions">
                     {canUsePrompt && (
                       <Button id="detailUsePromptButton" size="sm" onClick={() => onUsePrompt(item)}>
                         <WandSparkles />
@@ -116,10 +118,16 @@ export function MediaDialog({
                         </a>
                       </Button>
                     )}
-                  </div>
+                  </ButtonGroup>
 
-                  <div className="detailActionGroup detailActionSecondary" aria-label="Copy actions">
-                    <Button id="detailCopyPromptButton" size="sm" variant="ghost" onClick={() => onCopy(item.prompt, "Prompt copied")} disabled={!item.prompt}>
+                  <ButtonGroup className="detailActionGroup detailActionSecondary" aria-label="Copy actions">
+                    <Button
+                      id="detailCopyPromptButton"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onCopy(item.prompt, "Prompt copied")}
+                      disabled={!item.prompt}
+                    >
                       <Copy />
                       Prompt
                     </Button>
@@ -131,7 +139,7 @@ export function MediaDialog({
                         URL
                       </Button>
                     )}
-                  </div>
+                  </ButtonGroup>
                 </div>
               </div>
             </div>

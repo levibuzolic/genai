@@ -1,4 +1,4 @@
-import { Clock3, CopyPlus, ExternalLink, History, Loader2, RefreshCw, Save } from "lucide-react"
+import { Clock3, CopyPlus, ExternalLink, Loader2, RefreshCw, Save } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -7,10 +7,10 @@ import { formatDate, formatTime } from "@/lib/format"
 import type { Creation, CreationEvent } from "@/types/domain"
 
 function statusVariant(status: string) {
-  if (["done", "success", "completed"].includes(status)) return "success"
-  if (["failed", "error", "cancelled", "canceled"].includes(status)) return "danger"
-  if (status === "draft") return "muted"
-  return "warning"
+  if (["failed", "error", "cancelled", "canceled"].includes(status)) return "destructive"
+  if (["done", "success", "completed"].includes(status)) return "default"
+  if (status === "draft") return "secondary"
+  return "outline"
 }
 
 function statusLabel(status: string) {
@@ -69,11 +69,7 @@ export function CreationHistoryPanel({
     <section className="creationHistory" aria-label="Creation history">
       <div className="creationHistoryHeader">
         <div>
-          <Badge variant={activeCount > 0 ? "warning" : "muted"}>
-            <History className="size-3" />
-            Creation history
-          </Badge>
-          <h3>Queue</h3>
+          <h3>Creation history</h3>
           <p>{activeCount > 0 ? `${activeCount} generation${activeCount === 1 ? "" : "s"} still running` : "No active generations"}</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void onRefresh()} disabled={loading}>

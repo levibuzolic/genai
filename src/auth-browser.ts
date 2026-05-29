@@ -1,5 +1,8 @@
 import { existsSync } from "node:fs"
 import { mkdir, rm } from "node:fs/promises"
+import { setTimeout as sleep } from "node:timers/promises"
+
+import type { BrowserContext, Page } from "@playwright/test"
 
 const DEFAULT_LOGIN_TIMEOUT_MS = 10 * 60 * 1000
 const DEFAULT_TOKEN_TIMEOUT_MS = 20_000
@@ -7,11 +10,81 @@ const DEFAULT_REFRESH_INTERVAL_MS = 15 * 60 * 1000
 const REFRESH_LEEWAY_MS = 60_000
 const PROFILE_SETTLE_MS = 2500
 
-export function createAuthBrowserService(options) {
+type AuthBrowserStatusValue = "disconnected" | "profile-ready" | "awaiting-login" | "login-required" | "refreshing" | "connected"
+type AuthBrowserMode = "visible" | "headless" | null
+
+type TokenResult = {
+  expiresAt: string
+  source: string
+}
+
+type LaunchOptions = {
+  headless: boolean
+}
+
+type LaunchPersistentContext = (profileDir: string, options: LaunchOptions) => Promise<BrowserContext>
+
+type AuthBrowserLogger = {
+  warn?: (error: unknown) => void
+}
+
+type AuthBrowserOptions = {
+  profileDir: string
+  loginUrl: string
+  onToken: (token: string, source: string) => TokenResult | Promise<TokenResult>
+  launchPersistentContext?: LaunchPersistentContext
+  loginTimeoutMs?: number
+  tokenTimeoutMs?: number
+  refreshIntervalMs?: number
+  logger?: AuthBrowserLogger
+}
+
+type AuthBrowserState = {
+  status: AuthBrowserStatusValue
+  message: string
+  expiresAt: string | null
+  lastRefreshAt: string | null
+  nextRefreshAt: string | null
+  lastError: string | null
+  mode: AuthBrowserMode
+}
+
+type AuthBrowserStatus = AuthBrowserState & {
+  profileDir: string
+  loginUrl: string
+  hasProfile: boolean
+  browserOpen: boolean
+}
+
+declare global {
+  var Clerk:
+    | {
+        session?: {
+          getToken?: () => Promise<string | null> | string | null
+        }
+      }
+    | undefined
+}
+
+export function createAuthBrowserService(options: AuthBrowserOptions): AuthBrowserService {
   return new AuthBrowserService(options)
 }
 
 class AuthBrowserService {
+  readonly profileDir: string
+  readonly loginUrl: string
+  readonly onToken: (token: string, source: string) => TokenResult | Promise<TokenResult>
+  readonly launchPersistentContext: LaunchPersistentContext
+  readonly loginTimeoutMs: number
+  readonly tokenTimeoutMs: number
+  readonly refreshIntervalMs: number
+  readonly logger: AuthBrowserLogger
+  context: BrowserContext | null
+  refreshTimer: NodeJS.Timeout | null
+  loginPoll: Promise<void> | null
+  private connectPromise: Promise<AuthBrowserStatus> | null
+  private state: AuthBrowserState
+
   constructor({
     profileDir,
     loginUrl,
@@ -21,7 +94,7 @@ class AuthBrowserService {
     tokenTimeoutMs = DEFAULT_TOKEN_TIMEOUT_MS,
     refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS,
     logger = console,
-  }) {
+  }: AuthBrowserOptions) {
     this.profileDir = profileDir
     this.loginUrl = loginUrl
     this.onToken = onToken
@@ -45,7 +118,7 @@ class AuthBrowserService {
     }
   }
 
-  getStatus() {
+  getStatus(): AuthBrowserStatus {
     return {
       ...this.state,
       profileDir: this.profileDir,
@@ -55,7 +128,7 @@ class AuthBrowserService {
     }
   }
 
-  async connectVisible() {
+  async connectVisible(): Promise<AuthBrowserStatus> {
     if (this.connectPromise) {
       return this.connectPromise
     }
@@ -73,7 +146,7 @@ class AuthBrowserService {
     }
   }
 
-  async openVisibleLogin() {
+  async openVisibleLogin(): Promise<AuthBrowserStatus> {
     await this.closeContext()
     await mkdir(this.profileDir, { recursive: true })
     this.context = await this.launchPersistentContext(this.profileDir, { headless: false })
@@ -87,7 +160,7 @@ class AuthBrowserService {
     })
 
     this.loginPoll = this.pollVisibleLogin(page)
-    this.loginPoll.catch((error) => {
+    this.loginPoll.catch((error: unknown) => {
       this.setState({
         status: "login-required",
         mode: null,
@@ -100,7 +173,7 @@ class AuthBrowserService {
     return this.getStatus()
   }
 
-  async refreshHeadless() {
+  async refreshHeadless(): Promise<AuthBrowserStatus> {
     if (this.state.status === "awaiting-login") {
       return this.getStatus()
     }
@@ -135,7 +208,7 @@ class AuthBrowserService {
     }
   }
 
-  async disconnect({ deleteProfile = false } = {}) {
+  async disconnect({ deleteProfile = false }: { deleteProfile?: boolean } = {}): Promise<AuthBrowserStatus> {
     this.clearRefreshTimer()
     await this.closeContext()
 
@@ -156,7 +229,7 @@ class AuthBrowserService {
     return this.getStatus()
   }
 
-  startAutoRefresh() {
+  startAutoRefresh(): AuthBrowserStatus {
     if (!existsSync(this.profileDir)) {
       return this.getStatus()
     }
@@ -165,7 +238,7 @@ class AuthBrowserService {
     return this.getStatus()
   }
 
-  async pollVisibleLogin(page) {
+  async pollVisibleLogin(page: Page): Promise<void> {
     const deadline = Date.now() + this.loginTimeoutMs
 
     while (Date.now() < deadline && this.context) {
@@ -184,7 +257,7 @@ class AuthBrowserService {
     throw new Error("Timed out waiting for login to complete.")
   }
 
-  async acceptToken(token) {
+  async acceptToken(token: string): Promise<void> {
     const result = await this.onToken(token, "auth-browser")
     const nextRefreshAt = calculateNextRefreshAt(result.expiresAt, this.refreshIntervalMs)
     this.setState({
@@ -199,7 +272,7 @@ class AuthBrowserService {
     this.scheduleRefresh(nextRefreshAt)
   }
 
-  scheduleRefresh(nextRefreshAt) {
+  scheduleRefresh(nextRefreshAt: string): void {
     this.clearRefreshTimer()
     const delay = Math.max(5000, Date.parse(nextRefreshAt) - Date.now())
     this.refreshTimer = setTimeout(() => {
@@ -208,23 +281,23 @@ class AuthBrowserService {
     this.refreshTimer.unref?.()
   }
 
-  clearRefreshTimer() {
+  clearRefreshTimer(): void {
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer)
       this.refreshTimer = null
     }
   }
 
-  async closeContext() {
+  async closeContext(): Promise<void> {
     const context = this.context
     this.context = null
 
     if (context) {
-      await context.close().catch((error) => this.logger.warn?.(error))
+      await context.close().catch((error: unknown) => this.logger.warn?.(error))
     }
   }
 
-  setState(next) {
+  setState(next: Partial<AuthBrowserState>): void {
     this.state = {
       ...this.state,
       ...next,
@@ -232,10 +305,10 @@ class AuthBrowserService {
   }
 }
 
-async function launchPlaywrightPersistentContext(profileDir, { headless }) {
+async function launchPlaywrightPersistentContext(profileDir: string, { headless }: LaunchOptions): Promise<BrowserContext> {
   const { chromium } = await import("@playwright/test")
   return chromium.launchPersistentContext(profileDir, {
-    channel: process.env.AUTH_BROWSER_CHANNEL || "chrome",
+    channel: process.env["AUTH_BROWSER_CHANNEL"] || "chrome",
     headless,
     viewport: {
       width: 1280,
@@ -244,11 +317,11 @@ async function launchPlaywrightPersistentContext(profileDir, { headless }) {
   })
 }
 
-async function getOrCreatePage(context) {
-  return context.pages()[0] || context.newPage()
+async function getOrCreatePage(context: BrowserContext): Promise<Page> {
+  return context.pages()[0] ?? context.newPage()
 }
 
-async function readClerkToken(page, timeoutMs) {
+async function readClerkToken(page: Page, timeoutMs: number): Promise<string> {
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
@@ -260,7 +333,7 @@ async function readClerkToken(page, timeoutMs) {
       })
       .catch(() => null)
 
-    if (token) {
+    if (typeof token === "string" && token) {
       return token
     }
 
@@ -270,15 +343,11 @@ async function readClerkToken(page, timeoutMs) {
   throw new Error("Clerk did not return an auth token.")
 }
 
-function calculateNextRefreshAt(expiresAt, refreshIntervalMs) {
+function calculateNextRefreshAt(expiresAt: string, refreshIntervalMs: number): string {
   const expiresAtMs = Date.parse(expiresAt)
   const now = Date.now()
   const ttlMs = expiresAtMs - now
   const refreshLeewayMs = Math.min(REFRESH_LEEWAY_MS, Math.max(5000, Math.floor(ttlMs * 0.25)))
   const target = Number.isFinite(expiresAtMs) ? Math.min(now + refreshIntervalMs, expiresAtMs - refreshLeewayMs) : now + refreshIntervalMs
   return new Date(Math.max(Date.now() + 5000, target)).toISOString()
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

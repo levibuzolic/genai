@@ -14,7 +14,7 @@ import { useSyncOperations } from "@/hooks/use-sync-operations"
 import { useTemplates } from "@/hooks/use-templates"
 import { fetchJson } from "@/lib/api"
 import { isImageItem } from "@/lib/media"
-import type { CatalogItem } from "@/types/domain"
+import type { CatalogItem, MediaFitMode } from "@/types/domain"
 
 function App() {
   const { config, reloadConfig } = useConfig()
@@ -42,11 +42,18 @@ function App() {
   const [copyFlash, setCopyFlash] = React.useState("")
   const [authActionPending, setAuthActionPending] = React.useState(false)
   const [mediaBlurred, setMediaBlurred] = React.useState(() => window.localStorage.getItem("mediaBlurred") === "true")
+  const [mediaFitMode, setMediaFitMode] = React.useState<MediaFitMode>(() =>
+    window.localStorage.getItem("mediaFitMode") === "contain" ? "contain" : "fill",
+  )
   const setCreateOpen = create.setOpen
 
   React.useEffect(() => {
     window.localStorage.setItem("mediaBlurred", String(mediaBlurred))
   }, [mediaBlurred])
+
+  React.useEffect(() => {
+    window.localStorage.setItem("mediaFitMode", mediaFitMode)
+  }, [mediaFitMode])
 
   React.useEffect(() => {
     if (!create.open) return
@@ -125,6 +132,13 @@ function App() {
       authActionPending={authActionPending}
       mediaBlurred={mediaBlurred}
       onToggleMediaBlur={() => setMediaBlurred((current) => !current)}
+      mediaFitMode={mediaFitMode}
+      onToggleMediaFitMode={() => setMediaFitMode((current) => (current === "fill" ? "contain" : "fill"))}
+      backups={backups.backups}
+      selectedBackup={backups.selectedBackup}
+      setSelectedBackup={backups.setSelectedBackup}
+      onCreateBackup={() => void backups.createCatalogBackup()}
+      onRestoreBackup={() => void backups.restoreCatalogBackup()}
     >
       {activeView === "templates" ? (
         <TemplateBrowser
@@ -164,11 +178,6 @@ function App() {
           view={library.view}
           setView={library.setView}
           clearFilters={library.clearFilters}
-          backups={backups.backups}
-          selectedBackup={backups.selectedBackup}
-          setSelectedBackup={backups.setSelectedBackup}
-          onCreateBackup={() => void backups.createCatalogBackup()}
-          onRestoreBackup={() => void backups.restoreCatalogBackup()}
           onOpenCreate={(options) => void create.openCreator(options)}
           onDetails={setSelectedItem}
           onCopyPrompt={(item) => void copyValue(item.prompt, "Prompt copied")}
@@ -201,12 +210,7 @@ function App() {
             ref={create.panelRef}
             sourceKind={create.sourceKind}
             setSourceKind={create.setSourceKind}
-            sourceSearch={create.sourceSearch}
-            setSourceSearch={create.setSourceSearch}
-            sourceItems={create.sourceItems}
             selectedSource={create.selectedSource}
-            selectedSourceId={create.selectedSourceId}
-            setSelectedSourceId={create.setSelectedSourceId}
             uploadMeta={create.uploadMeta}
             uploadedDataUrl={create.uploadedDataUrl}
             uploadedName={create.uploadedName}
@@ -228,6 +232,7 @@ function App() {
             setIsDraggingUpload={create.setIsDraggingUpload}
             fileInputRef={create.fileInputRef}
             onUploadFile={create.acceptUploadFile}
+            onClearSource={create.clearSource}
             onSubmit={async () => {
               await create.submitCreateJob()
               await creationHistory.loadCreations()

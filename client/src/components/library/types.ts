@@ -1,6 +1,6 @@
 import type * as React from "react"
 
-import type { Backup, CatalogItem, ItemsResponse, SourceKind, ViewMode } from "@/types/domain"
+import type { CatalogItem, ItemsResponse, SourceKind, ViewMode } from "@/types/domain"
 
 export type OpenCreateOptions = {
   sourceKind?: SourceKind | undefined
@@ -30,11 +30,6 @@ export type LibraryViewProps = {
   view: ViewMode
   setView: (value: ViewMode) => void
   clearFilters: () => void
-  backups: Backup[]
-  selectedBackup: string
-  setSelectedBackup: (value: string) => void
-  onCreateBackup: () => void
-  onRestoreBackup: () => void
   onOpenCreate: (options?: OpenCreateOptions) => void
   onDetails: (item: CatalogItem) => void
   onCopyPrompt: (item: CatalogItem) => void

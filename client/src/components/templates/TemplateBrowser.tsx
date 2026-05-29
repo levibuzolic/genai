@@ -2,6 +2,7 @@ import { CopyPlus, Edit3, Plus, Search, Trash2, WandSparkles } from "lucide-reac
 import * as React from "react"
 
 import { Field } from "@/components/common/Field"
+import { SelectControl } from "@/components/common/NativeSelect"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -96,7 +97,7 @@ export function TemplateBrowser({
     <section className="templateBrowser" aria-label="Template browser">
       <div className="templateBrowserHeader">
         <div>
-          <Badge variant="muted">
+          <Badge variant="secondary">
             <WandSparkles className="size-3" />
             Templates
           </Badge>
@@ -111,9 +112,10 @@ export function TemplateBrowser({
 
       <div className="templateBrowserLayout">
         <section className="templateList" aria-label="Saved templates">
-          <div className="search-shell templateSearch">
+          <div className="templateSearch flex items-center gap-2 rounded-md border border-input bg-background px-2">
             <Search className="size-4 text-muted-foreground" />
             <Input
+              className="h-8 border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:ring-0"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Search templates"
@@ -131,7 +133,7 @@ export function TemplateBrowser({
                 </div>
                 <div className="templateCardBody">
                   <div>
-                    <Badge variant={template.type === "combo" ? "warning" : "muted"}>{template.type}</Badge>
+                    <Badge variant={template.type === "combo" ? "outline" : "secondary"}>{template.type}</Badge>
                     <h3>{template.label}</h3>
                     <p>{template.description || template.settings?.params?.["prompt"] || "No description"}</p>
                   </div>
@@ -175,11 +177,10 @@ export function TemplateBrowser({
             <Textarea value={editor.description} onChange={(event) => setEditor({ ...editor, description: event.target.value })} />
           </Field>
           <Field label="Type">
-            <select
-              className="native-select"
+            <SelectControl
               value={editor.type}
-              onChange={(event) => {
-                const type = event.target.value as CreateTemplateType
+              onChange={(value) => {
+                const type = value as CreateTemplateType
                 setEditor({
                   ...editor,
                   type,
@@ -190,16 +191,12 @@ export function TemplateBrowser({
               <option value="image">Image edit</option>
               <option value="video">Video creation</option>
               <option value="combo">Image edit + video</option>
-            </select>
+            </SelectControl>
           </Field>
           {editor.type !== "combo" ? (
             <>
               <Field label="Mode">
-                <select
-                  className="native-select"
-                  value={editor.modeId}
-                  onChange={(event) => setEditor({ ...editor, modeId: event.target.value })}
-                >
+                <SelectControl value={editor.modeId} onChange={(value) => setEditor({ ...editor, modeId: value })}>
                   {modes
                     .filter((mode) => mode.kind !== "template")
                     .map((mode) => (
@@ -207,7 +204,7 @@ export function TemplateBrowser({
                         {mode.label}
                       </option>
                     ))}
-                </select>
+                </SelectControl>
               </Field>
               <Field label="Prompt">
                 <Textarea value={editor.prompt} onChange={(event) => setEditor({ ...editor, prompt: event.target.value })} />
@@ -225,17 +222,13 @@ export function TemplateBrowser({
           )}
           {editor.type !== "image" && (
             <Field label="Quality">
-              <select
-                className="native-select"
-                value={editor.quality}
-                onChange={(event) => setEditor({ ...editor, quality: event.target.value })}
-              >
+              <SelectControl value={editor.quality} onChange={(value) => setEditor({ ...editor, quality: value })}>
                 {qualityOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </SelectControl>
             </Field>
           )}
           {editor.type === "video" && (

@@ -84,125 +84,26 @@
   }
 }
 
-.app-sidebar {
-  @apply fixed inset-y-0 left-0 z-40 hidden w-56 flex-col border-r bg-background p-3 lg:flex;
-}
-
-.app-brand {
-  @apply mb-4 flex min-h-10 items-center gap-3 rounded-md px-2;
-}
-
-.app-brand strong {
-  @apply block truncate text-sm font-semibold leading-5;
-}
-
-.app-brand span {
-  @apply block truncate text-xs text-muted-foreground;
-}
-
-.brand-mark {
-  @apply grid size-8 shrink-0 place-items-center rounded-md border bg-card text-foreground;
-}
-
-.app-nav {
-  @apply grid gap-1;
-}
-
-.nav-button {
-  @apply h-9 w-full justify-start px-2.5 text-muted-foreground;
-}
-
-.nav-button.is-active {
-  @apply text-foreground;
-}
-
-.sidebar-footer {
-  @apply mt-auto grid gap-0 border-t pt-2;
-}
-
-.nav-status {
-  @apply flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground;
-}
-
-.nav-status strong {
-  @apply block truncate font-medium text-foreground;
-}
-
-.nav-status span {
-  @apply block truncate;
-}
-
-.sidebar-metrics {
-  @apply grid gap-1 border-t px-2 py-2 text-[11px] text-muted-foreground;
-}
-
-.sidebar-metrics span,
-.sidebar-path {
-  @apply truncate;
-}
-
-.sidebar-path {
-  @apply border-t px-2 py-2 text-[11px] text-muted-foreground;
-}
-
-.app-shell {
-  @apply min-h-screen lg:pl-56;
-}
-
-.topbar {
-  @apply sticky top-0 z-30 flex min-h-14 items-center justify-between gap-3 border-b bg-background px-3 py-2 lg:px-5;
-}
-
-.topbar h1 {
-  @apply m-0 text-sm font-semibold;
-}
-
-.top-actions {
-  @apply flex shrink-0 items-center gap-2;
-}
-
-main {
-  @apply p-0;
-}
-
-.mobile-tabbar {
-  @apply fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t bg-background p-2 lg:hidden;
-}
-
-.mobile-tabbar .nav-button {
-  @apply h-10 justify-center;
-}
-
-.mobile-tabbar .nav-button svg {
-  @apply size-4;
+.toolbar,
+.pager,
+.createPanel,
+.createResult,
+.creationHistory,
+.templateTools,
+.settingsPane,
+.settingsActionGrid,
+.settingsAccountStatus,
+.settingsPath,
+.settingsField {
+  min-width: 0;
 }
 
 .library-grid {
-  @apply grid min-h-[calc(100vh-3.5rem)] gap-0 xl:grid-cols-[minmax(0,1fr)_280px];
+  @apply grid min-h-[calc(100vh-3.5rem)] gap-0;
 }
 
 .library-main {
   @apply min-w-0 space-y-0;
-}
-
-.inspector-panel {
-  @apply hidden border-l xl:block;
-}
-
-.panel-card {
-  @apply sticky top-14 border-0 bg-background shadow-none;
-}
-
-.toolbar {
-  @apply sticky top-14 z-20 grid grid-cols-2 gap-2 border-b bg-background p-3 md:grid-cols-[minmax(240px,1fr)_136px_164px_132px_88px];
-}
-
-.search-shell {
-  @apply col-span-2 flex items-center gap-2 rounded-md border border-input bg-background px-2 md:col-span-1;
-}
-
-.search-shell input {
-  @apply h-8 border-0 bg-transparent px-0 text-[13px] shadow-none focus-visible:ring-0;
 }
 
 .native-select-field {
@@ -212,10 +113,6 @@ main {
 .native-select-field span,
 .field > label {
   @apply px-0.5 text-[11px] font-medium text-muted-foreground;
-}
-
-.native-select {
-  @apply h-8 w-full rounded-md border border-input bg-background px-2 text-[13px] text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/30;
 }
 
 .summary-strip {
@@ -258,16 +155,8 @@ main {
   @apply flex flex-wrap items-center gap-2;
 }
 
-.filter-chips.hidden {
-  display: none;
-}
-
 .chip {
   @apply rounded-full;
-}
-
-.pager {
-  @apply flex flex-wrap items-center gap-3 border-b bg-background px-3 py-2;
 }
 
 #pageStatus {
@@ -278,12 +167,8 @@ main {
   @apply text-xs tabular-nums text-muted-foreground;
 }
 
-.viewToggle {
-  @apply ml-auto flex rounded-md border bg-background p-0.5;
-}
-
 .media-grid {
-  @apply grid grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] md:gap-3;
+  @apply grid grid-cols-2 gap-2 p-2 md:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] md:gap-3 md:p-3;
 }
 
 .media-grid.is-list {
@@ -291,7 +176,7 @@ main {
 }
 
 .media-card {
-  @apply overflow-hidden border-border bg-card transition-colors hover:border-border hover:bg-accent/40;
+  @apply overflow-hidden rounded-md border bg-card transition-colors hover:border-border hover:bg-accent/40;
   content-visibility: auto;
   contain-intrinsic-size: 320px;
 }
@@ -319,6 +204,34 @@ main {
   @apply h-full w-full object-contain;
 }
 
+.media-fit-fill .preview img,
+.media-fit-fill .preview video,
+.media-fit-fill .videoPosterButton img {
+  @apply object-cover;
+}
+
+.media-fit-contain .preview img,
+.media-fit-contain .preview video,
+.media-fit-contain .videoPosterButton img {
+  @apply object-contain;
+}
+
+.videoPosterButton {
+  @apply relative grid h-full w-full place-items-center border-0 bg-background p-0 text-muted-foreground;
+}
+
+.videoPosterButton img {
+  @apply h-full w-full;
+}
+
+.videoPosterFallback {
+  @apply text-xs text-muted-foreground;
+}
+
+.videoPlayBadge {
+  @apply absolute grid size-10 place-items-center rounded-full border bg-background/80 text-foreground shadow-sm;
+}
+
 .media-blurred .preview img,
 .media-blurred .preview video,
 .media-blurred .createSourcePreview img,
@@ -328,10 +241,18 @@ main {
 .media-blurred .detailPreview img,
 .media-blurred .detailPreview video {
   filter: blur(22px) saturate(0.55) brightness(0.75);
-  transform: scale(1.035);
   transition:
     filter 160ms ease,
     transform 160ms ease;
+}
+
+.media-blurred .preview img,
+.media-blurred .preview video,
+.media-blurred .createSourcePreview img,
+.media-blurred .createSourcePreview video,
+.media-blurred .createResultPreview img,
+.media-blurred .createResultPreview video {
+  transform: scale(1.035);
 }
 
 .missing-preview {
@@ -348,15 +269,15 @@ main {
 }
 
 .cardBody {
-  @apply grid gap-2 p-2.5;
+  @apply grid gap-1 p-2;
 }
 
 .cardMeta {
-  @apply min-h-4 truncate text-xs text-muted-foreground;
+  @apply min-h-0 truncate text-[11px] text-muted-foreground;
 }
 
 .prompt {
-  @apply line-clamp-3 min-h-11 text-[13px] leading-5 text-foreground;
+  @apply line-clamp-2 min-h-0 text-xs leading-5 text-foreground;
 }
 
 .media-card.is-list .prompt {
@@ -365,16 +286,11 @@ main {
 
 .cardFooter,
 .cardActions {
-  @apply flex items-center justify-end gap-1.5;
+  @apply flex items-center justify-end gap-1;
 }
 
 .cardActions {
-  @apply w-full flex-wrap;
-}
-
-.cardActions button,
-.cardActions a {
-  @apply h-7 px-2 text-xs;
+  @apply w-full;
 }
 
 .cardCreateButton {
@@ -390,7 +306,7 @@ main {
 }
 
 .createOverlay {
-  @apply fixed inset-0 z-50 m-0 grid h-auto max-h-none w-auto max-w-none place-items-center border-0 bg-transparent p-2 text-foreground md:p-4;
+  @apply fixed inset-0 z-50 m-0 grid h-auto max-h-none w-auto max-w-none place-items-center border-0 bg-transparent p-2 text-foreground md:p-3;
 }
 
 .createOverlayBackdrop {
@@ -398,16 +314,16 @@ main {
 }
 
 .create-studio {
-  @apply relative z-10 mb-0 h-[calc(100dvh-1rem)] w-full max-w-[1500px] overflow-auto rounded-lg border bg-card p-3 shadow-2xl md:h-[calc(100dvh-2rem)] md:p-4;
+  @apply relative z-10 mb-0 flex h-[calc(100dvh-1rem)] w-full max-w-[1600px] flex-col overflow-auto rounded-lg border bg-background p-0 shadow-2xl md:h-[calc(100dvh-1.5rem)] xl:overflow-hidden;
   scroll-margin-top: 0;
 }
 
 .createHeader {
-  @apply sticky top-0 z-10 flex flex-col gap-2 border-b bg-card pb-3 md:flex-row md:items-center md:justify-between;
+  @apply z-10 flex shrink-0 items-center justify-between gap-3 bg-background px-4 py-3;
 }
 
 .createHeader h2 {
-  @apply mt-1 text-sm font-semibold;
+  @apply text-sm font-semibold;
 }
 
 .createHeader p {
@@ -415,19 +331,15 @@ main {
 }
 
 .createLayout {
-  @apply grid gap-3 pt-3 xl:grid-cols-[360px_minmax(0,1fr)_320px];
+  @apply grid gap-0 border-t xl:min-h-0 xl:flex-1 xl:grid-cols-[340px_minmax(0,1fr)_300px] xl:overflow-hidden;
 }
 
 .createPanel {
-  @apply grid gap-3 border bg-background p-3;
+  @apply grid content-start gap-3 border-b bg-background p-3 xl:min-h-0 xl:overflow-y-auto xl:border-r xl:border-b-0;
 }
 
 .createResult {
-  @apply grid gap-3 2xl:grid-cols-[minmax(220px,0.72fr)_minmax(320px,1.28fr)];
-}
-
-.createTabs {
-  @apply h-8 w-full bg-muted;
+  @apply grid min-h-[560px] grid-rows-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-0 border-b bg-background xl:min-h-0 xl:overflow-hidden xl:border-r xl:border-b-0;
 }
 
 .sourcePanel,
@@ -440,7 +352,7 @@ main {
 }
 
 .uploadDropZone {
-  @apply grid min-h-24 cursor-pointer place-items-center gap-1 rounded-md border border-dashed bg-background p-3 text-center transition-colors hover:bg-accent;
+  @apply grid min-h-20 cursor-pointer place-items-center gap-1 rounded-md border border-dashed bg-background p-3 text-center transition-colors hover:bg-accent;
 }
 
 .uploadDropZone span {
@@ -452,11 +364,12 @@ main {
 }
 
 .createActions {
-  @apply grid grid-cols-[1fr_auto] gap-2;
+  @apply sticky bottom-0 z-10 grid grid-cols-[1fr_auto] gap-2 border-t bg-background pt-3;
+  width: 100%;
 }
 
 .templateTools {
-  @apply grid gap-3 overflow-hidden border bg-background p-3;
+  @apply grid gap-3 overflow-visible border-t bg-transparent pt-3;
 }
 
 .templateTools summary {
@@ -488,29 +401,57 @@ main {
 }
 
 .templateSaveInline {
-  @apply md:grid-cols-[minmax(0,1fr)_128px_auto];
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.templateSaveInline > input {
+  grid-column: 1 / -1;
 }
 
 .templateImport {
   @apply pt-1;
 }
 
-.createSourcePreview,
+.createSourcePreviewSlot,
 .createResultPreview {
-  @apply grid h-[240px] place-items-center overflow-hidden border bg-background text-xs text-muted-foreground lg:h-[320px];
+  @apply grid min-h-0 place-items-center overflow-hidden border-b bg-background text-xs text-muted-foreground;
 }
 
-.createResultPreview {
-  @apply lg:h-[320px];
+.createSourcePreviewSlot {
+  @apply relative;
 }
 
-.createResult .detailFacts,
-.createResult .dialogActions {
-  @apply 2xl:col-span-2;
+.createSourcePreview {
+  @apply grid h-full w-full place-items-center overflow-hidden text-xs text-muted-foreground;
+}
+
+.createClearSourceButton {
+  @apply absolute top-2 right-2;
+}
+
+.createResultMeta {
+  @apply min-w-0 bg-background;
+}
+
+.createResultFacts {
+  @apply grid grid-cols-[108px_minmax(0,1fr)] gap-x-3 gap-y-2 border-b p-3 text-xs;
+}
+
+.createResultFacts dt {
+  @apply text-muted-foreground;
+}
+
+.createResultFacts dd {
+  @apply min-w-0 break-words text-foreground;
+}
+
+.createResultActions {
+  @apply flex flex-wrap items-center gap-2 p-3;
+  width: 100%;
 }
 
 .creationHistory {
-  @apply border bg-background p-3;
+  @apply min-h-0 overflow-y-auto bg-background p-3;
 }
 
 .creationHistoryHeader {
@@ -518,7 +459,7 @@ main {
 }
 
 .creationHistoryHeader h3 {
-  @apply mt-1 text-sm font-semibold;
+  @apply text-sm font-semibold;
 }
 
 .creationHistoryHeader p,
@@ -539,11 +480,11 @@ main {
 }
 
 .creationHistoryRow {
-  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 rounded-md border bg-card p-2;
+  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 border-b bg-transparent p-2;
 }
 
 .creationHistoryRow.is-active {
-  @apply border-amber-300/30 bg-card;
+  @apply bg-accent/30;
 }
 
 .creationHistoryMain {
@@ -559,7 +500,7 @@ main {
 }
 
 .creationHistoryEmpty {
-  @apply border border-dashed bg-background p-3 text-xs text-muted-foreground;
+  @apply py-2 text-xs text-muted-foreground;
 }
 
 .creationDetailDialog {
@@ -694,7 +635,7 @@ main {
 }
 
 .dialogActions {
-  @apply flex flex-col gap-2;
+  @apply flex flex-col items-stretch gap-2;
 }
 
 .detailActionGroup {
@@ -715,23 +656,23 @@ main {
 }
 
 .detailDialog {
-  @apply max-w-[1180px] border-border bg-card p-0;
-}
-
-.dialogHeader {
-  @apply border-b bg-card pb-4;
+  @apply h-[calc(100dvh-2rem)] w-[calc(100dvw-2rem)] max-w-[1600px] gap-0 border-border bg-card p-0;
 }
 
 .dialogBody {
-  @apply grid max-h-[calc(100dvh-8rem)] overflow-auto lg:grid-cols-[minmax(320px,58%)_minmax(300px,1fr)];
+  @apply grid h-full min-h-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_380px];
 }
 
 .detailPreview {
-  @apply grid min-h-[320px] place-items-center bg-background lg:min-h-[560px];
+  @apply grid aspect-square place-items-center overflow-hidden bg-background;
+  align-self: center;
+  justify-self: center;
+  width: min(100%, calc(100dvh - 3rem));
+  max-width: min(100%, calc(100dvw - 28rem));
 }
 
 .detailPanel {
-  @apply grid content-start gap-4 overflow-auto p-5;
+  @apply grid min-h-0 content-start gap-4 overflow-y-auto border-l p-4 pt-10;
 }
 
 .detailPanel h3 {
@@ -744,6 +685,90 @@ main {
 
 .copy-toast {
   @apply fixed right-4 bottom-4 z-50 rounded-lg border bg-popover px-3 py-2 text-xs shadow-lg;
+}
+
+.settingsDialog {
+  @apply grid h-[min(680px,calc(100dvh-2rem))] w-[min(920px,calc(100dvw-2rem))] max-w-none grid-cols-[180px_minmax(0,1fr)] gap-0 overflow-hidden p-0;
+}
+
+.settingsSidebar {
+  @apply border-r bg-muted/30 p-2;
+}
+
+.settingsTitle {
+  @apply mb-2 flex h-9 items-center gap-2 px-2 text-sm font-medium;
+}
+
+.settingsNavButton {
+  @apply mb-1 h-8 w-full justify-start px-2 text-muted-foreground;
+}
+
+.settingsNavButton.is-active {
+  @apply bg-accent text-foreground;
+}
+
+.settingsContent {
+  @apply min-h-0 overflow-y-auto p-5;
+}
+
+.settingsPane {
+  @apply grid max-w-2xl gap-5;
+}
+
+.settingsPane h2 {
+  @apply text-base font-semibold;
+}
+
+.settingsPane > div:first-child p {
+  @apply mt-1 text-xs text-muted-foreground;
+}
+
+.settingsStatusGrid {
+  @apply grid grid-cols-2 gap-2 md:grid-cols-4;
+}
+
+.settingsStatusGrid div {
+  @apply rounded-md border bg-background p-3;
+}
+
+.settingsStatusGrid span {
+  @apply block text-xs text-muted-foreground;
+}
+
+.settingsStatusGrid strong {
+  @apply mt-1 block text-sm font-medium;
+}
+
+.settingsActionGrid {
+  @apply grid gap-2 sm:grid-cols-2;
+}
+
+.settingsActionGrid button,
+.settingsActionGrid a {
+  @apply min-w-0 justify-start overflow-hidden;
+}
+
+.settingsAccountStatus,
+.settingsPath,
+.settingsField {
+  @apply rounded-md border bg-background p-3;
+}
+
+.settingsStatusHeading {
+  @apply flex items-center justify-between gap-3 text-sm font-medium;
+}
+
+.settingsAccountStatus p,
+.settingsPath p {
+  @apply mt-1 break-words text-xs text-muted-foreground;
+}
+
+.settingsStatusHeading {
+  min-width: 0;
+}
+
+.settingsStatusHeading span:first-child {
+  @apply min-w-0 truncate;
 }
 
 .sr-only {
@@ -759,42 +784,8 @@ main {
 }
 
 @media (max-width: 860px) {
-  .topbar {
-    @apply static flex-col items-stretch;
-  }
-
-  .top-actions {
-    @apply grid grid-cols-[1fr_1fr_auto] gap-2;
-  }
-
-  .top-actions > button:not([aria-label]) {
-    @apply w-full;
-  }
-
-  main {
-    @apply px-3 pt-3 pb-20;
-  }
-
-  .toolbar {
-    @apply static grid-cols-2 rounded-none;
-  }
-
-  .sortFilter,
-  .pageSizeFilter,
-  .viewToggle {
-    @apply hidden;
-  }
-
   #libraryStatus {
     @apply text-left;
-  }
-
-  .pager {
-    @apply grid grid-cols-[1fr_auto_auto_1fr];
-  }
-
-  .pager .viewToggle {
-    display: none;
   }
 
   .createLayout,
@@ -850,11 +841,17 @@ main {
   }
 
   .dialogBody {
-    @apply max-h-[calc(100dvh-5rem)] grid-cols-1;
+    @apply grid-cols-1;
+    grid-template-rows: minmax(0, 1fr) minmax(180px, 42dvh);
   }
 
   .detailPreview {
-    @apply min-h-[320px];
+    width: min(100dvw, 58dvh);
+    max-width: 100%;
+  }
+
+  .detailPanel {
+    @apply border-t border-l-0 p-4;
   }
 
   .detailFacts {

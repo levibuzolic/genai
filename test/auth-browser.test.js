@@ -4,7 +4,7 @@ import os from "node:os"
 import path from "node:path"
 import test from "node:test"
 
-import { createAuthBrowserService } from "../src/auth-browser.js"
+import { createAuthBrowserService } from "../src/auth-browser.ts"
 
 test("auth browser visible login captures token and closes the visible context", async () => {
   const profileDir = await mkdtemp(path.join(os.tmpdir(), "auth-browser-visible-"))

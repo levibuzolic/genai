@@ -1,10 +1,12 @@
-import { Search } from "lucide-react"
+import { Search, X } from "lucide-react"
 import type * as React from "react"
 
-import { NativeSelect } from "@/components/common/NativeSelect"
+import { SelectControl } from "@/components/common/NativeSelect"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { sortOptions } from "@/hooks/use-library"
+import { useMediaQuery } from "@/hooks/use-media-query"
+import { cn } from "@/lib/utils"
 import type { ItemsResponse } from "@/types/domain"
 
 export function LibraryToolbar({
@@ -34,85 +36,104 @@ export function LibraryToolbar({
   setPageSize: (value: string) => void
   setPage: React.Dispatch<React.SetStateAction<number>>
 }) {
+  const showAdvancedControls = useMediaQuery("(min-width: 861px)")
+
   return (
-    <section className="toolbar" aria-label="Library filters">
-      <div className="search-shell">
-        <Search className="size-4 text-muted-foreground" />
+    <section
+      className={cn(
+        "toolbar grid grid-cols-2 gap-2 border-b bg-background p-3",
+        showAdvancedControls && "sticky top-14 z-20 grid-cols-[minmax(240px,1fr)_148px_176px_132px_112px]",
+      )}
+      aria-label="Library filters"
+    >
+      <div className={cn("relative", showAdvancedControls ? "col-span-1" : "col-span-2")}>
+        <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           id="searchInput"
+          className="h-9 pl-9 pr-9"
           value={searchDraft}
           onChange={(event) => setSearchDraft(event.target.value)}
           placeholder="Search prompt, ID, type..."
         />
         {searchDraft && (
-          <Button variant="ghost" size="icon" onClick={() => setSearchDraft("")} aria-label="Clear search">
-            ×
+          <Button
+            className="absolute top-1/2 right-1 size-7 -translate-y-1/2"
+            variant="ghost"
+            size="icon"
+            onClick={() => setSearchDraft("")}
+            aria-label="Clear search"
+          >
+            <X />
           </Button>
         )}
       </div>
 
-      <NativeSelect
+      <SelectControl
         id="mediaSelect"
-        className="mediaFilter"
-        label="Media"
+        className="mediaFilter h-9"
+        aria-label="Media filter"
         value={media}
         onChange={(value) => {
           setPage(1)
           setMedia(value)
         }}
       >
-        <option value="all">All ({facets.media?.all || 0})</option>
+        <option value="all">Media: All ({facets.media?.all || 0})</option>
         <option value="image">Images ({facets.media?.image || 0})</option>
         <option value="video">Videos ({facets.media?.video || 0})</option>
-      </NativeSelect>
-      <NativeSelect
+      </SelectControl>
+      <SelectControl
         id="statusSelect"
-        className="statusFilter"
-        label="Status"
+        className="statusFilter h-9"
+        aria-label="Status filter"
         value={status}
         onChange={(value) => {
           setPage(1)
           setStatus(value)
         }}
       >
-        <option value="all">All ({facets.status?.all || 0})</option>
+        <option value="all">Status: All ({facets.status?.all || 0})</option>
         <option value="downloaded">Downloaded ({facets.status?.downloaded || 0})</option>
         <option value="missing">Missing ({facets.status?.missing || 0})</option>
         <option value="error">Errors ({facets.status?.error || 0})</option>
         <option value="duplicate">Duplicates ({facets.status?.duplicate || 0})</option>
         <option value="unverified">Unverified ({facets.status?.unverified || 0})</option>
         <option value="favorited">Favorited ({facets.status?.favorited || 0})</option>
-      </NativeSelect>
-      <NativeSelect
-        id="sortSelect"
-        className="sortFilter"
-        label="Sort"
-        value={sort}
-        onChange={(value) => {
-          setPage(1)
-          setSort(value)
-        }}
-      >
-        {sortOptions.map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </NativeSelect>
-      <NativeSelect
-        id="pageSizeSelect"
-        className="pageSizeFilter"
-        label="Page"
-        value={pageSize}
-        onChange={(value) => {
-          setPage(1)
-          setPageSize(value)
-        }}
-      >
-        <option value="48">48</option>
-        <option value="96">96</option>
-        <option value="180">180</option>
-      </NativeSelect>
+      </SelectControl>
+      {showAdvancedControls && (
+        <>
+          <SelectControl
+            id="sortSelect"
+            className="sortFilter h-9"
+            aria-label="Sort order"
+            value={sort}
+            onChange={(value) => {
+              setPage(1)
+              setSort(value)
+            }}
+          >
+            {sortOptions.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </SelectControl>
+          <SelectControl
+            id="pageSizeSelect"
+            className="pageSizeFilter h-9"
+            aria-label="Items per page"
+            value={pageSize}
+            onChange={(value) => {
+              setPage(1)
+              setPageSize(value)
+            }}
+          >
+            <option value="48">48 / page</option>
+            <option value="96">96 / page</option>
+            <option value="180">180 / page</option>
+          </SelectControl>
+        </>
+      )}
     </section>
   )
 }

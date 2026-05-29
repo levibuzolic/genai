@@ -13,6 +13,7 @@ describe("CreateResultPanel", () => {
       <CreateResultPanel
         sourceFallback="No source"
         result={{ id: "job-1", status: "pending", outputUrl: "https://example.com/result.png" }}
+        onClearSource={vi.fn<() => void>()}
         onDownload={vi.fn<() => Promise<void>>()}
         onAnimate={vi.fn<() => void>()}
       />,
@@ -31,6 +32,7 @@ describe("CreateResultPanel", () => {
         sourceLabel="Source image"
         sourceFallback="No source"
         result={{ id: "job-2", type: "video", status: "done", outputUrl: "https://example.com/result.mp4", duration: 4 }}
+        onClearSource={vi.fn<() => void>()}
         onDownload={onDownload}
         onAnimate={onAnimate}
       />,

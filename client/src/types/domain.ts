@@ -234,5 +234,6 @@ export type Backup = {
 }
 
 export type ViewMode = "grid" | "list"
+export type MediaFitMode = "fill" | "contain"
 export type SourceKind = "catalog" | "upload" | "url"
 export type UploadSource = "picker" | "drop" | "paste"

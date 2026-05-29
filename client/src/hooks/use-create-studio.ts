@@ -3,7 +3,14 @@ import * as React from "react"
 import { fetchJson } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { isImageItem } from "@/lib/media"
-import { extensionForImageType, fileToDataUrl, getImageFileFromTransfer, sourceLabel, UPLOAD_IMAGE_TYPES } from "@/lib/upload"
+import {
+  extensionForImageType,
+  fileToDataUrl,
+  getImageFileFromTransfer,
+  hasImageTransfer,
+  sourceLabel,
+  UPLOAD_IMAGE_TYPES,
+} from "@/lib/upload"
 import type {
   CatalogItem,
   CreateField,
@@ -12,19 +19,14 @@ import type {
   CreateTemplate,
   CreateTemplateType,
   CreationSource,
-  ItemsResponse,
   SourceKind,
   UploadSource,
 } from "@/types/domain"
-
-const CREATE_SOURCE_SEARCH_DEBOUNCE_MS = 220
 
 export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   const [open, setOpen] = React.useState(false)
   const [modes, setModes] = React.useState<CreateMode[]>([])
   const [sourceKind, setSourceKind] = React.useState<SourceKind>("catalog")
-  const [sourceSearch, setSourceSearch] = React.useState("")
-  const [sourceSearchQuery, setSourceSearchQuery] = React.useState("")
   const [sourceItems, setSourceItems] = React.useState<CatalogItem[]>([])
   const [selectedSourceId, setSelectedSourceId] = React.useState("")
   const [uploadedDataUrl, setUploadedDataUrl] = React.useState<string | null>(null)
@@ -64,43 +66,14 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     })
   }, [])
 
-  const loadSources = React.useCallback(async () => {
-    const params = new URLSearchParams({
-      media: "image",
-      status: "all",
-      sort: "newest",
-      pageSize: "240",
-      page: "1",
-    })
-    if (sourceSearchQuery) params.set("q", sourceSearchQuery)
-    const data = await fetchJson<ItemsResponse>(`/api/items?${params}`)
-    setSourceItems(data.items || [])
-    setSelectedSourceId((current) => {
-      if (current && data.items?.some((item) => item.id === current)) return current
-      return data.items?.[0]?.id || ""
-    })
-  }, [sourceSearchQuery])
-
   React.useEffect(() => {
     void loadModes()
   }, [loadModes])
 
   React.useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setSourceSearchQuery(sourceSearch.trim())
-    }, CREATE_SOURCE_SEARCH_DEBOUNCE_MS)
-    return () => window.clearTimeout(timer)
-  }, [sourceSearch])
-
-  React.useEffect(() => {
     if (!open) return
     void loadModes()
   }, [loadModes, open])
-
-  React.useEffect(() => {
-    if (!open) return
-    void loadSources()
-  }, [loadSources, open])
 
   React.useEffect(() => {
     if (!modeId || !selectedMode) return
@@ -123,9 +96,35 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
       await openCreator({ sourceKind: "upload" })
       await acceptUploadFile(file, "paste")
     }
+    const onDragOver = (event: DragEvent) => {
+      if (!hasImageTransfer(event.dataTransfer)) return
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy"
+      setIsDraggingUpload(true)
+    }
+    const onDragLeave = (event: DragEvent) => {
+      if (event.relatedTarget === null) setIsDraggingUpload(false)
+    }
+    const onDrop = async (event: DragEvent) => {
+      if (event.defaultPrevented) return
+      const file = getImageFileFromTransfer(event.dataTransfer)
+      if (!file) return
+      event.preventDefault()
+      setIsDraggingUpload(false)
+      await openCreator({ sourceKind: "upload" })
+      await acceptUploadFile(file, "drop")
+    }
 
+    window.addEventListener("dragover", onDragOver)
+    window.addEventListener("dragleave", onDragLeave)
+    window.addEventListener("drop", onDrop)
     window.addEventListener("paste", onPaste)
-    return () => window.removeEventListener("paste", onPaste)
+    return () => {
+      window.removeEventListener("dragover", onDragOver)
+      window.removeEventListener("dragleave", onDragLeave)
+      window.removeEventListener("drop", onDrop)
+      window.removeEventListener("paste", onPaste)
+    }
   }, [])
 
   async function openCreator(
@@ -293,8 +292,8 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
 
   function buildCreateSourcePayload() {
     if (sourceKind === "catalog") {
-      if (!selectedSource) throw new Error("Choose a collection image.")
-      return { kind: "catalog", itemId: selectedSource.id }
+      if (!selectedSourceId) throw new Error("Attach a collection image.")
+      return { kind: "catalog", itemId: selectedSourceId }
     }
     if (sourceKind === "upload") {
       if (!uploadedDataUrl) throw new Error("Choose, drop, or paste an image.")
@@ -312,10 +311,10 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   }
 
   function buildReusableTemplateSource(): CreationSource | null {
-    if (sourceKind === "catalog" && selectedSource) {
-      return selectedSource.outputUrl
-        ? { kind: "catalog", itemId: selectedSource.id, url: selectedSource.outputUrl }
-        : { kind: "catalog", itemId: selectedSource.id }
+    if (sourceKind === "catalog" && selectedSourceId) {
+      return selectedSource?.outputUrl
+        ? { kind: "catalog", itemId: selectedSourceId, url: selectedSource.outputUrl }
+        : { kind: "catalog", itemId: selectedSourceId }
     }
     if (sourceKind === "url" && sourceUrl.trim()) {
       return { kind: "url", url: sourceUrl.trim() }
@@ -341,13 +340,18 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   }
 
   function resetCreateForm() {
+    clearSource()
+    setPrompt("")
+    setResult(null)
+    setStatus("Choose a source and mode.")
+  }
+
+  function clearSource() {
+    setSelectedSourceId("")
     setUploadedDataUrl(null)
     setUploadedName("")
     setUploadMeta("No file selected.")
     setSourceUrl("")
-    setPrompt("")
-    setResult(null)
-    setStatus("Choose a source and mode.")
   }
 
   function animateCreateResult() {
@@ -367,12 +371,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     modes,
     sourceKind,
     setSourceKind,
-    sourceSearch,
-    setSourceSearch,
-    sourceItems,
     selectedSource,
-    selectedSourceId,
-    setSelectedSourceId,
     uploadedDataUrl,
     uploadedName,
     uploadMeta,
@@ -404,6 +403,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     setIsDraggingUpload,
     openCreator,
     acceptUploadFile,
+    clearSource,
     submitCreateJob,
     downloadCreateJob,
     importTemplate,

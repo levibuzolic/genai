@@ -5,7 +5,6 @@ import { MediaCard } from "@/components/media/MediaCard"
 import { cn } from "@/lib/utils"
 
 import { ActiveFilters } from "./ActiveFilters"
-import { InspectorPanel } from "./InspectorPanel"
 import { LibraryToolbar } from "./LibraryToolbar"
 import { PagerControls } from "./PagerControls"
 import { SummaryStrip } from "./SummaryStrip"
@@ -32,11 +31,6 @@ export function LibraryView({
   view,
   setView,
   clearFilters,
-  backups,
-  selectedBackup,
-  setSelectedBackup,
-  onCreateBackup,
-  onRestoreBackup,
   onOpenCreate,
   onDetails,
   onCopyPrompt,
@@ -91,7 +85,7 @@ export function LibraryView({
           data-view={view}
         >
           {itemsLoading && !itemsData
-            ? Array.from({ length: 12 }, (_, index) => <MediaSkeleton key={index} />)
+            ? Array.from({ length: 12 }, (_, index) => <MediaSkeleton key={index} view={view} />)
             : deferredItems.map((item) => (
                 <MediaCard
                   key={item.id}
@@ -112,14 +106,6 @@ export function LibraryView({
           </section>
         )}
       </div>
-
-      <InspectorPanel
-        backups={backups}
-        selectedBackup={selectedBackup}
-        setSelectedBackup={setSelectedBackup}
-        onCreateBackup={onCreateBackup}
-        onRestoreBackup={onRestoreBackup}
-      />
     </section>
   )
 }

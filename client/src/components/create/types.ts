@@ -16,12 +16,7 @@ import type {
 export type CreateStudioProps = {
   sourceKind: SourceKind
   setSourceKind: (kind: SourceKind) => void
-  sourceSearch: string
-  setSourceSearch: (value: string) => void
-  sourceItems: CatalogItem[]
   selectedSource: CatalogItem | null
-  selectedSourceId: string
-  setSelectedSourceId: (id: string) => void
   uploadMeta: string
   uploadedDataUrl: string | null
   uploadedName: string
@@ -43,6 +38,7 @@ export type CreateStudioProps = {
   setIsDraggingUpload: (value: boolean) => void
   fileInputRef: React.RefObject<HTMLInputElement | null>
   onUploadFile: (file: File | null, source: UploadSource) => Promise<void>
+  onClearSource: () => void
   onSubmit: () => Promise<void>
   onReset: () => void
   onClose: () => void

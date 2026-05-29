@@ -15,7 +15,7 @@ type AutoSyncStatusProps = {
 export function AutoSyncStatus({ autoSync, className }: AutoSyncStatusProps) {
   const enabled = Boolean(autoSync?.enabled)
   const hasError = Boolean(autoSync?.lastError)
-  const badgeVariant = hasError ? "danger" : enabled ? "success" : "muted"
+  const badgeVariant = hasError ? "destructive" : enabled ? "default" : "secondary"
   const nextRun = enabled ? formatNullableTime(autoSync?.nextRunAt) : "Off"
   const lastRun = formatRun(autoSync?.lastRunAt, autoSync?.lastReason)
   const skipped = formatRun(autoSync?.lastSkippedAt, autoSync?.lastSkipReason)

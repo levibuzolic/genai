@@ -2,6 +2,7 @@ import { ExternalLink, Save, X } from "lucide-react"
 import * as React from "react"
 
 import { Field } from "@/components/common/Field"
+import { SelectControl } from "@/components/common/NativeSelect"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -39,12 +40,11 @@ export function TemplateTools(props: CreateStudioProps) {
           onChange={(event) => props.setTemplateSearch(event.target.value)}
           placeholder="Filter templates"
         />
-        <select
+        <SelectControl
           id="createTemplateSelect"
-          className="native-select"
           value={props.selectedTemplateId}
-          onChange={(event) => {
-            const template = props.templates.find((entry) => entry.id === event.target.value)
+          onChange={(value) => {
+            const template = props.templates.find((entry) => entry.id === value)
             if (template) props.onApplyTemplate(template)
           }}
         >
@@ -54,7 +54,7 @@ export function TemplateTools(props: CreateStudioProps) {
               {template.label} · {template.type}
             </option>
           ))}
-        </select>
+        </SelectControl>
         {selectedTemplate && (
           <div className="selectedTemplateLine">
             <span>{selectedTemplate.label}</span>
@@ -66,16 +66,15 @@ export function TemplateTools(props: CreateStudioProps) {
       </div>
       <div className="templateSaveInline">
         <Input value={saveLabel} onChange={(event) => setSaveLabel(event.target.value)} placeholder="Save current settings as..." />
-        <select
-          className="native-select"
+        <SelectControl
           value={props.templateType}
-          onChange={(event) => props.setTemplateType(event.target.value as typeof props.templateType)}
+          onChange={(value) => props.setTemplateType(value as typeof props.templateType)}
           aria-label="Template type"
         >
           <option value="image">Image edit</option>
           <option value="video">Video</option>
           <option value="combo">Edit + video</option>
-        </select>
+        </SelectControl>
         <Button
           type="button"
           variant="outline"

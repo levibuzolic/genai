@@ -9,17 +9,19 @@ export function RailButton({
   active,
   id,
   onClick,
+  className,
 }: {
   icon: React.ElementType
   label: string
   active?: boolean
   id?: string
   onClick?: () => void
+  className?: string
 }) {
   return (
     <Button
       id={id}
-      className={cn("nav-button", active && "is-active")}
+      className={cn("h-9 w-full justify-start px-2.5 text-muted-foreground", active && "text-foreground", className)}
       type="button"
       variant={active ? "secondary" : "ghost"}
       aria-label={label}

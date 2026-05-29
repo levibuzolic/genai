@@ -2,7 +2,7 @@
 
 ## Stack
 
-- Backend: Node.js ESM in `src/server.js`, tested with `node --test`.
+- Backend: Node.js ESM/TypeScript in `src/server.ts`, tested with `node --test`.
 - Frontend: React 19 + Vite 8 in `client/src`, built into `public/`.
 - React Compiler: enabled in `vite.config.ts` with `@vitejs/plugin-react`'s `reactCompilerPreset()` via `@rolldown/plugin-babel`.
 - Styling: Tailwind CSS 4 via `@tailwindcss/vite`, with shadcn-style local primitives in `client/src/components/ui`.
@@ -25,7 +25,7 @@ Do not rely on Vite alone for type safety. The build intentionally includes `pnp
 
 ## Auth Browser
 
-- Backend-owned browser auth lives in `src/auth-browser.js` and is wired through `/api/auth/browser/*` routes.
+- Backend-owned browser auth lives in `src/auth-browser.ts` and is wired through `/api/auth/browser/*` routes.
 - Initial login is intentionally visible because the source account requires email/password/OTP.
 - After login, the server reuses the same persistent Chrome profile headlessly to refresh Clerk tokens.
 - The default profile path is `MEDIA_DIR/_auth_browser_profile`; override with `AUTH_BROWSER_PROFILE_DIR`.
@@ -44,9 +44,13 @@ Do not rely on Vite alone for type safety. The build intentionally includes `pnp
 TypeScript is strict. Keep it that way.
 
 - Avoid implicit `any`, optional-prop ambiguity, and unchecked indexed access.
-- Use shared domain types from `client/src/types/domain.ts`.
+- Use shared domain types from `client/src/types/domain.ts` (client) or `src/types/domain.ts` (server)
 - Feature-level prop types belong near the feature, such as `components/create/types.ts` and `components/library/types.ts`.
-- Prefer typed helpers in `client/src/lib` over ad hoc inline parsing or formatting.
+- Prefer typed helpers in `client/src/lib` (client) or `src/lib` (server) over ad hoc inline parsing or formatting.
+- Use `as const` to get concrete types for arrays, sets, and objects where appropriate.
+- Prefer `satisfies` for type assertions to preserve literal types and catch excess properties.
+- Use discriminated unions for complex state or config objects with multiple variants.
+- Explicit return types on exported functions are required. For internal functions, prefer inference unless the signature is complex or non-obvious.
 
 ## React Compiler
 

@@ -4,9 +4,36 @@ import path from "node:path"
 
 const THUMBNAIL_SUBDIR = "_thumbnails"
 
-let processRunnerOverride = null
+type ProcessResult = {
+  stdout: string | Buffer
+  stderr: string | Buffer
+}
 
-async function ensureVideoThumbnail(mediaDir, localFile, options = {}) {
+type ProcessRunner = (command: string, args: readonly string[]) => Promise<ProcessResult | void>
+
+type ThumbnailOptions = {
+  ffmpegPath?: string
+  runProcess?: ProcessRunner
+}
+
+type ThumbnailResult = {
+  skipped?: boolean
+  reason?: "not-video"
+  thumbnailFile?: string | null
+  created?: boolean
+  generatedAt?: string
+  error?: string
+}
+
+type NodeProcessError = Error & {
+  code?: string
+  stdout?: string | Buffer
+  stderr?: string | Buffer
+}
+
+let processRunnerOverride: ProcessRunner | null = null
+
+async function ensureVideoThumbnail(mediaDir: string, localFile: string, options: ThumbnailOptions = {}): Promise<ThumbnailResult> {
   if (!isMp4(localFile)) {
     return { skipped: true, reason: "not-video" }
   }
@@ -33,7 +60,7 @@ async function ensureVideoThumbnail(mediaDir, localFile, options = {}) {
   ]
 
   try {
-    let lastError = null
+    let lastError: unknown = null
 
     for (const args of attempts) {
       try {
@@ -75,17 +102,17 @@ async function ensureVideoThumbnail(mediaDir, localFile, options = {}) {
   }
 }
 
-function getThumbnailRelativePath(localFile) {
+function getThumbnailRelativePath(localFile: string): string {
   const normalized = toPosixPath(localFile)
   const parsed = path.posix.parse(normalized)
   return path.posix.join(THUMBNAIL_SUBDIR, parsed.dir, `${parsed.name}.jpg`)
 }
 
-function getThumbnailDir(mediaDir) {
+function getThumbnailDir(mediaDir: string): string {
   return path.join(mediaDir, THUMBNAIL_SUBDIR)
 }
 
-function setThumbnailProcessRunnerForTests(runProcess) {
+function setThumbnailProcessRunnerForTests(runProcess: ProcessRunner | null): () => void {
   const previous = processRunnerOverride
   processRunnerOverride = runProcess
 
@@ -94,11 +121,11 @@ function setThumbnailProcessRunnerForTests(runProcess) {
   }
 }
 
-function getDefaultFfmpegPath() {
-  return process.env.FFMPEG_PATH || "ffmpeg"
+function getDefaultFfmpegPath(): string {
+  return process.env["FFMPEG_PATH"] || "ffmpeg"
 }
 
-function runProcessCommand(command, args) {
+function runProcessCommand(command: string, args: readonly string[]): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
     execFile(command, args, { maxBuffer: 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
@@ -113,7 +140,7 @@ function runProcessCommand(command, args) {
   })
 }
 
-async function existingFile(filePath) {
+async function existingFile(filePath: string): Promise<boolean> {
   try {
     const fileStat = await stat(filePath)
     return fileStat.isFile() && fileStat.size > 0
@@ -122,7 +149,7 @@ async function existingFile(filePath) {
   }
 }
 
-async function removeIfExists(filePath) {
+async function removeIfExists(filePath: string): Promise<void> {
   try {
     await unlink(filePath)
   } catch {
@@ -130,7 +157,7 @@ async function removeIfExists(filePath) {
   }
 }
 
-function resolveInside(rootDir, relativePath) {
+function resolveInside(rootDir: string, relativePath: string): string {
   const root = path.resolve(rootDir)
   const resolved = path.resolve(root, relativePath)
   const prefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`
@@ -142,25 +169,29 @@ function resolveInside(rootDir, relativePath) {
   return resolved
 }
 
-function isMp4(value) {
+function isMp4(value: unknown): value is string {
   return typeof value === "string" && value.toLowerCase().endsWith(".mp4")
 }
 
-function isMissingExecutableError(error) {
-  return error?.code === "ENOENT"
+function isMissingExecutableError(error: unknown): error is NodeProcessError {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT")
 }
 
-function formatThumbnailError(error, ffmpegPath) {
+function formatThumbnailError(error: unknown, ffmpegPath: string): string {
   if (isMissingExecutableError(error)) {
     return `${ffmpegPath} is not available on PATH`
   }
 
-  const stderr = String(error?.stderr || "").trim()
-  const message = stderr || error?.message || String(error)
-  return message.split(/\r?\n/)[0].slice(0, 240)
+  const stderr = isNodeProcessErrorLike(error) ? String(error.stderr || "").trim() : ""
+  const message = stderr || (error instanceof Error ? error.message : String(error))
+  return (message.split(/\r?\n/)[0] ?? "").slice(0, 240)
 }
 
-function toPosixPath(value) {
+function isNodeProcessErrorLike(error: unknown): error is Partial<NodeProcessError> {
+  return Boolean(error && typeof error === "object")
+}
+
+function toPosixPath(value: unknown): string {
   return String(value || "")
     .split(path.sep)
     .join("/")

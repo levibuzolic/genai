@@ -1,25 +1,26 @@
 import { Upload } from "lucide-react"
 
 import { getImageFileFromTransfer } from "@/lib/upload"
-import { cn } from "@/lib/utils"
 
 import type { CreateStudioProps } from "./types"
 
 export function UploadSourcePanel(props: CreateStudioProps) {
   return (
-    <div id="uploadSourcePanel" className={cn("sourcePanel", props.sourceKind !== "upload" && "hidden")}>
+    <div id="uploadSourcePanel" className="sourcePanel">
       <button
         id="createUploadDropZone"
         type="button"
         aria-label="Choose, drop, or paste an image"
-        className={cn("uploadDropZone", props.isDraggingUpload && "is-dragging")}
+        className={props.isDraggingUpload ? "uploadDropZone is-dragging" : "uploadDropZone"}
         onClick={() => props.fileInputRef.current?.click()}
         onDragEnter={(event) => {
           event.preventDefault()
+          event.stopPropagation()
           props.setIsDraggingUpload(true)
         }}
         onDragOver={(event) => {
           event.preventDefault()
+          event.stopPropagation()
           event.dataTransfer.dropEffect = "copy"
           props.setIsDraggingUpload(true)
         }}
@@ -28,6 +29,7 @@ export function UploadSourcePanel(props: CreateStudioProps) {
         }}
         onDrop={(event) => {
           event.preventDefault()
+          event.stopPropagation()
           props.setIsDraggingUpload(false)
           void props.onUploadFile(getImageFileFromTransfer(event.dataTransfer), "drop")
         }}

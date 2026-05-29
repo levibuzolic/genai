@@ -1,9 +1,10 @@
-import { Loader2, Sparkles, WandSparkles } from "lucide-react"
+import { Loader2, Sparkles, X } from "lucide-react"
 import * as React from "react"
 
 import { Field } from "@/components/common/Field"
-import { Badge } from "@/components/ui/badge"
+import { SelectControl } from "@/components/common/NativeSelect"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { Textarea } from "@/components/ui/textarea"
 import { mediaUrlForItem } from "@/lib/media"
 
@@ -34,38 +35,30 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
     <section id="createArea" ref={ref} className="create-studio createArea" aria-label="Create media">
       <div className="createHeader">
         <div>
-          <Badge variant="muted">
-            <WandSparkles className="size-3" />
-            Create
-          </Badge>
           <h2 id="createTitle">Create</h2>
           <p id="createStatus">{props.createStatus}</p>
         </div>
-        <Button id="hideCreateButton" variant="outline" onClick={props.onClose}>
-          Hide creator
+        <Button id="hideCreateButton" variant="outline" size="icon" onClick={props.onClose} aria-label="Close creator">
+          <X />
+          <span className="sr-only">Close creator</span>
         </Button>
       </div>
 
       <div className="createLayout">
         <section className="createPanel" aria-label="Creation controls">
           <SourceTabs value={props.sourceKind} onChange={props.setSourceKind} />
-          <CatalogSourcePanel {...props} />
-          <UploadSourcePanel {...props} />
-          <UrlSourcePanel {...props} />
+          {props.sourceKind === "catalog" && <CatalogSourcePanel {...props} />}
+          {props.sourceKind === "upload" && <UploadSourcePanel {...props} />}
+          {props.sourceKind === "url" && <UrlSourcePanel {...props} />}
 
           <Field label="Mode">
-            <select
-              id="createModeSelect"
-              className="native-select"
-              value={props.modeId}
-              onChange={(event) => props.setModeId(event.target.value)}
-            >
+            <SelectControl id="createModeSelect" value={props.modeId} onChange={(value) => props.setModeId(value)}>
               {props.modes.map((mode) => (
                 <option key={mode.id} value={mode.id} disabled={mode.disabled}>
                   {mode.disabled ? `${mode.label} (import required)` : mode.label}
                 </option>
               ))}
-            </select>
+            </SelectControl>
           </Field>
 
           {props.promptField && (
@@ -81,22 +74,17 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
 
           {props.qualityField && (
             <Field id="createQualityLabel" label="Quality">
-              <select
-                id="createQualitySelect"
-                className="native-select"
-                value={props.quality}
-                onChange={(event) => props.setQuality(event.target.value)}
-              >
+              <SelectControl id="createQualitySelect" value={props.quality} onChange={(value) => props.setQuality(value)}>
                 {props.qualityField.options?.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
-              </select>
+              </SelectControl>
             </Field>
           )}
 
-          <div className="createActions">
+          <ButtonGroup className="createActions">
             <Button id="createSubmitButton" onClick={() => void props.onSubmit()} disabled={props.createSubmitting}>
               {props.createSubmitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
               Create
@@ -104,16 +92,17 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
             <Button id="createResetButton" variant="outline" onClick={props.onReset}>
               Reset
             </Button>
-          </div>
+          </ButtonGroup>
 
           <TemplateTools {...props} />
         </section>
 
         <CreateResultPanel
           sourcePreviewUrl={sourcePreviewUrl}
-          sourceLabel={props.uploadedName || props.selectedSource?.prompt}
+          sourceLabel={props.uploadedName || props.selectedSource?.prompt || props.sourceUrl}
           sourceFallback={sourceFallback}
           result={props.createResult}
+          onClearSource={props.onClearSource}
           onDownload={props.onDownload}
           onAnimate={props.onAnimate}
         />

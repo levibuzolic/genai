@@ -7,7 +7,7 @@ import test from "node:test"
 
 import { chromium } from "@playwright/test"
 
-const SERVER_PATH = new URL("../src/server.js", import.meta.url)
+const SERVER_PATH = new URL("../src/server.ts", import.meta.url)
 const PNG_BYTES = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", "base64")
 
 test("browser UI smoke covers filters, menus, lazy media, and stable card rendering", async (t) => {
@@ -31,7 +31,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
 
     assert.equal(await page.locator(".card").count(), 48)
     assert.equal(await page.locator("#emptyState").count(), 0)
-    assert.deepEqual(await visibleTopActions(page), ["Sync & download", "Blur", "More"])
+    assert.deepEqual(await visibleTopActions(page), ["Sync", "View", "Settings"])
     assert.deepEqual(await page.locator(".summaryCard span").allTextContents(), ["Missing", "Unverified", "Favorited", "Orphans"])
 
     await page.locator("#templateViewButton").click()
@@ -40,7 +40,9 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     await page.getByRole("button", { name: "Library" }).click()
     await page.waitForSelector(".card", { timeout: 10000 })
 
+    await openViewOptions(page)
     await page.locator("#mediaBlurButton").click()
+    await page.keyboard.press("Escape")
     assert.notEqual(
       await page
         .locator(".preview img")
@@ -48,32 +50,48 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
         .evaluate((node) => getComputedStyle(node).filter),
       "none",
     )
-    await page.locator("#mediaBlurButton").click()
 
-    await page.getByRole("button", { name: "More actions" }).click()
-    assert.deepEqual(await page.getByRole("menuitem").allTextContents(), [
-      "Full rescan",
-      "Download missing",
-      "Retry errors",
-      "Thumbnails",
-      "Verify",
-      "Connect account",
-      "Refresh token",
-      "Close browser",
-      "Export database",
-    ])
+    assert.equal(await page.locator(".inspector-panel").count(), 0)
+    await page.getByRole("button", { name: "Settings" }).click()
+    await page.waitForSelector("#settingsDialog", { timeout: 5000 })
+    assert.deepEqual(await page.locator(".settingsSidebar button").allTextContents(), ["Library", "Account", "Backups"])
+    assert.equal(await page.getByRole("button", { name: "Full rescan" }).isVisible(), true)
+    assert.equal(await page.getByRole("link", { name: "Export database" }).isVisible(), true)
+    await page.getByRole("button", { name: "Backups" }).click()
+    assert.equal(await page.locator("#backupSelect").isVisible(), true)
+    assert.equal(await page.getByRole("button", { name: "Create backup" }).isVisible(), true)
     await page.keyboard.press("Escape")
+    await page.waitForSelector("#settingsDialog", { state: "detached", timeout: 5000 })
 
     const cardActions = await page.locator(".card").first().locator(".cardActions").boundingBox()
     assert.ok(cardActions)
-    assert.ok(cardActions.height <= 72, `expected compact card actions, got ${cardActions.height}px`)
-    assert.deepEqual((await page.locator(".card").first().locator(".cardActions *").allTextContents()).filter(Boolean), [
-      "Create",
-      "Details",
-      "Prompt",
-      "Open",
-    ])
+    assert.ok(cardActions.height <= 36, `expected compact card actions, got ${cardActions.height}px`)
+    assert.deepEqual(
+      await page
+        .locator(".card")
+        .first()
+        .locator(".cardActions [aria-label]")
+        .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label"))),
+      ["Create", "Details", "Prompt", "Open"],
+    )
     assert.match(await page.locator('.card[data-media="video"] .cardMeta').first().textContent(), /0:12/)
+
+    const initialMediaFit = await page.evaluate(() => ({
+      rootFill: document.querySelector(".media-fit-fill") !== null,
+      imageFit: getComputedStyle(document.querySelector(".preview img")).objectFit,
+    }))
+    assert.equal(initialMediaFit.rootFill, true)
+    assert.equal(initialMediaFit.imageFit, "cover")
+    await openViewOptions(page)
+    await page.locator("#mediaFitContainItem").click()
+    const containedMediaFit = await page.evaluate(() => ({
+      rootContain: document.querySelector(".media-fit-contain") !== null,
+      imageFit: getComputedStyle(document.querySelector(".preview img")).objectFit,
+    }))
+    assert.equal(containedMediaFit.rootContain, true)
+    assert.equal(containedMediaFit.imageFit, "contain")
+    assert.equal(await page.locator("#mediaFitContainItem").getAttribute("aria-checked"), "true")
+    await page.keyboard.press("Escape")
 
     const lazyState = await page.evaluate(() => {
       const media = [...document.querySelectorAll(".preview img, .preview video")]
@@ -81,6 +99,8 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
         loaded: media.filter((node) => node.getAttribute("src")).length,
         deferred: media.filter((node) => node.dataset.src).length,
         nativeLazy: media.filter((node) => node.getAttribute("loading") === "lazy").length,
+        mountedVideos: document.querySelectorAll(".card video").length,
+        videoPosters: document.querySelectorAll('.card[data-media="video"] .videoPosterButton').length,
         visibleLoaded: [...document.querySelectorAll(".card")]
           .filter((card) => {
             const rect = card.getBoundingClientRect()
@@ -92,18 +112,12 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.ok(lazyState.loaded > 0)
     assert.equal(lazyState.deferred, 0)
     assert.ok(lazyState.nativeLazy > 0)
+    assert.equal(lazyState.mountedVideos, 0)
+    assert.ok(lazyState.videoPosters > 0)
     assert.equal(lazyState.visibleLoaded, true)
 
-    const videoStayedMounted = await page.evaluate(async () => {
-      const video = [...document.querySelectorAll(".card video")].find((node) => node.getAttribute("src"))
-      if (!video) return false
-
-      video.dataset.stableMarker = "present"
-      document.querySelector("#sortSelect").dispatchEvent(new Event("change", { bubbles: true }))
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      return [...document.querySelectorAll(".card video")].some((node) => node.dataset.stableMarker === "present")
-    })
-    assert.equal(videoStayedMounted, true)
+    await page.locator('.card[data-media="video"] .videoPosterButton').first().click()
+    await page.waitForSelector('.card[data-media="video"] video[src]', { timeout: 5000 })
 
     await page.locator("#createViewButton").click()
     await page.waitForSelector(".createOverlay #createArea:not([hidden])", { timeout: 5000 })
@@ -127,8 +141,12 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.ok(createOverlay.panelHeight > createOverlay.viewportHeight * 0.9)
     assert.equal(await page.locator("#libraryArea").isHidden(), false)
     assert.equal(await page.locator("#createModeSelect").isVisible(), true)
-    await page.waitForFunction(() => document.querySelector("#createCatalogSelect")?.options.length > 0)
-    assert.equal((await page.locator("#createCatalogSelect option").count()) > 0, true)
+    assert.equal(await page.locator("#createCatalogSelect").count(), 0)
+    await page.locator('[data-source-kind="url"]').click()
+    await page.locator("#createUrlInput").fill("https://assets.example/source.png")
+    assert.equal(await page.locator('#createSourcePreview img[src="https://assets.example/source.png"]').count(), 1)
+    await page.locator("#createClearSourceButton").click()
+    assert.equal(await page.locator("#createSourcePreview img").count(), 0)
     await page.locator('[data-source-kind="upload"]').click()
     await page.evaluate(() => {
       const file = new File([new Uint8Array([137, 80, 78, 71])], "drop.png", { type: "image/png" })
@@ -161,18 +179,65 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     await page.waitForSelector(".createOverlay", { state: "detached", timeout: 5000 })
     await page.waitForSelector("#libraryArea:not([hidden])", { timeout: 5000 })
 
-    await page.selectOption("#statusSelect", "missing")
+    await page.evaluate(() => {
+      const file = new File([new Uint8Array([137, 80, 78, 71])], "global-drop.png", { type: "image/png" })
+      const data = new DataTransfer()
+      data.items.add(file)
+      window.dispatchEvent(
+        new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: data,
+        }),
+      )
+    })
+    await page.waitForSelector(".createOverlay #createArea", { timeout: 5000 })
+    await page.waitForFunction(() => document.querySelector("#createUploadMeta")?.textContent.includes("Dropped global-drop.png"))
+    assert.equal(await page.locator('[data-source-kind="upload"][data-state="active"]').isVisible(), true)
+    await page.locator("#hideCreateButton").click()
+    await page.waitForSelector(".createOverlay", { state: "detached", timeout: 5000 })
+
+    await page.locator('.card[data-media="image"] .cardCreateButton').first().click()
+    await page.waitForSelector(".createOverlay #createArea", { timeout: 5000 })
+    assert.equal(await page.locator("#createSourcePreview img").count(), 1)
+    assert.equal(await page.locator("#createClearSourceButton").isVisible(), true)
+    await page.locator("#createClearSourceButton").click()
+    assert.equal(await page.locator("#createSourcePreview img").count(), 0)
+    await page.locator("#hideCreateButton").click()
+    await page.waitForSelector(".createOverlay", { state: "detached", timeout: 5000 })
+
+    await page.locator("#statusSelect").click()
+    await page.getByRole("option", { name: /Missing/ }).click()
     await page.waitForURL(/status=missing/, { timeout: 5000 })
     assert.equal(new URL(page.url()).searchParams.get("status"), "missing")
     await page.reload()
     await page.waitForSelector(".card", { timeout: 10000 })
-    assert.equal(await page.locator("#statusSelect").inputValue(), "missing")
+    assert.match(await page.locator("#statusSelect").textContent(), /Missing/)
     assert.equal(await page.locator(".card").count(), 1)
 
     await page.locator(".detailsButton").first().click()
     await page.waitForSelector("#itemDialog", { timeout: 5000 })
     assert.equal(await page.locator("#detailCopyPromptButton").isVisible(), true)
     assert.equal(await page.locator("#detailCopyIdButton").isVisible(), true)
+    const detailLayout = await page.evaluate(() => {
+      const title = document.querySelector("#detailTitle")
+      const body = document.querySelector(".dialogBody")
+      const preview = document.querySelector("#detailPreview")
+      const panel = document.querySelector(".detailPanel")
+      const previewRect = preview?.getBoundingClientRect()
+
+      return {
+        bodyOverflow: body ? getComputedStyle(body).overflow : "",
+        panelOverflowY: panel ? getComputedStyle(panel).overflowY : "",
+        previewWidth: previewRect?.width || 0,
+        previewHeight: previewRect?.height || 0,
+        titleVisible: title ? getComputedStyle(title).position !== "absolute" : true,
+      }
+    })
+    assert.equal(detailLayout.bodyOverflow, "hidden")
+    assert.equal(detailLayout.panelOverflowY, "auto")
+    assert.ok(Math.abs(detailLayout.previewWidth - detailLayout.previewHeight) < 2)
+    assert.equal(detailLayout.titleVisible, false)
 
     const mobilePage = await browser.newPage({
       viewport: {
@@ -199,14 +264,14 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
         return {
           firstCardTop,
           firstRowCount,
-          pageSizeVisible: getComputedStyle(document.querySelector(".pageSizeFilter")).display !== "none",
-          viewToggleVisible: getComputedStyle(document.querySelector(".viewToggle")).display !== "none",
+          pageSizeRendered: document.querySelector(".pageSizeFilter") !== null,
+          viewToggleRendered: document.querySelector(".viewToggle") !== null,
         }
       })
       assert.ok(mobileLayout.firstCardTop < 844, `expected first mobile card in first viewport, got y=${mobileLayout.firstCardTop}`)
       assert.equal(mobileLayout.firstRowCount, 2)
-      assert.equal(mobileLayout.pageSizeVisible, false)
-      assert.equal(mobileLayout.viewToggleVisible, false)
+      assert.equal(mobileLayout.pageSizeRendered, false)
+      assert.equal(mobileLayout.viewToggleRendered, false)
 
       await mobilePage.locator(".detailsButton").first().click()
       await mobilePage.waitForSelector("#itemDialog", { timeout: 5000 })
@@ -246,10 +311,15 @@ async function writeFixtureCatalog(mediaDir) {
     const type = isVideo ? "video" : "edit"
     const date = "2026-05-27"
     const localFile = `${date}/${date}_${type}_${id}.${extension}`
+    const thumbnailFile = isVideo && !isMissing ? `_thumbnails/${date}/${date}_${type}_${id}.jpg` : null
 
     if (!isMissing) {
       await mkdir(path.join(mediaDir, date), { recursive: true })
       await writeFile(path.join(mediaDir, localFile), isVideo ? new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]) : PNG_BYTES)
+      if (thumbnailFile) {
+        await mkdir(path.join(mediaDir, "_thumbnails", date), { recursive: true })
+        await writeFile(path.join(mediaDir, thumbnailFile), PNG_BYTES)
+      }
     }
 
     items.push({
@@ -260,6 +330,8 @@ async function writeFixtureCatalog(mediaDir) {
       localFile: isMissing ? null : localFile,
       size: isMissing ? null : isVideo ? 8 : PNG_BYTES.byteLength,
       duration: isVideo ? 12 : null,
+      thumbnailFile,
+      thumbnailError: null,
       createdAt: 1779769900 - index,
       createdAtIso: new Date((1779769900 - index) * 1000).toISOString(),
       prompt: `Fixture prompt ${index}`,
@@ -372,6 +444,11 @@ function listenOnRandomPort(server) {
 
 function visibleTopActions(page) {
   return page.locator(".actions > button:not([hidden]), .actions > details > summary").allTextContents()
+}
+
+async function openViewOptions(page) {
+  await page.locator("#viewOptionsButton").click()
+  await page.waitForSelector('[data-slot="dropdown-menu-content"]', { timeout: 5000 })
 }
 
 function uuidForIndex(index) {

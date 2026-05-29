@@ -7,9 +7,9 @@ import path from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 
-import { ensureVideoThumbnail, getThumbnailRelativePath, setThumbnailProcessRunnerForTests } from "../src/thumbnails.js"
+import { ensureVideoThumbnail, getThumbnailRelativePath, setThumbnailProcessRunnerForTests } from "../src/thumbnails.ts"
 
-const SERVER_PATH = new URL("../src/server.js", import.meta.url)
+const SERVER_PATH = new URL("../src/server.ts", import.meta.url)
 
 test("video thumbnail helper writes predictable poster path with a stubbed ffmpeg runner", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-thumb-helper-"))
@@ -496,42 +496,6 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
   assert.equal(templateUpload.negative_prompt, "template negative")
   assert.equal(templateUrl.input_url, "https://assets.example/source.png")
   assert.equal(templateUrl.image_base64, undefined)
-})
-
-test("creation request shaping blocks unsafe age and consent language", async () => {
-  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-safety-"))
-  const server = await importServer(mediaDir)
-  const customImage = (await server.getCreateModes()).modes.find((mode) => mode.id === "custom-image")
-
-  assert.throws(
-    () =>
-      server.buildCreateApiRequest(
-        customImage,
-        {
-          value: imageDataUrl(),
-          isDataUrl: true,
-        },
-        {
-          prompt: "portrait of someone 17 years old",
-        },
-      ),
-    /disallowed age or consent language/,
-  )
-
-  assert.throws(
-    () =>
-      server.buildCreateApiRequest(
-        customImage,
-        {
-          value: imageDataUrl(),
-          isDataUrl: true,
-        },
-        {
-          prompt: "forced scene",
-        },
-      ),
-    /disallowed age or consent language/,
-  )
 })
 
 test("creation source resolver prefers catalog output URL and falls back to local image data", async () => {

@@ -1,4 +1,5 @@
-import { Copy, ExternalLink, FileDown, Sparkles } from "lucide-react"
+import { Copy, ExternalLink, FileDown, Info, Play, Sparkles } from "lucide-react"
+import * as React from "react"
 
 import { Button } from "@/components/ui/button"
 import { formatBytes, formatDate, formatDuration } from "@/lib/format"
@@ -22,6 +23,7 @@ export function MediaCard({
   const mediaUrl = mediaUrlForItem(item)
   const isVideo = isVideoItem(item)
   const isImage = isImageItem(item)
+  const [videoActive, setVideoActive] = React.useState(false)
 
   return (
     <article
@@ -29,19 +31,45 @@ export function MediaCard({
       data-media={isVideo ? "video" : isImage ? "image" : "missing"}
       data-media-loaded="true"
     >
-      <a className="previewLink preview" href={mediaUrl || "#"} target="_blank" rel="noreferrer">
-        {isVideo && mediaUrl ? (
-          <video src={mediaUrl} poster={item.posterUrl} muted playsInline preload="metadata" controls aria-label={item.prompt || item.id} />
-        ) : isImage && mediaUrl ? (
-          <img src={mediaUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
-        ) : (
-          <div className="missing-preview">
-            <FileDown className="size-6" />
-            <span>{item.downloadError || "No local file"}</span>
-          </div>
-        )}
-        {isVideo && <span className="durationBadge">{formatDuration(item.duration)}</span>}
-      </a>
+      {isVideo && mediaUrl ? (
+        <div className="preview videoPreview">
+          {videoActive ? (
+            <video
+              src={mediaUrl}
+              poster={item.posterUrl}
+              muted
+              playsInline
+              preload="metadata"
+              controls
+              autoPlay
+              aria-label={item.prompt || item.id}
+            />
+          ) : (
+            <button className="videoPosterButton" type="button" onClick={() => setVideoActive(true)} aria-label="Play video">
+              {item.posterUrl ? (
+                <img src={item.posterUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
+              ) : (
+                <span className="videoPosterFallback">Poster pending</span>
+              )}
+              <span className="videoPlayBadge">
+                <Play className="size-4 fill-current" />
+              </span>
+            </button>
+          )}
+          <span className="durationBadge">{formatDuration(item.duration)}</span>
+        </div>
+      ) : (
+        <a className="previewLink preview" href={mediaUrl || "#"} target="_blank" rel="noreferrer">
+          {isImage && mediaUrl ? (
+            <img src={mediaUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
+          ) : (
+            <div className="missing-preview">
+              <FileDown className="size-6" />
+              <span>{item.downloadError || "No local file"}</span>
+            </div>
+          )}
+        </a>
+      )}
       <div className="cardBody">
         <div className="cardMeta">
           {[
@@ -59,22 +87,27 @@ export function MediaCard({
         <div className="cardFooter">
           <div className="cardActions">
             {isImage && (
-              <Button className="cardCreateButton" size="sm" variant="outline" onClick={onCreate}>
+              <Button className="cardCreateButton" size="icon-sm" variant="outline" onClick={onCreate} title="Create" aria-label="Create">
                 <Sparkles />
-                Create
               </Button>
             )}
-            <Button className="detailsButton" size="sm" variant="outline" onClick={onDetails}>
-              Details
+            <Button className="detailsButton" size="icon-sm" variant="outline" onClick={onDetails} title="Details" aria-label="Details">
+              <Info />
             </Button>
-            <Button className="copyPromptButton" size="sm" variant="outline" disabled={!item.prompt} onClick={onCopyPrompt}>
+            <Button
+              className="copyPromptButton"
+              size="icon-sm"
+              variant="outline"
+              disabled={!item.prompt}
+              onClick={onCopyPrompt}
+              title="Copy prompt"
+              aria-label="Prompt"
+            >
               <Copy />
-              Prompt
             </Button>
-            <Button className="openLink" size="sm" variant="outline" asChild>
-              <a href={mediaUrl || "#"} target="_blank" rel="noreferrer">
+            <Button className="openLink" size="icon-sm" variant="outline" asChild>
+              <a href={mediaUrl || "#"} target="_blank" rel="noreferrer" title="Open" aria-label="Open">
                 <ExternalLink />
-                Open
               </a>
             </Button>
           </div>
