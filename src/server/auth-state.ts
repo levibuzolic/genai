@@ -1,7 +1,7 @@
 import { createAuthBrowserService } from "../auth-browser.ts"
 import { APP_LOGIN_URL, AUTH_BROWSER_PROFILE_DIR, AUTH_BROWSER_REFRESH_MS } from "./config.ts"
 import { httpError } from "./errors.ts"
-import { isRecord } from "./refinements.ts"
+import { parseJwtExpiration } from "./schemas.ts"
 
 export const authState = {
   authorization: normalizeAuthorization(process.env["GENERATEPORN_AUTHORIZATION"]),
@@ -112,8 +112,7 @@ export function getJwtExpiration(authorization: unknown): string | null {
       return null
     }
     const payload: unknown = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8"))
-    const exp = isRecord(payload) ? payload["exp"] : null
-    return exp ? new Date(Number(exp) * 1000).toISOString() : null
+    return parseJwtExpiration(payload)
   } catch {
     return null
   }

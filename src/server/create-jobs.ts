@@ -19,13 +19,8 @@ import { getReusableCreationSource, isActiveCreationStatus, isTerminalCreationSt
 import { getCreateModeDefinitions, loadCreateTemplateRegistry, prepareCreateSubmission } from "./create-templates.ts"
 import { httpError } from "./errors.ts"
 import { readJsonObject, requireCreateSource, stringOrNull } from "./refinements.ts"
-import { parseGeneratePornJob } from "./schemas.ts"
+import { parseCreateApiResponse, parseGeneratePornJob } from "./schemas.ts"
 import type { CreateParams, CreationJob, CreationWorkflow, GeneratePornJob } from "./types.ts"
-
-type CreateApiResponse = Record<string, unknown> & {
-  job_id?: unknown
-  error?: unknown
-}
 
 export { buildCreateApiRequest, resolveCreateSource }
 
@@ -80,14 +75,16 @@ async function createTemplateWorkflowJob(
   })
 
   let response: Response
-  let body: CreateApiResponse
+  let body: Record<string, unknown>
+  let apiResponse: ReturnType<typeof parseCreateApiResponse>
   try {
     response = await fetch(`${getJobsApiBaseUrl()}/${firstMode.endpoint}`, {
       method: "POST",
       headers: buildApiHeaders(),
       body: JSON.stringify(liveRequest.body),
     })
-    body = await readJsonObject(response)
+    apiResponse = parseCreateApiResponse(await readJsonObject(response))
+    body = apiResponse.body
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     saveCreationJob(
@@ -105,10 +102,10 @@ async function createTemplateWorkflowJob(
     throw error
   }
 
-  const jobId = stringOrNull(body["job_id"])
+  const jobId = apiResponse.jobId
   if (!response.ok || !jobId) {
     const error =
-      stringOrNull(body["error"]) ||
+      apiResponse.error ||
       (!jobId ? "Create response did not include a job_id." : `Create request failed: ${response.status} ${response.statusText}`)
     saveCreationJob(
       {
@@ -213,14 +210,16 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   })
 
   let response: Response
-  let body: CreateApiResponse
+  let body: Record<string, unknown>
+  let apiResponse: ReturnType<typeof parseCreateApiResponse>
   try {
     response = await fetch(url, {
       method: "POST",
       headers: buildApiHeaders(),
       body: JSON.stringify(liveRequest.body),
     })
-    body = await readJsonObject(response)
+    apiResponse = parseCreateApiResponse(await readJsonObject(response))
+    body = apiResponse.body
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     saveCreationJob(
@@ -239,7 +238,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   }
 
   if (!response.ok) {
-    const error = stringOrNull(body["error"]) || `Create request failed: ${response.status} ${response.statusText}`
+    const error = apiResponse.error || `Create request failed: ${response.status} ${response.statusText}`
     saveCreationJob(
       {
         ...baseRecord,
@@ -257,7 +256,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
     throw httpError(error, response.status)
   }
 
-  const jobId = stringOrNull(body["job_id"])
+  const jobId = apiResponse.jobId
   if (!jobId) {
     saveCreationJob(
       {
@@ -374,12 +373,11 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
       headers: buildApiHeaders(),
       body: JSON.stringify(liveRequest.body),
     })
-    const body = await readJsonObject(response)
-    const jobId = stringOrNull(body["job_id"])
+    const { body, error: responseError, jobId } = parseCreateApiResponse(await readJsonObject(response))
 
     if (!response.ok || !jobId) {
       const error =
-        stringOrNull(body["error"]) ||
+        responseError ||
         (!jobId ? "Create response did not include a job_id." : `Create request failed: ${response.status} ${response.statusText}`)
       saveCreationJob(
         {
@@ -682,10 +680,10 @@ export async function fetchCreateJob(jobId: string): Promise<GeneratePornJob> {
   const response = await fetch(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}`, {
     headers: buildApiHeaders(),
   })
-  const body = await readJsonObject(response)
+  const { body, error } = parseCreateApiResponse(await readJsonObject(response))
 
   if (!response.ok) {
-    throw new Error(stringOrNull(body["error"]) || `Job request failed: ${response.status} ${response.statusText}`)
+    throw new Error(error || `Job request failed: ${response.status} ${response.statusText}`)
   }
 
   const job = parseGeneratePornJob(body)

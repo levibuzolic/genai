@@ -1,7 +1,6 @@
 import { getActiveAuthorization } from "./auth-state.ts"
 import { API_BASE_URL, AUTH_SETUP_MESSAGE } from "./config.ts"
-import { recordOrEmpty } from "./refinements.ts"
-import { parseJobsPageResponse } from "./schemas.ts"
+import { parseApiHeaders, parseJobsPageResponse } from "./schemas.ts"
 import type { ApiHeaders, GeneratePornJob } from "./types.ts"
 
 export async function fetchJobsPage(page: number): Promise<GeneratePornJob[]> {
@@ -51,7 +50,7 @@ export function buildApiHeaders(): ApiHeaders {
 
   if (process.env["GENERATEPORN_EXTRA_HEADERS_JSON"]) {
     const extraHeaders: unknown = JSON.parse(process.env["GENERATEPORN_EXTRA_HEADERS_JSON"])
-    Object.assign(headers, recordOrEmpty(extraHeaders))
+    Object.assign(headers, parseApiHeaders(extraHeaders))
   }
 
   return headers

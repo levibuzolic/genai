@@ -19,7 +19,7 @@ import {
 } from "./db-schema.ts"
 import { redactDataUrlFields } from "./redaction.ts"
 import { isCatalogItem, isRecord, paramsFromUnknown, recordOrNull, stringOrNull } from "./refinements.ts"
-import { parseCreationWorkflow, parseOrphanFile } from "./schemas.ts"
+import { parseCatalogInput, parseCreationWorkflow, parseOrphanFile } from "./schemas.ts"
 import type { Catalog, CatalogItem, CreateParams, CreationEventOptions, CreationJob, CreationWorkflow, OrphanFile } from "./types.ts"
 
 type TableInfoRow = {
@@ -535,15 +535,15 @@ export function stringifyNullable(value: unknown): string | null {
 }
 
 export function normalizeCatalog(catalog: Partial<Catalog> = {}): Catalog {
+  const parsed = parseCatalogInput(catalog)
+
   return {
-    items: Array.isArray(catalog.items) ? catalog.items.filter(isCatalogItem) : [],
-    downloadedJobIds: Array.isArray(catalog.downloadedJobIds)
-      ? catalog.downloadedJobIds.filter((id): id is string => typeof id === "string")
-      : [],
-    orphanFiles: Array.isArray(catalog.orphanFiles) ? catalog.orphanFiles.filter(isOrphanFile) : [],
-    lastSeenJobId: stringOrNull(catalog.lastSeenJobId),
-    updatedAt: stringOrNull(catalog.updatedAt),
-    lastRun: recordOrNull(catalog.lastRun),
+    items: parsed.items.filter(isCatalogItem),
+    downloadedJobIds: parsed.downloadedJobIds,
+    orphanFiles: parsed.orphanFiles.filter(isOrphanFile),
+    lastSeenJobId: stringOrNull(parsed.lastSeenJobId),
+    updatedAt: stringOrNull(parsed.updatedAt),
+    lastRun: recordOrNull(parsed.lastRun),
   }
 }
 
