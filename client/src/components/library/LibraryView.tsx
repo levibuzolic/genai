@@ -93,7 +93,7 @@ export function LibraryView({
                   view={view}
                   onDetails={() => onDetails(item)}
                   onCopyPrompt={() => onCopyPrompt(item)}
-                  onCreate={() => onOpenCreate({ sourceItem: item, prompt: item.prompt })}
+                  onCreate={() => onOpenCreate({ sourceItem: item, prompt: item.prompt || undefined })}
                 />
               ))}
         </section>

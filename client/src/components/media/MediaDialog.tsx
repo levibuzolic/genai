@@ -22,7 +22,7 @@ export function MediaDialog({
   item: CatalogItem | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCopy: (value: string | undefined, label: string) => void
+  onCopy: (value: string | null | undefined, label: string) => void
   onCreate: (item: CatalogItem) => void
   onAnimate: (item: CatalogItem) => void
   onUsePrompt: (item: CatalogItem) => void

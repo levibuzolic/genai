@@ -1,31 +1,33 @@
 import { CREATE_ACTIVE_STATUSES, CREATE_TERMINAL_STATUSES } from "./create-constants.ts"
 import { isRecord } from "./refinements.ts"
+import type { CreateSource } from "./types.ts"
 
-export function getReusableCreationSource(source: unknown): Record<string, unknown> | null {
+export function getReusableCreationSource(source: unknown): CreateSource | null {
   if (!isRecord(source)) {
     return null
   }
 
-  if (!source["kind"]) {
+  const kind = typeof source["kind"] === "string" ? source["kind"] : ""
+  if (!kind) {
     return null
   }
 
   if (source["kind"] === "catalog" && source["itemId"]) {
     return {
       kind: "catalog",
-      itemId: source["itemId"],
+      itemId: String(source["itemId"]),
     }
   }
 
   if (source["kind"] === "url" && source["url"]) {
     return {
       kind: "url",
-      url: source["url"],
+      url: String(source["url"]),
     }
   }
 
   return {
-    kind: source["kind"],
+    kind,
   }
 }
 

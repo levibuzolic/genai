@@ -72,7 +72,7 @@ function App() {
     }
   }, [create.open, setCreateOpen])
 
-  async function copyValue(value: string | undefined, label: string) {
+  async function copyValue(value: string | null | undefined, label: string) {
     if (!value) return
     await navigator.clipboard.writeText(value)
     setCopyFlash(label)
@@ -191,15 +191,15 @@ function App() {
         onCopy={(value, label) => void copyValue(value, label)}
         onCreate={(item) => {
           setSelectedItem(null)
-          void create.openCreator({ sourceItem: item, prompt: item.prompt })
+          void create.openCreator({ sourceItem: item, prompt: item.prompt || undefined })
         }}
         onAnimate={(item) => {
           setSelectedItem(null)
-          void create.openCreator({ sourceItem: item, prompt: item.prompt, modeId: "custom-video" })
+          void create.openCreator({ sourceItem: item, prompt: item.prompt || undefined, modeId: "custom-video" })
         }}
         onUsePrompt={(item) => {
           setSelectedItem(null)
-          void create.openCreator({ sourceItem: isImageItem(item) ? item : null, prompt: item.prompt })
+          void create.openCreator({ sourceItem: isImageItem(item) ? item : null, prompt: item.prompt || undefined })
         }}
       />
 

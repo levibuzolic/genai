@@ -1,12 +1,13 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
-import type { Creation, CreationEvent, CreationSource, CreationsResponse } from "@/types/domain"
+import type { CreateParams, Creation, CreationEvent, CreationSource, CreationsResponse } from "@/types/domain"
+import type { CreationDetailsResponse, DuplicateCreationResponse, RefreshCreationsResponse } from "@/types/routes"
 
 const IDLE_CREATION_POLL_MS = 10000
 
 export function useCreationHistory(
-  onApplyDraft: (form: { modeId?: string | null; source?: CreationSource | null; params?: Record<string, string> }) => Promise<void>,
+  onApplyDraft: (form: { modeId?: string | null; source?: CreationSource | null; params?: CreateParams }) => Promise<void>,
 ) {
   const [creations, setCreations] = React.useState<Creation[]>([])
   const [activeCount, setActiveCount] = React.useState(0)
@@ -60,7 +61,7 @@ export function useCreationHistory(
   async function refreshNow() {
     setStatusMessage("Refreshing creation history...")
     try {
-      const data = await fetchJson<CreationsResponse>("/api/creations/refresh", {
+      const data = await fetchJson<RefreshCreationsResponse>("/api/creations/refresh", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
@@ -75,16 +76,13 @@ export function useCreationHistory(
   }
 
   async function openDetails(creation: Creation) {
-    const data = await fetchJson<{ creation: Creation; events: CreationEvent[] }>(`/api/creations/${encodeURIComponent(creation.id)}`)
+    const data = await fetchJson<CreationDetailsResponse>(`/api/creations/${encodeURIComponent(creation.id)}`)
     setSelectedCreation(data.creation)
     setSelectedEvents(data.events || [])
   }
 
   async function duplicateSettings(creation: Creation) {
-    const data = await fetchJson<{
-      draft: Creation
-      form: { modeId?: string | null; source?: CreationSource | null; params?: Record<string, string> }
-    }>(`/api/creations/${encodeURIComponent(creation.id)}/duplicate`, {
+    const data = await fetchJson<DuplicateCreationResponse>(`/api/creations/${encodeURIComponent(creation.id)}/duplicate`, {
       method: "POST",
     })
     await onApplyDraft(data.form)

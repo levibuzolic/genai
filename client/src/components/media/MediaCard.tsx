@@ -36,7 +36,7 @@ export function MediaCard({
           {videoActive ? (
             <video
               src={mediaUrl}
-              poster={item.posterUrl}
+              poster={item.posterUrl || undefined}
               muted
               playsInline
               preload="metadata"

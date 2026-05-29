@@ -1,7 +1,8 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
-import type { CreateTemplate, CreateTemplatesResponse } from "@/types/domain"
+import type { CreateTemplate } from "@/types/domain"
+import type { CreateTemplateMutationResponse, CreateTemplatesResponse } from "@/types/routes"
 
 export type TemplateDraft = {
   id?: string
@@ -40,7 +41,7 @@ export function useTemplates() {
     async (draft: TemplateDraft) => {
       setStatus("Saving template...")
       const path = draft.id ? `/api/create/templates/${encodeURIComponent(draft.id)}` : "/api/create/templates"
-      const response = await fetchJson<{ template: CreateTemplate }>(path, {
+      const response = await fetchJson<CreateTemplateMutationResponse>(path, {
         method: draft.id ? "PUT" : "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(draft),
@@ -55,7 +56,7 @@ export function useTemplates() {
   const saveCreationAsTemplate = React.useCallback(
     async (creationId: string, label: string) => {
       setStatus("Saving creation as template...")
-      const response = await fetchJson<{ template: CreateTemplate }>(`/api/creations/${encodeURIComponent(creationId)}/template`, {
+      const response = await fetchJson<CreateTemplateMutationResponse>(`/api/creations/${encodeURIComponent(creationId)}/template`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ label }),

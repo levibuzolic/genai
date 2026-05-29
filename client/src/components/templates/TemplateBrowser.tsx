@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { mediaUrlForItem } from "@/lib/media"
-import type { CreateMode, CreateTemplate, CreateTemplateType } from "@/types/domain"
+import type { CreateMode, CreateParamValue, CreateTemplate, CreateTemplateType } from "@/types/domain"
 
 type TemplateEditorState = {
   id: string
@@ -80,11 +80,11 @@ export function TemplateBrowser({
       description: template.description || "",
       type: template.type,
       modeId: template.settings?.modeId || (template.type === "image" ? "custom-image" : "custom-video"),
-      prompt: params["prompt"] || "",
-      negativePrompt: params["negativePrompt"] || "",
-      quality: params["quality"] || "720p-4",
-      imagePrompt: imageStep?.params["prompt"] || params["prompt"] || "",
-      videoPrompt: videoStep?.params["prompt"] || params["prompt"] || "",
+      prompt: paramAsString(params["prompt"]) || "",
+      negativePrompt: paramAsString(params["negativePrompt"]) || "",
+      quality: paramAsString(params["quality"]) || "720p-4",
+      imagePrompt: paramAsString(imageStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
+      videoPrompt: paramAsString(videoStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
     })
   }
 
@@ -321,4 +321,9 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
 
 function templateIdPatch(id: string) {
   return id ? { id } : {}
+}
+
+function paramAsString(value: CreateParamValue): string | undefined {
+  if (value === undefined || value === null) return undefined
+  return String(value)
 }

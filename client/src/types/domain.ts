@@ -39,34 +39,34 @@ export type AutoSyncStatus = {
 
 export type CatalogItem = {
   id: string
-  type?: string
-  status?: string
-  prompt?: string
-  negativePrompt?: string
-  outputUrl?: string
-  localFile?: string
-  thumbnailFile?: string
-  posterUrl?: string
-  size?: number
-  duration?: number
-  createdAt?: number
-  createdAtIso?: string
-  downloadedAt?: string
-  downloadError?: string
-  favorited?: boolean
-  sha256?: string
-  verifiedAt?: string
-  duplicateOf?: string
-  duplicateGroupSize?: number
-  contentType?: string
-  externalTaskId?: string
-  createModeId?: string
+  type?: string | null
+  status?: string | null
+  prompt?: string | null
+  negativePrompt?: string | null
+  outputUrl?: string | null
+  localFile?: string | null
+  thumbnailFile?: string | null
+  posterUrl?: string | null
+  size?: number | null
+  duration?: number | null
+  createdAt?: string | number | null
+  createdAtIso?: string | null
+  downloadedAt?: string | null
+  downloadError?: string | null
+  favorited?: boolean | null
+  sha256?: string | null
+  verifiedAt?: string | null
+  duplicateOf?: string | null
+  duplicateGroupSize?: number | null
+  contentType?: string | null
+  externalTaskId?: string | null
+  createModeId?: string | null
   templateId?: string | null
   templateLabel?: string | null
-  sourceKind?: string
-  sourceItemId?: string
-  sourceUrl?: string
-  createdLocallyAt?: string
+  sourceKind?: string | null
+  sourceItemId?: string | null
+  sourceUrl?: string | null
+  createdLocallyAt?: string | null
 }
 
 export type MediaFacetCounts = Partial<Record<"all" | "image" | "video", number>>
@@ -87,8 +87,8 @@ export type ItemsResponse = {
   pageSize: number
   pageCount: number
   facets: Facets
-  catalogUpdatedAt?: string
-  lastSeenJobId?: string
+  catalogUpdatedAt?: string | null
+  lastSeenJobId?: string | null
   lastRun?: Record<string, unknown> | null
 }
 
@@ -129,16 +129,18 @@ export type CreateMode = {
 }
 
 export type CreateTemplateType = "image" | "video" | "combo"
+export type CreateParamValue = string | number | boolean | null | undefined
+export type CreateParams = Record<string, CreateParamValue>
 
 export type CreateTemplateSettings = {
   modeId: string
-  source?: CreationSource | null
-  params: Record<string, string>
+  source?: CreationSource | null | undefined
+  params: CreateParams
 }
 
 export type CreateTemplateStep = {
   modeId: string
-  params: Record<string, string>
+  params: CreateParams
 }
 
 export type CreateTemplate = {
@@ -167,18 +169,18 @@ export type CreateTemplatesResponse = {
 
 export type CreateJob = {
   id: string
-  type?: string
-  status?: string
+  type?: string | null
+  status?: string | null
   prompt?: string
-  outputUrl?: string
-  resolution?: string
-  duration?: number
-  error?: string
+  outputUrl?: string | null
+  resolution?: string | null
+  duration?: string | number | null
+  error?: string | null
 }
 
 export type CreationSource =
   | { kind: "catalog"; itemId?: string; url?: string; contentType?: string; size?: number }
-  | { kind: "upload"; contentType?: string; size?: number }
+  | { kind: "upload"; dataUrl?: string; contentType?: string; size?: number }
   | { kind: "url"; url?: string }
   | { kind: string; [key: string]: unknown }
 
@@ -192,12 +194,12 @@ export type Creation = {
   templateId?: string | null
   templateLabel?: string | null
   source?: CreationSource | null
-  params?: Record<string, string>
+  params?: CreateParams
   error?: string | null
   inputUrl?: string | null
   outputUrl?: string | null
   externalTaskId?: string | null
-  createdAt?: number | null
+  createdAt?: string | number | null
   createdAtIso?: string | null
   createdLocallyAt?: string | null
   submittedAt?: string | null
@@ -214,7 +216,7 @@ export type CreationEvent = {
   id: number
   status: string
   message?: string | null
-  data?: Record<string, unknown> | null
+  data?: unknown
   createdAt: string
 }
 
@@ -229,7 +231,7 @@ export type Backup = {
   file: string
   createdAt?: string
   reason?: string
-  itemCount?: number
+  itemCount?: number | null
   size?: number
 }
 

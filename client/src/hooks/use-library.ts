@@ -1,7 +1,8 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
-import type { ItemsResponse, ViewMode } from "@/types/domain"
+import type { ViewMode } from "@/types/domain"
+import type { ItemsResponse } from "@/types/routes"
 
 const SEARCH_DEBOUNCE_MS = 260
 

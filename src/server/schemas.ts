@@ -7,6 +7,7 @@ import type {
   CreationWorkflow,
   CreationWorkflowJob,
   GeneratePornJob,
+  GeneratePornJobResponse,
   OrphanFile,
   TemplateSettings,
 } from "./types.ts"
@@ -14,76 +15,14 @@ import type {
 const stringOrNumberSchema = z.union([z.string(), z.number()])
 const nullableStringSchema = z.string().nullish()
 const nullableStringOrNumberSchema = stringOrNumberSchema.nullish()
-const optionalStringSchema = z.string().optional()
-const optionalNullableStringSchema = z.string().nullish()
 
 export const RecordSchema = z.record(z.string(), z.unknown())
 export const ApiHeadersSchema = z.record(z.string(), z.string())
 export const CreateParamsSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.undefined()]))
 export const CreateSourceSchema = z.object({ kind: z.string().min(1) }).passthrough()
 export const JwtPayloadSchema = z.object({ exp: z.number().optional() }).passthrough()
-export const CreateApiResponseSchema = z.object({ job_id: optionalNullableStringSchema, error: optionalNullableStringSchema }).passthrough()
-export const CreateSubmissionRequestSchema = z
-  .object({
-    modeId: optionalStringSchema,
-    params: z.unknown().optional(),
-    source: z.unknown().optional(),
-    templateId: optionalStringSchema,
-  })
-  .passthrough()
-export const CreateTemplateRequestSchema = z
-  .object({
-    createdAt: optionalStringSchema,
-    description: z.unknown().optional(),
-    id: z.unknown().optional(),
-    label: z.unknown().optional(),
-  })
-  .passthrough()
-export const ImportCreateTemplateRequestSchema = z
-  .object({
-    id: z.unknown().optional(),
-    jobId: z.string().optional(),
-    label: z.unknown().optional(),
-  })
-  .passthrough()
-export const CreateTemplateRegistryInputSchema = z
-  .object({
-    templates: z.array(z.unknown()).catch([]),
-    updatedAt: z.string().nullable().catch(null),
-  })
-  .catch({
-    templates: [],
-    updatedAt: null,
-  })
-export const CreateTemplateInputSchema = z
-  .object({
-    createdAt: optionalStringSchema,
-    description: z.unknown().optional(),
-    duration: z.unknown().optional(),
-    endpoint: z.unknown().optional(),
-    id: z.unknown().optional(),
-    label: z.unknown().optional(),
-    mediaType: z.unknown().optional(),
-    modeId: z.unknown().optional(),
-    negative_prompt: z.unknown().optional(),
-    negativePrompt: z.unknown().optional(),
-    params: z.unknown().optional(),
-    prompt: z.unknown().optional(),
-    resolution: z.unknown().optional(),
-    seedJobId: optionalNullableStringSchema,
-    settings: z.unknown().optional(),
-    source: z.unknown().optional(),
-    sourceCreationId: optionalNullableStringSchema,
-    sourcePolicy: z.string().catch("image"),
-    source_creation_id: z.unknown().optional(),
-    templateType: z.unknown().optional(),
-    type: z.unknown().optional(),
-    updatedAt: optionalStringSchema,
-    workflow: z.array(z.unknown()).catch([]),
-  })
-  .passthrough()
 
-export const GeneratePornJobSchema = z
+export const GeneratePornJobResponseSchema = z
   .object({
     id: z.string(),
     user_id: nullableStringSchema,
@@ -111,11 +50,43 @@ export const GeneratePornJobSchema = z
   })
   .passthrough()
 
+export const GeneratePornJobSchema = GeneratePornJobResponseSchema.transform(normalizeGeneratePornJobResponse)
+
 export const JobsPageResponseSchema = z
   .object({
     results: z.array(GeneratePornJobSchema),
   })
   .passthrough()
+
+function preferString<T extends string | null | undefined>(primary: T, fallback: T): T {
+  return primary || fallback
+}
+
+function preferStringOrNumber<T extends string | number | null | undefined>(primary: T, fallback: T): T {
+  return primary || fallback
+}
+
+function normalizeGeneratePornJobResponse(job: GeneratePornJobResponse): GeneratePornJob {
+  return {
+    id: job.id,
+    user_id: preferString(job.user_id, job.userId),
+    type: job.type,
+    prompt: job.prompt,
+    negative_prompt: preferString(job.negative_prompt, job.negativePrompt),
+    status: job.status,
+    output_url: preferString(job.output_url, job.outputUrl),
+    input_url: preferString(job.input_url, job.inputUrl),
+    duration: job.duration,
+    resolution: job.resolution,
+    seed: job.seed,
+    created_at: preferStringOrNumber(job.created_at, job.createdAt),
+    external_task_id: preferString(job.external_task_id, job.externalTaskId),
+    shared: job.shared,
+    favorited: job.favorited,
+    error: job.error,
+    job_id: job.job_id,
+  }
+}
 
 export const CatalogItemSchema = z
   .object({
@@ -277,36 +248,4 @@ export function parseCreationWorkflow(value: unknown): CreationWorkflow | null {
 export function parseJwtExpiration(value: unknown): string | null {
   const parsed = JwtPayloadSchema.safeParse(value)
   return parsed.success && parsed.data.exp ? new Date(parsed.data.exp * 1000).toISOString() : null
-}
-
-export function parseCreateApiResponse(value: unknown): { body: Record<string, unknown>; error: string | null; jobId: string | null } {
-  const body = parseRecordOrEmpty(value)
-  const parsed = CreateApiResponseSchema.parse(body)
-
-  return {
-    body,
-    error: parsed.error || null,
-    jobId: parsed.job_id || null,
-  }
-}
-
-export function parseCreateSubmissionRequest(value: unknown): z.output<typeof CreateSubmissionRequestSchema> {
-  return CreateSubmissionRequestSchema.parse(parseRecordOrEmpty(value))
-}
-
-export function parseCreateTemplateRequest(value: unknown): z.output<typeof CreateTemplateRequestSchema> {
-  return CreateTemplateRequestSchema.parse(parseRecordOrEmpty(value))
-}
-
-export function parseImportCreateTemplateRequest(value: unknown): z.output<typeof ImportCreateTemplateRequestSchema> {
-  return ImportCreateTemplateRequestSchema.parse(parseRecordOrEmpty(value))
-}
-
-export function parseCreateTemplateRegistryInput(value: unknown): z.output<typeof CreateTemplateRegistryInputSchema> {
-  return CreateTemplateRegistryInputSchema.parse(value)
-}
-
-export function parseCreateTemplateInput(value: unknown): z.output<typeof CreateTemplateInputSchema> | null {
-  const parsed = CreateTemplateInputSchema.safeParse(value)
-  return parsed.success ? parsed.data : null
 }

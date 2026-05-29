@@ -2,6 +2,7 @@ import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
 import type { Backup } from "@/types/domain"
+import type { CatalogBackupsResponse, CatalogBackupResponse, CatalogRestoreResponse } from "@/types/routes"
 
 export function useBackups(onRestore: () => Promise<void>) {
   const [backups, setBackups] = React.useState<Backup[]>([])
@@ -12,13 +13,13 @@ export function useBackups(onRestore: () => Promise<void>) {
   }, [])
 
   async function loadBackups() {
-    const data = await fetchJson<{ backups: Backup[] }>("/api/catalog/backups")
+    const data = await fetchJson<CatalogBackupsResponse>("/api/catalog/backups")
     setBackups(data.backups || [])
     setSelectedBackup((current) => current || data.backups?.[0]?.file || "")
   }
 
   async function createCatalogBackup() {
-    await fetchJson("/api/catalog/backup", {
+    await fetchJson<CatalogBackupResponse>("/api/catalog/backup", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ reason: "manual" }),
@@ -28,7 +29,7 @@ export function useBackups(onRestore: () => Promise<void>) {
 
   async function restoreCatalogBackup() {
     if (!selectedBackup) return
-    await fetchJson("/api/catalog/restore", {
+    await fetchJson<CatalogRestoreResponse>("/api/catalog/restore", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ file: selectedBackup }),

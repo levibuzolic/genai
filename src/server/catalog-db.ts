@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite"
 import { asc, desc, eq, or } from "drizzle-orm"
 import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite"
 
+import type { PublicCreation } from "../types/routes.ts"
 import { CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
 import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import {
@@ -20,7 +21,16 @@ import {
 import { redactDataUrlFields } from "./redaction.ts"
 import { isCatalogItem, isRecord, paramsFromUnknown, recordOrNull, stringOrNull } from "./refinements.ts"
 import { parseCatalogInput, parseCreationWorkflow, parseOrphanFile } from "./schemas.ts"
-import type { Catalog, CatalogItem, CreateParams, CreationEventOptions, CreationJob, CreationWorkflow, OrphanFile } from "./types.ts"
+import type {
+  Catalog,
+  CatalogItem,
+  CreateParams,
+  CreateSource,
+  CreationEventOptions,
+  CreationJob,
+  CreationWorkflow,
+  OrphanFile,
+} from "./types.ts"
 
 type TableInfoRow = {
   name: string
@@ -73,14 +83,6 @@ type CreationInput = {
   finished_at?: string | null
   downloaded_item_id?: string | null
   [key: string]: unknown
-}
-
-type PublicCreation = Omit<CreationJob, "requestBody" | "request" | "response" | "job" | "workflow"> & {
-  active: boolean
-  request?: Record<string, unknown> | null
-  response?: Record<string, unknown> | null
-  job?: Record<string, unknown> | null
-  workflow?: CreationWorkflow | null
 }
 
 type CatalogOrm = NodeSQLiteDatabase<CatalogDbSchema>
@@ -504,7 +506,7 @@ export function toPublicCreation(creation: CreationJob, { details = false }: { d
     mediaType: creation.mediaType,
     templateId: creation.templateId,
     templateLabel: creation.templateLabel,
-    source: creation.source,
+    source: publicCreationSource(creation.source),
     params: creation.params || {},
     error: creation.error,
     inputUrl: creation.inputUrl,
@@ -528,6 +530,22 @@ export function toPublicCreation(creation: CreationJob, { details = false }: { d
   }
 
   return publicCreation
+}
+
+function publicCreationSource(source: Record<string, unknown> | null): CreateSource | null {
+  if (!source) {
+    return null
+  }
+
+  const kind = stringOrNull(source["kind"])
+  if (!kind) {
+    return null
+  }
+
+  return {
+    ...source,
+    kind,
+  }
 }
 
 export function stringifyNullable(value: unknown): string | null {

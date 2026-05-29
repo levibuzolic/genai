@@ -13,6 +13,7 @@ import {
 } from "@/lib/upload"
 import type {
   CatalogItem,
+  CreateParams,
   CreateField,
   CreateJob,
   CreateMode,
@@ -22,6 +23,7 @@ import type {
   SourceKind,
   UploadSource,
 } from "@/types/domain"
+import type { CreateJobPollResponse, CreateJobSubmitRequest, CreateJobSubmitResponse, ImportCreateTemplateResponse } from "@/types/routes"
 
 export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   const [open, setOpen] = React.useState(false)
@@ -134,7 +136,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
       source?: CreationSource | null | undefined
       prompt?: string | undefined
       modeId?: string | undefined
-      params?: Record<string, string> | undefined
+      params?: CreateParams | undefined
       templateId?: string | undefined
     } = {},
   ) {
@@ -143,8 +145,10 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     if (options.sourceKind) setSourceKind(options.sourceKind)
     if (options.prompt) setPrompt(options.prompt)
     if (options.modeId) setModeId(options.modeId)
-    if (options.params?.["prompt"]) setPrompt(options.params["prompt"])
-    if (options.params?.["quality"]) setQuality(options.params["quality"])
+    const promptParam = paramAsString(options.params?.["prompt"])
+    const qualityParam = paramAsString(options.params?.["quality"])
+    if (promptParam) setPrompt(promptParam)
+    if (qualityParam) setQuality(qualityParam)
     if (options.source?.kind === "url" && typeof options.source.url === "string") {
       setSourceKind("url")
       setSourceUrl(options.source.url)
@@ -193,15 +197,16 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     setStatus("Submitting creation job...")
     setResult(null)
     try {
-      const response = await fetchJson<{ jobId: string; modeId: string; modeLabel: string; pollMs?: number }>("/api/create/jobs", {
+      const request: CreateJobSubmitRequest = {
+        modeId,
+        source: buildCreateSourcePayload(),
+        params: buildCreateParamsPayload(),
+      }
+      if (selectedTemplateId) request.templateId = selectedTemplateId
+      const response = await fetchJson<CreateJobSubmitResponse>("/api/create/jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          modeId,
-          templateId: selectedTemplateId || undefined,
-          source: buildCreateSourcePayload(),
-          params: buildCreateParamsPayload(),
-        }),
+        body: JSON.stringify(request),
       })
       setStatus("Submitted. Waiting for output...")
       await pollCreateJob(response.jobId, response.pollMs || 2000)
@@ -213,7 +218,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   }
 
   async function pollCreateJob(jobId: string, pollMs: number) {
-    const data = await fetchJson<{ job: CreateJob; pollMs?: number }>(`/api/create/jobs/${encodeURIComponent(jobId)}`)
+    const data = await fetchJson<CreateJobPollResponse>(`/api/create/jobs/${encodeURIComponent(jobId)}`)
     setResult(data.job)
     setStatus(`Job ${data.job.status || "pending"}.`)
     if (["done", "failed", "error"].includes(data.job.status || "")) return
@@ -232,7 +237,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
 
   async function importTemplate() {
     setStatus("Importing template from history...")
-    const response = await fetchJson<{ template: { id: string; label: string } }>("/api/create/templates/import", {
+    const response = await fetchJson<ImportCreateTemplateResponse>("/api/create/templates/import", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ jobId: templateJobId.trim(), label: templateLabel.trim() }),
@@ -247,8 +252,10 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     setSelectedTemplateId(template.id)
     setTemplateType(template.type)
     if (settings.modeId) setModeId(settings.modeId)
-    if (settings.params?.["prompt"] !== undefined) setPrompt(settings.params["prompt"])
-    if (settings.params?.["quality"] !== undefined) setQuality(settings.params["quality"])
+    const promptParam = paramAsString(settings.params?.["prompt"])
+    const qualityParam = paramAsString(settings.params?.["quality"])
+    if (promptParam !== undefined) setPrompt(promptParam)
+    if (qualityParam !== undefined) setQuality(qualityParam)
     applyCreationSource(settings.source)
     setStatus(`Using template ${template.label}. Overrides apply only to this run.`)
   }
@@ -275,14 +282,14 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
               {
                 modeId: "custom-image",
                 params: {
-                  prompt: settings.params["prompt"] || "",
+                  prompt: paramAsString(settings.params["prompt"]) || "",
                 },
               },
               {
                 modeId: "custom-video",
                 params: {
-                  prompt: settings.params["prompt"] || "",
-                  quality: settings.params["quality"] || "720p-4",
+                  prompt: paramAsString(settings.params["prompt"]) || "",
+                  quality: paramAsString(settings.params["quality"]) || "720p-4",
                 },
               },
             ]
@@ -290,7 +297,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     }
   }
 
-  function buildCreateSourcePayload() {
+  function buildCreateSourcePayload(): CreationSource {
     if (sourceKind === "catalog") {
       if (!selectedSourceId) throw new Error("Attach a collection image.")
       return { kind: "catalog", itemId: selectedSourceId }
@@ -303,8 +310,8 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     return { kind: "url", url: sourceUrl.trim() }
   }
 
-  function buildCreateParamsPayload() {
-    const params: Record<string, string> = {}
+  function buildCreateParamsPayload(): CreateParams {
+    const params: CreateParams = {}
     if (promptField) params["prompt"] = prompt.trim()
     if (qualityField) params["quality"] = quality
     return params
@@ -413,4 +420,9 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     resetCreateForm,
     animateCreateResult,
   }
+}
+
+function paramAsString(value: CreateParams[string]): string | undefined {
+  if (value === undefined || value === null) return undefined
+  return String(value)
 }

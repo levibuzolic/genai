@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto"
 
+import type {
+  CreateJobPollResponse,
+  CreateJobSubmitResponse,
+  CreationDetailsResponse,
+  CreationsResponse,
+  DownloadCreateJobResponse,
+  DuplicateCreationResponse,
+  RefreshCreationsResponse,
+} from "../types/routes.ts"
 import { buildApiHeaders, fetchJobsPage, getJobsApiBaseUrl } from "./api-client.ts"
 import { hasApiAuth } from "./auth-state.ts"
 import {
@@ -15,11 +24,12 @@ import { downloadJob, loadCatalog, saveCatalog, sortItems, toCatalogItem, toPubl
 import { AUTH_SETUP_MESSAGE, CREATE_HISTORY_PAGE_LIMIT } from "./config.ts"
 import { buildCreateApiRequest, resolveCreateSource, toPublicCreateJob, validateCreateSourceUrl } from "./create-api.ts"
 import { CREATE_POLL_MS } from "./create-constants.ts"
+import { parseCreateApiResponse } from "./create-schemas.ts"
 import { getReusableCreationSource, isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import { getCreateModeDefinitions, loadCreateTemplateRegistry, prepareCreateSubmission } from "./create-templates.ts"
 import { httpError } from "./errors.ts"
 import { readJsonObject, requireCreateSource, stringOrNull } from "./refinements.ts"
-import { parseCreateApiResponse, parseGeneratePornJob } from "./schemas.ts"
+import { parseGeneratePornJob } from "./schemas.ts"
 import type { CreateParams, CreationJob, CreationWorkflow, GeneratePornJob } from "./types.ts"
 
 export { buildCreateApiRequest, resolveCreateSource }
@@ -29,7 +39,7 @@ async function createTemplateWorkflowJob(
     template: NonNullable<Awaited<ReturnType<typeof prepareCreateSubmission>>["template"]>
   },
   { attemptId, requestStartedAt }: { attemptId: string; requestStartedAt: string },
-): Promise<Record<string, unknown>> {
+): Promise<CreateJobSubmitResponse> {
   const { modes, template, sourceRequest } = submission
   const source = await resolveCreateSource(requireCreateSource(sourceRequest))
   const firstStep = template.workflow[0]
@@ -154,7 +164,7 @@ async function createTemplateWorkflowJob(
   }
 }
 
-export async function createMediaJob(requestBody: Record<string, unknown>): Promise<Record<string, unknown>> {
+export async function createMediaJob(requestBody: Record<string, unknown>): Promise<CreateJobSubmitResponse> {
   const attemptId = `local-${randomUUID()}`
   const requestStartedAt = new Date().toISOString()
 
@@ -309,7 +319,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   }
 }
 
-export async function pollCreateJob(jobId: string): Promise<Record<string, unknown>> {
+export async function pollCreateJob(jobId: string): Promise<CreateJobPollResponse> {
   const existing = findCreationJob(jobId)
   if (existing?.workflow && existing.workflow.steps.length > 1) {
     return pollCreateWorkflowJob({ ...existing, workflow: existing.workflow })
@@ -328,7 +338,7 @@ export async function pollCreateJob(jobId: string): Promise<Record<string, unkno
   }
 }
 
-async function pollCreateWorkflowJob(creation: CreationJob & { workflow: CreationWorkflow }): Promise<Record<string, unknown>> {
+async function pollCreateWorkflowJob(creation: CreationJob & { workflow: CreationWorkflow }): Promise<CreateJobPollResponse> {
   const workflow = creation.workflow
   if (!workflow.activeJobId) {
     throw new Error("Workflow has no active job.")
@@ -486,7 +496,7 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
   }
 }
 
-export async function downloadCreateJob(jobId: string): Promise<Record<string, unknown>> {
+export async function downloadCreateJob(jobId: string): Promise<DownloadCreateJobResponse> {
   const createState = findCreationJob(jobId)
   const activeJobId = createState?.workflow?.activeJobId || jobId
   const job = await fetchCreateJob(activeJobId)
@@ -533,7 +543,7 @@ export async function downloadCreateJob(jobId: string): Promise<Record<string, u
   }
 }
 
-export async function getCreations(searchParams = new URLSearchParams()): Promise<Record<string, unknown>> {
+export async function getCreations(searchParams = new URLSearchParams()): Promise<CreationsResponse> {
   const status = searchParams.get("status") || "all"
   const refresh = searchParams.get("refresh") === "true"
 
@@ -552,7 +562,7 @@ export async function getCreations(searchParams = new URLSearchParams()): Promis
   }
 }
 
-export async function getCreationDetails(id: string): Promise<Record<string, unknown>> {
+export async function getCreationDetails(id: string): Promise<CreationDetailsResponse> {
   const creation = findCreationJob(id)
 
   if (!creation) {
@@ -565,7 +575,7 @@ export async function getCreationDetails(id: string): Promise<Record<string, unk
   }
 }
 
-export async function duplicateCreation(id: string): Promise<Record<string, unknown>> {
+export async function duplicateCreation(id: string): Promise<DuplicateCreationResponse> {
   const creation = findCreationJob(id)
 
   if (!creation) {
@@ -604,9 +614,11 @@ export async function duplicateCreation(id: string): Promise<Record<string, unkn
   }
 }
 
-export async function refreshCreations({ pageLimit = CREATE_HISTORY_PAGE_LIMIT }: { pageLimit?: number } = {}): Promise<
-  Record<string, unknown>
-> {
+export async function refreshCreations({
+  pageLimit = CREATE_HISTORY_PAGE_LIMIT,
+}: {
+  pageLimit?: number
+} = {}): Promise<RefreshCreationsResponse> {
   if (!hasApiAuth()) {
     throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
   }

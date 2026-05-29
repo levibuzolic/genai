@@ -1,31 +1,30 @@
 import { randomUUID } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 
+import type {
+  CreateModesResponse,
+  CreateTemplatesResponse,
+  PublicCatalogItem,
+  PublicCreateTemplate,
+  PublicTemplateSettings,
+} from "../types/routes.ts"
 import { fetchJobsPage } from "./api-client.ts"
 import { hasApiAuth } from "./auth-state.ts"
 import { findCreationJob, listCatalogItemsByTemplate, readCatalogMeta, writeCatalogMeta } from "./catalog-db.ts"
 import { jobFromCatalogItem, loadCatalog, toPublicCatalogItem } from "./catalog.ts"
 import { CREATE_HISTORY_PAGE_LIMIT, MEDIA_DIR } from "./config.ts"
 import { CREATE_BUILTIN_TEMPLATE_SEEDS, CREATE_IMAGE_ACCEPT, CREATE_POLL_MS, CREATE_VIDEO_QUALITY_OPTIONS } from "./create-constants.ts"
-import { assertCreateTextAllowed, getReusableCreationSource } from "./create-shared.ts"
-import { httpError } from "./errors.ts"
-import { paramsFromUnknown, recordOrEmpty, stringOrNull } from "./refinements.ts"
 import {
   parseCreateSubmissionRequest,
   parseCreateTemplateInput,
   parseCreateTemplateRegistryInput,
   parseCreateTemplateRequest,
   parseImportCreateTemplateRequest,
-} from "./schemas.ts"
-import type {
-  CatalogItem,
-  CreateMode,
-  CreateParams,
-  CreateTemplate,
-  CreateTemplateRegistry,
-  GeneratePornJob,
-  TemplateSettings,
-} from "./types.ts"
+} from "./create-schemas.ts"
+import { assertCreateTextAllowed, getReusableCreationSource } from "./create-shared.ts"
+import { httpError } from "./errors.ts"
+import { paramsFromUnknown, recordOrEmpty, stringOrNull } from "./refinements.ts"
+import type { CreateMode, CreateParams, CreateTemplate, CreateTemplateRegistry, GeneratePornJob, TemplateSettings } from "./types.ts"
 import { sanitizePathPart } from "./utils.ts"
 
 export function getCreateModeDefinitions(templates: CreateTemplate[] = []): CreateMode[] {
@@ -121,11 +120,11 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
   return modes
 }
 
-export async function getCreateModes(): Promise<Record<string, unknown>> {
+export async function getCreateModes(): Promise<CreateModesResponse> {
   const registry = await loadCreateTemplateRegistry()
   return {
     modes: getCreateModeDefinitions(registry.templates),
-    templates: registry.templates,
+    templates: registry.templates.map(toPublicCreateTemplate),
     pollMs: CREATE_POLL_MS,
     uploadAccept: Array.from(CREATE_IMAGE_ACCEPT).join(","),
   }
@@ -205,12 +204,16 @@ export async function loadCreateTemplateRegistry(): Promise<CreateTemplateRegist
   return normalizeCreateTemplateRegistry(readCatalogMeta("createTemplateRegistry") || {})
 }
 
-export async function getCreateTemplateRegistryResponse(): Promise<Record<string, unknown>> {
+export async function getCreateTemplateRegistryResponse(): Promise<CreateTemplatesResponse> {
   const registry = await loadCreateTemplateRegistry()
 
   return {
-    ...registry,
-    templates: registry.templates.map((template) => Object.assign({}, template, { previews: getCreateTemplatePreviews(template.id) })),
+    updatedAt: registry.updatedAt,
+    templates: registry.templates.map((template) =>
+      Object.assign(toPublicCreateTemplate(template), {
+        previews: getCreateTemplatePreviews(template.id),
+      }),
+    ),
   }
 }
 
@@ -377,7 +380,7 @@ export function getQualityFromTemplateParams(params: CreateParams = {}): { resol
 
 export async function saveCreateTemplateFromRequest(
   body: Record<string, unknown> = {},
-): Promise<CreateTemplate & { previews: (CatalogItem & { posterUrl: string | null })[] }> {
+): Promise<PublicCreateTemplate & { previews: PublicCatalogItem[] }> {
   const requestBody = parseCreateTemplateRequest(body)
   const registry = await loadCreateTemplateRegistry()
   const now = new Date().toISOString()
@@ -402,7 +405,7 @@ export async function saveCreateTemplateFromRequest(
   })
 
   return {
-    ...template,
+    ...toPublicCreateTemplate(template),
     previews: getCreateTemplatePreviews(template.id),
   }
 }
@@ -410,7 +413,7 @@ export async function saveCreateTemplateFromRequest(
 export async function saveCreateTemplateFromCreation(
   id: string,
   body: Record<string, unknown> = {},
-): Promise<CreateTemplate & { previews: (CatalogItem & { posterUrl: string | null })[] }> {
+): Promise<PublicCreateTemplate & { previews: PublicCatalogItem[] }> {
   const requestBody = parseCreateTemplateRequest(body)
   const creation = findCreationJob(id)
 
@@ -451,11 +454,11 @@ export async function deleteCreateTemplate(id: string): Promise<{ ok: true; id: 
   }
 }
 
-function getCreateTemplatePreviews(templateId: string, limit = 6): (CatalogItem & { posterUrl: string | null })[] {
+function getCreateTemplatePreviews(templateId: string, limit = 6): PublicCatalogItem[] {
   return listCatalogItemsByTemplate(templateId, limit).map(toPublicCatalogItem)
 }
 
-export async function importCreateTemplateFromHistory(body: Record<string, unknown>): Promise<CreateTemplate> {
+export async function importCreateTemplateFromHistory(body: Record<string, unknown>): Promise<PublicCreateTemplate> {
   const requestBody = parseImportCreateTemplateRequest(body)
   const jobId = requestBody.jobId || null
   if (!jobId) {
@@ -481,7 +484,7 @@ export async function importCreateTemplateFromHistory(body: Record<string, unkno
       modeId: "custom-video",
       params: {
         prompt: job.prompt,
-        negativePrompt: job.negative_prompt || job.negativePrompt || "",
+        negativePrompt: job.negative_prompt || "",
         quality: `${job.resolution || "720p"}-${Number(job.duration || 4)}`,
       },
     },
@@ -499,7 +502,35 @@ export async function importCreateTemplateFromHistory(body: Record<string, unkno
     templates: nextTemplates,
   })
 
-  return template
+  return toPublicCreateTemplate(template)
+}
+
+function toPublicCreateTemplate(template: CreateTemplate): PublicCreateTemplate {
+  return {
+    id: template.id,
+    label: template.label,
+    description: template.description,
+    type: template.type,
+    settings: toPublicTemplateSettings(template.settings),
+    workflow: template.workflow.map(toPublicTemplateSettings),
+    prompt: template.prompt,
+    negativePrompt: template.negativePrompt,
+    resolution: template.resolution,
+    duration: template.duration,
+    sourcePolicy: template.sourcePolicy,
+    seedJobId: template.seedJobId,
+    sourceCreationId: template.sourceCreationId,
+    createdAt: template.createdAt,
+    updatedAt: template.updatedAt,
+  }
+}
+
+function toPublicTemplateSettings(settings: TemplateSettings): PublicTemplateSettings {
+  return {
+    modeId: settings.modeId,
+    source: getReusableCreationSource(settings.source),
+    params: settings.params || {},
+  }
 }
 
 export async function findJobForTemplate(jobId: string): Promise<GeneratePornJob | null> {

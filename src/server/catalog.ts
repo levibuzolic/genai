@@ -8,6 +8,7 @@ import { count, eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-sqlite"
 
 import { ensureVideoThumbnail } from "../thumbnails.ts"
+import type { BackupSummary, ItemsResponse, PublicCatalogItem } from "../types/routes.ts"
 import { closeCatalogDb, getCatalogDb, parseJson, readCatalogFromDb, saveCatalog } from "./catalog-db.ts"
 import { BACKUP_DIR, CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
 import { catalogMeta, catalogSchema, mediaItems } from "./db-schema.ts"
@@ -34,14 +35,7 @@ type CatalogFacets = {
   }
 }
 
-type CatalogBackupSummary = {
-  file: string
-  reason: string
-  createdAt: string
-  size: number
-  itemCount: number | null
-  catalogUpdatedAt: unknown
-}
+type CatalogBackupSummary = BackupSummary
 
 export async function downloadJob(job: GeneratePornJob): Promise<Partial<CatalogItem>> {
   const normalizedJob = normalizeJob(job)
@@ -146,7 +140,7 @@ function getExtension(url: string): string {
   }
 }
 
-export async function getItems(searchParams: URLSearchParams): Promise<Record<string, unknown>> {
+export async function getItems(searchParams: URLSearchParams): Promise<ItemsResponse> {
   const catalog = await loadCatalog()
   const query = (searchParams.get("q") || "").trim().toLowerCase()
   const media = searchParams.get("media") || "all"
@@ -244,9 +238,44 @@ export function buildFacets(items: CatalogItem[]): CatalogFacets {
   }
 }
 
-export function toPublicCatalogItem(item: CatalogItem): CatalogItem & { posterUrl: string | null } {
+export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
   return {
-    ...item,
+    id: item.id,
+    userId: item.userId ?? null,
+    type: item.type ?? null,
+    prompt: item.prompt ?? null,
+    negativePrompt: item.negativePrompt ?? null,
+    status: item.status ?? null,
+    outputUrl: item.outputUrl ?? null,
+    inputUrl: item.inputUrl ?? null,
+    duration: item.duration ?? null,
+    createdAt: item.createdAt ?? null,
+    createdAtIso: item.createdAtIso ?? null,
+    externalTaskId: item.externalTaskId ?? null,
+    shared: item.shared ?? null,
+    favorited: item.favorited ?? null,
+    error: item.error ?? null,
+    updatedAt: item.updatedAt ?? null,
+    localFile: item.localFile ?? null,
+    size: item.size ?? null,
+    fileSize: item.fileSize ?? null,
+    sha256: item.sha256 ?? null,
+    verifiedAt: item.verifiedAt ?? null,
+    contentType: item.contentType ?? null,
+    downloadedAt: item.downloadedAt ?? null,
+    downloadError: item.downloadError ?? null,
+    thumbnailFile: item.thumbnailFile ?? null,
+    thumbnailGeneratedAt: item.thumbnailGeneratedAt ?? null,
+    thumbnailError: item.thumbnailError ?? null,
+    duplicateOf: item.duplicateOf ?? null,
+    duplicateGroupSize: item.duplicateGroupSize ?? null,
+    createModeId: item.createModeId ?? null,
+    templateId: item.templateId ?? null,
+    templateLabel: item.templateLabel ?? null,
+    sourceKind: item.sourceKind ?? null,
+    sourceItemId: item.sourceItemId ?? null,
+    sourceUrl: item.sourceUrl ?? null,
+    createdLocallyAt: item.createdLocallyAt ?? null,
     posterUrl: item.thumbnailFile ? mediaUrlForLocalFile(item.thumbnailFile) : null,
   }
 }
@@ -551,12 +580,12 @@ export function jobFromCatalogItem(item: CatalogItem): GeneratePornJob {
 export function normalizeJob(job: GeneratePornJob): NormalizedJob {
   return {
     ...job,
-    output_url: job.output_url || job.outputUrl || "",
-    created_at: job.created_at || job.createdAt,
-    user_id: job.user_id || job.userId,
-    negative_prompt: job.negative_prompt || job.negativePrompt,
-    input_url: job.input_url || job.inputUrl,
-    external_task_id: job.external_task_id || job.externalTaskId,
+    output_url: job.output_url || "",
+    created_at: job.created_at,
+    user_id: job.user_id,
+    negative_prompt: job.negative_prompt,
+    input_url: job.input_url,
+    external_task_id: job.external_task_id,
   }
 }
 
