@@ -37,7 +37,7 @@ export type GeneratePornJob = {
   shared?: boolean | null | undefined
   favorited?: boolean | null | undefined
   error?: string | null | undefined
-  job_id?: string
+  job_id?: string | undefined
   [key: string]: unknown
 }
 
@@ -93,7 +93,7 @@ export type CatalogItem = {
 export type OrphanFile = {
   localFile: string
   size: number
-  fileSize?: number
+  fileSize?: number | undefined
   contentType: string
   sha256: string
   discoveredAt: string
@@ -168,7 +168,7 @@ export type CreateMode = {
 
 export type TemplateSettings = {
   modeId: string
-  source?: Record<string, unknown> | null
+  source?: Record<string, unknown> | null | undefined
   params: CreateParams
 }
 
@@ -199,12 +199,12 @@ export type CreateTemplateRegistry = {
 export type CreationWorkflowJob = {
   stepIndex: number
   jobId: string
-  modeId?: string | null
-  status?: string | null
+  modeId?: string | null | undefined
+  status?: string | null | undefined
 }
 
 export type CreationWorkflow = {
-  templateId?: string | null
+  templateId?: string | null | undefined
   currentStep: number
   activeJobId: string | null
   steps: TemplateSettings[]

@@ -3,6 +3,7 @@ import { stat } from "node:fs/promises"
 import path from "node:path"
 
 import { MEDIA_DIR, PUBLIC_DIR } from "./config.ts"
+import { recordOrEmpty } from "./refinements.ts"
 import type { HttpRequest, HttpResponse } from "./types.ts"
 import { contentTypeFor, fileExists } from "./utils.ts"
 
@@ -144,7 +145,8 @@ export async function readJsonBody(request: HttpRequest): Promise<Record<string,
   }
 
   const raw = Buffer.concat(chunks).toString("utf8").trim()
-  return raw ? JSON.parse(raw) : {}
+  const parsed: unknown = raw ? JSON.parse(raw) : {}
+  return recordOrEmpty(parsed)
 }
 
 export function sendJson(response: HttpResponse, body: unknown, statusCode = 200): void {

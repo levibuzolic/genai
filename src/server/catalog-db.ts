@@ -6,6 +6,7 @@ import { CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
 import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import { redactDataUrlFields } from "./redaction.ts"
 import { isCatalogItem, isRecord, paramsFromUnknown, recordOrNull, stringOrNull } from "./refinements.ts"
+import { parseCreationWorkflow, parseOrphanFile } from "./schemas.ts"
 import type { Catalog, CreateParams, CreationEventOptions, CreationJob, CreationWorkflow, OrphanFile } from "./types.ts"
 
 type TableInfoRow = {
@@ -613,24 +614,7 @@ export function closeCatalogDb(): void {
 }
 
 function workflowOrNull(value: unknown): CreationWorkflow | null {
-  if (!isRecord(value) || typeof value["currentStep"] !== "number" || !Array.isArray(value["steps"]) || !Array.isArray(value["jobs"])) {
-    return null
-  }
-
-  const steps = value["steps"].filter(isTemplateSettings)
-  const jobs = value["jobs"].filter(isCreationWorkflowJob)
-  if (steps.length !== value["steps"].length || jobs.length !== value["jobs"].length) {
-    return null
-  }
-
-  return {
-    templateId: stringOrNull(value["templateId"]),
-    currentStep: value["currentStep"],
-    activeJobId: stringOrNull(value["activeJobId"]),
-    steps,
-    jobs,
-    overrides: paramsFromUnknown(value["overrides"]),
-  }
+  return parseCreationWorkflow(value)
 }
 
 function paramsOrEmpty(value: unknown): CreateParams {
@@ -638,14 +622,7 @@ function paramsOrEmpty(value: unknown): CreateParams {
 }
 
 function isOrphanFile(value: unknown): value is OrphanFile {
-  return (
-    isRecord(value) &&
-    typeof value["localFile"] === "string" &&
-    typeof value["size"] === "number" &&
-    typeof value["contentType"] === "string" &&
-    typeof value["sha256"] === "string" &&
-    typeof value["discoveredAt"] === "string"
-  )
+  return parseOrphanFile(value) !== null
 }
 
 function isTableInfoRow(value: unknown): value is TableInfoRow {
@@ -680,12 +657,4 @@ function isCreationEventRow(value: unknown): value is CreationEventRow {
   return (
     isRecord(value) && typeof value["id"] === "number" && typeof value["status"] === "string" && typeof value["created_at"] === "string"
   )
-}
-
-function isTemplateSettings(value: unknown): value is CreationWorkflow["steps"][number] {
-  return isRecord(value) && typeof value["modeId"] === "string" && isRecord(value["params"])
-}
-
-function isCreationWorkflowJob(value: unknown): value is CreationWorkflow["jobs"][number] {
-  return isRecord(value) && typeof value["stepIndex"] === "number" && typeof value["jobId"] === "string"
 }

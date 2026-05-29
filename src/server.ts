@@ -2,6 +2,8 @@ import { mkdir } from "node:fs/promises"
 import http from "node:http"
 import path from "node:path"
 
+import { z } from "zod"
+
 import {
   acceptAuthorization,
   authBrowser,
@@ -77,6 +79,19 @@ import {
   triggerAutoSync,
 } from "./server/sync.ts"
 import { clamp, hashBuffer, resolveMediaDirFromRoot } from "./server/utils.ts"
+
+const AuthTokenBodySchema = z
+  .object({
+    authorization: z.unknown().optional(),
+    source: z.string().catch("browser"),
+    token: z.unknown().optional(),
+  })
+  .passthrough()
+const CatalogBackupBodySchema = z.object({ reason: z.string().catch("manual") }).passthrough()
+const CatalogRestoreBodySchema = z.object({ file: z.string().catch("") }).passthrough()
+const DisconnectBrowserBodySchema = z.object({ deleteProfile: z.boolean().catch(false) }).passthrough()
+const RefreshCreationsBodySchema = z.object({ pageLimit: z.coerce.number().catch(CREATE_HISTORY_PAGE_LIMIT) }).passthrough()
+const SyncStartBodySchema = z.object({ incremental: z.boolean().catch(true) }).passthrough()
 
 reloadConfigFromEnv()
 closeCatalogDb()
@@ -184,18 +199,18 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/creations/refresh") {
-      const body = await readJsonBody(request)
+      const body = RefreshCreationsBodySchema.parse(await readJsonBody(request))
       return sendJson(
         response,
         await refreshCreations({
-          pageLimit: clamp(Number(body["pageLimit"] || CREATE_HISTORY_PAGE_LIMIT), 1, PAGE_LIMIT),
+          pageLimit: clamp(body.pageLimit, 1, PAGE_LIMIT),
         }),
       )
     }
 
     if (request.method === "POST" && url.pathname === "/api/auth/token") {
-      const body = await readJsonBody(request)
-      const auth = acceptAuthorization(body["authorization"] || body["token"], String(body["source"] || "browser"))
+      const body = AuthTokenBodySchema.parse(await readJsonBody(request))
+      const auth = acceptAuthorization(body.authorization || body.token, body.source)
 
       return sendJson(response, {
         ok: true,
@@ -217,8 +232,8 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/auth/browser/disconnect") {
-      const body = await readJsonBody(request)
-      return sendJson(response, await authBrowser.disconnect({ deleteProfile: Boolean(body["deleteProfile"]) }))
+      const body = DisconnectBrowserBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, await authBrowser.disconnect({ deleteProfile: body.deleteProfile }))
     }
 
     if (request.method === "GET" && url.pathname === "/api/items") {
@@ -234,8 +249,8 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/catalog/backup") {
-      const body = await readJsonBody(request)
-      const backup = await createCatalogBackup(String(body["reason"] || "manual"))
+      const body = CatalogBackupBodySchema.parse(await readJsonBody(request))
+      const backup = await createCatalogBackup(body.reason)
       return sendJson(response, { ok: true, backup })
     }
 
@@ -244,8 +259,8 @@ const server = http.createServer(async (request, response) => {
         return sendJson(response, { ok: false, error: "A sync, download, thumbnail, or verification job is already running." }, 409)
       }
 
-      const body = await readJsonBody(request)
-      const restored = await restoreCatalogBackup(String(body["file"] || ""))
+      const body = CatalogRestoreBodySchema.parse(await readJsonBody(request))
+      const restored = await restoreCatalogBackup(body.file)
       return sendJson(response, { ok: true, restored })
     }
 
@@ -254,13 +269,13 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && url.pathname === "/api/sync/start") {
-      const body = await readJsonBody(request)
+      const body = SyncStartBodySchema.parse(await readJsonBody(request))
 
       if (syncState.running) {
         return sendJson(response, { ok: false, error: "A sync is already running." }, 409)
       }
 
-      const incremental = body["incremental"] !== false
+      const incremental = body.incremental
       startSync({ incremental }).catch(handleBackgroundError)
 
       return sendJson(response, { ok: true, incremental })

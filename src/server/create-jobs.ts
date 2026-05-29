@@ -18,7 +18,8 @@ import { CREATE_POLL_MS } from "./create-constants.ts"
 import { getReusableCreationSource, isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import { getCreateModeDefinitions, loadCreateTemplateRegistry, prepareCreateSubmission } from "./create-templates.ts"
 import { httpError } from "./errors.ts"
-import { isGeneratePornJob, readJsonObject, requireCreateSource, stringOrNull } from "./refinements.ts"
+import { readJsonObject, requireCreateSource, stringOrNull } from "./refinements.ts"
+import { parseGeneratePornJob } from "./schemas.ts"
 import type { CreateParams, CreationJob, CreationWorkflow, GeneratePornJob } from "./types.ts"
 
 type CreateApiResponse = Record<string, unknown> & {
@@ -687,11 +688,12 @@ export async function fetchCreateJob(jobId: string): Promise<GeneratePornJob> {
     throw new Error(stringOrNull(body["error"]) || `Job request failed: ${response.status} ${response.statusText}`)
   }
 
-  if (!isGeneratePornJob(body)) {
+  const job = parseGeneratePornJob(body)
+  if (!job) {
     throw new Error("Job response did not include an id.")
   }
 
-  return body
+  return job
 }
 
 export function saveCreationFromJob(

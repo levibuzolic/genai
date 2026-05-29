@@ -1,6 +1,7 @@
 import { getActiveAuthorization } from "./auth-state.ts"
 import { API_BASE_URL, AUTH_SETUP_MESSAGE } from "./config.ts"
-import { isGeneratePornJob, isRecord } from "./refinements.ts"
+import { recordOrEmpty } from "./refinements.ts"
+import { parseJobsPageResponse } from "./schemas.ts"
 import type { ApiHeaders, GeneratePornJob } from "./types.ts"
 
 export async function fetchJobsPage(page: number): Promise<GeneratePornJob[]> {
@@ -21,12 +22,13 @@ export async function fetchJobsPage(page: number): Promise<GeneratePornJob[]> {
   }
 
   const body: unknown = await response.json()
+  const jobs = parseJobsPageResponse(body)
 
-  if (!isRecord(body) || !Array.isArray(body["results"])) {
+  if (!jobs) {
     throw new Error(`Unexpected API response on page ${page}: missing results array`)
   }
 
-  return body["results"].filter(isGeneratePornJob)
+  return jobs
 }
 
 export function buildApiHeaders(): ApiHeaders {
@@ -48,7 +50,8 @@ export function buildApiHeaders(): ApiHeaders {
   }
 
   if (process.env["GENERATEPORN_EXTRA_HEADERS_JSON"]) {
-    Object.assign(headers, JSON.parse(process.env["GENERATEPORN_EXTRA_HEADERS_JSON"]))
+    const extraHeaders: unknown = JSON.parse(process.env["GENERATEPORN_EXTRA_HEADERS_JSON"])
+    Object.assign(headers, recordOrEmpty(extraHeaders))
   }
 
   return headers
