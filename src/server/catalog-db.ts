@@ -2,8 +2,12 @@ import { randomUUID } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { DatabaseSync } from "node:sqlite"
 
+import { desc, eq } from "drizzle-orm"
+import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite"
+
 import { CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
 import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
+import { catalogMeta, catalogSchema, downloadedJobIds, mediaItems, orphanFiles, type CatalogDbSchema } from "./db-schema.ts"
 import { redactDataUrlFields } from "./redaction.ts"
 import { isCatalogItem, isRecord, paramsFromUnknown, recordOrNull, stringOrNull } from "./refinements.ts"
 import { parseCreationWorkflow, parseOrphanFile } from "./schemas.ts"
@@ -11,23 +15,6 @@ import type { Catalog, CreateParams, CreationEventOptions, CreationJob, Creation
 
 type TableInfoRow = {
   name: string
-}
-
-type CatalogMetaRow = {
-  key: string
-  value_json: string
-}
-
-type CatalogItemRow = {
-  item_json: string
-}
-
-type DownloadedJobRow = {
-  id: string
-}
-
-type OrphanFileRow = {
-  file_json: string
 }
 
 type CreationRow = {
@@ -121,7 +108,10 @@ type PublicCreation = Omit<CreationJob, "requestBody" | "request" | "response" |
   workflow?: CreationWorkflow | null
 }
 
+type CatalogOrm = NodeSQLiteDatabase<CatalogDbSchema>
+
 let catalogDb: DatabaseSync | null = null
+let catalogOrm: CatalogOrm | null = null
 
 export function getCatalogDb(): DatabaseSync {
   if (catalogDb) {
@@ -134,6 +124,17 @@ export function getCatalogDb(): DatabaseSync {
   catalogDb.exec("PRAGMA busy_timeout = 5000")
   ensureCatalogSchema(catalogDb)
   return catalogDb
+}
+
+function getCatalogOrm(): CatalogOrm {
+  if (!catalogOrm) {
+    catalogOrm = drizzle({
+      client: getCatalogDb(),
+      schema: catalogSchema,
+    })
+  }
+
+  return catalogOrm
 }
 
 function ensureCatalogSchema(db: DatabaseSync): void {
@@ -220,17 +221,17 @@ function ensureCatalogColumn(db: DatabaseSync, table: string, column: string, ty
 }
 
 export function readCatalogFromDb(): Catalog {
-  const db = getCatalogDb()
-  const metaRows = db.prepare("SELECT key, value_json FROM catalog_meta").all().filter(isCatalogMetaRow)
-  const meta = new Map(metaRows.map((row) => [row.key, parseJson(row.value_json, null)]))
-  const itemRows = db.prepare("SELECT item_json FROM media_items ORDER BY created_at DESC, id ASC").all().filter(isCatalogItemRow)
-  const downloadedRows = db.prepare("SELECT id FROM downloaded_job_ids ORDER BY position ASC").all().filter(isDownloadedJobRow)
-  const orphanRows = db.prepare("SELECT file_json FROM orphan_files ORDER BY local_file ASC").all().filter(isOrphanFileRow)
+  const db = getCatalogOrm()
+  const metaRows = db.select().from(catalogMeta).all()
+  const meta = new Map(metaRows.map((row) => [row.key, parseJson(row.valueJson, null)]))
+  const itemRows = db.select().from(mediaItems).orderBy(desc(mediaItems.createdAt), mediaItems.id).all()
+  const downloadedRows = db.select({ id: downloadedJobIds.id }).from(downloadedJobIds).orderBy(downloadedJobIds.position).all()
+  const orphanRows = db.select().from(orphanFiles).orderBy(orphanFiles.localFile).all()
 
   return normalizeCatalog({
-    items: itemRows.map((row) => parseJson(row.item_json, null)).filter(isCatalogItem),
+    items: itemRows.map((row) => parseJson(row.itemJson, null)).filter(isCatalogItem),
     downloadedJobIds: downloadedRows.map((row) => row.id),
-    orphanFiles: orphanRows.map((row) => parseJson(row.file_json, null)).filter(isOrphanFile),
+    orphanFiles: orphanRows.map((row) => parseJson(row.fileJson, null)).filter(isOrphanFile),
     lastSeenJobId: stringOrNull(meta.get("lastSeenJobId")),
     updatedAt: stringOrNull(meta.get("updatedAt")),
     lastRun: recordOrNull(meta.get("lastRun")),
@@ -285,18 +286,19 @@ export function writeCatalogToDb(catalog: Catalog): void {
 }
 
 export function readCatalogMeta(key: string): unknown {
-  const row = getCatalogDb().prepare("SELECT value_json FROM catalog_meta WHERE key = ?").get(key)
-  return isCatalogMetaValueRow(row) ? parseJson(row.value_json, null) : null
+  const row = getCatalogOrm().select({ valueJson: catalogMeta.valueJson }).from(catalogMeta).where(eq(catalogMeta.key, key)).get()
+  return row ? parseJson(row.valueJson, null) : null
 }
 
 export function writeCatalogMeta(key: string, value: unknown): void {
-  getCatalogDb()
-    .prepare(`
-      INSERT INTO catalog_meta (key, value_json)
-      VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
-    `)
-    .run(key, JSON.stringify(value))
+  getCatalogOrm()
+    .insert(catalogMeta)
+    .values({ key, valueJson: JSON.stringify(value) })
+    .onConflictDoUpdate({
+      target: catalogMeta.key,
+      set: { valueJson: JSON.stringify(value) },
+    })
+    .run()
 }
 
 export function saveCreationJob(creation: CreationInput, event: CreationEventOptions = {}): CreationJob {
@@ -611,6 +613,7 @@ export function closeCatalogDb(): void {
 
   catalogDb.close()
   catalogDb = null
+  catalogOrm = null
 }
 
 function workflowOrNull(value: unknown): CreationWorkflow | null {
@@ -627,26 +630,6 @@ function isOrphanFile(value: unknown): value is OrphanFile {
 
 function isTableInfoRow(value: unknown): value is TableInfoRow {
   return isRecord(value) && typeof value["name"] === "string"
-}
-
-function isCatalogMetaRow(value: unknown): value is CatalogMetaRow {
-  return isRecord(value) && typeof value["key"] === "string" && typeof value["value_json"] === "string"
-}
-
-function isCatalogMetaValueRow(value: unknown): value is Pick<CatalogMetaRow, "value_json"> {
-  return isRecord(value) && typeof value["value_json"] === "string"
-}
-
-function isCatalogItemRow(value: unknown): value is CatalogItemRow {
-  return isRecord(value) && typeof value["item_json"] === "string"
-}
-
-function isDownloadedJobRow(value: unknown): value is DownloadedJobRow {
-  return isRecord(value) && typeof value["id"] === "string"
-}
-
-function isOrphanFileRow(value: unknown): value is OrphanFileRow {
-  return isRecord(value) && typeof value["file_json"] === "string"
 }
 
 function isCreationRow(value: unknown): value is CreationRow {
