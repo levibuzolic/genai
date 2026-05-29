@@ -2,57 +2,32 @@ import { randomUUID } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { DatabaseSync } from "node:sqlite"
 
-import { desc, eq } from "drizzle-orm"
+import { asc, desc, eq, or } from "drizzle-orm"
 import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite"
 
 import { CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
 import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
-import { catalogMeta, catalogSchema, downloadedJobIds, mediaItems, orphanFiles, type CatalogDbSchema } from "./db-schema.ts"
+import {
+  catalogMeta,
+  catalogSchema,
+  creationEvents,
+  creationJobs,
+  downloadedJobIds,
+  mediaItems,
+  orphanFiles,
+  type CatalogDbSchema,
+} from "./db-schema.ts"
 import { redactDataUrlFields } from "./redaction.ts"
 import { isCatalogItem, isRecord, paramsFromUnknown, recordOrNull, stringOrNull } from "./refinements.ts"
 import { parseCreationWorkflow, parseOrphanFile } from "./schemas.ts"
-import type { Catalog, CreateParams, CreationEventOptions, CreationJob, CreationWorkflow, OrphanFile } from "./types.ts"
+import type { Catalog, CatalogItem, CreateParams, CreationEventOptions, CreationJob, CreationWorkflow, OrphanFile } from "./types.ts"
 
 type TableInfoRow = {
   name: string
 }
 
-type CreationRow = {
-  id: string
-  job_id: string | null
-  status: string
-  mode_id: string | null
-  mode_label: string | null
-  media_type: string | null
-  template_id: string | null
-  template_label: string | null
-  source_json: string | null
-  params_json: string | null
-  request_json: string | null
-  request_body_json: string | null
-  workflow_json: string | null
-  response_json: string | null
-  job_json: string | null
-  error: string | null
-  input_url: string | null
-  output_url: string | null
-  external_task_id: string | null
-  created_at: string | number | null
-  created_at_iso: string | null
-  created_locally_at: string | null
-  submitted_at: string | null
-  updated_at: string | null
-  finished_at: string | null
-  downloaded_item_id: string | null
-}
-
-type CreationEventRow = {
-  id: number
-  status: string
-  message: string | null
-  event_json: string | null
-  created_at: string
-}
+type CreationJobRow = typeof creationJobs.$inferSelect
+type CreationJobInsert = typeof creationJobs.$inferInsert
 
 type CreationInput = {
   id?: string | null
@@ -238,51 +213,60 @@ export function readCatalogFromDb(): Catalog {
   })
 }
 
+export function listCatalogItemsByTemplate(templateId: string, limit = 6): CatalogItem[] {
+  return getCatalogOrm()
+    .select({ itemJson: mediaItems.itemJson })
+    .from(mediaItems)
+    .orderBy(desc(mediaItems.createdAt), mediaItems.id)
+    .all()
+    .map((row) => parseJson(row.itemJson, null))
+    .filter((item): item is CatalogItem => isCatalogItem(item) && item.templateId === templateId)
+    .slice(0, limit)
+}
+
 export function writeCatalogToDb(catalog: Catalog): void {
-  const db = getCatalogDb()
+  const db = getCatalogOrm()
   const normalized = normalizeCatalog(catalog)
 
-  db.exec("BEGIN IMMEDIATE")
-  try {
-    db.exec("DELETE FROM media_items")
-    db.exec("DELETE FROM downloaded_job_ids")
-    db.exec("DELETE FROM orphan_files")
+  db.transaction(
+    (tx) => {
+      tx.delete(mediaItems).run()
+      tx.delete(downloadedJobIds).run()
+      tx.delete(orphanFiles).run()
 
-    const insertItem = db.prepare("INSERT INTO media_items (id, item_json, created_at, updated_at) VALUES (?, ?, ?, ?)")
-    for (const item of normalized.items) {
-      if (!item?.id) {
-        continue
+      const itemRows = normalized.items
+        .filter((item) => Boolean(item.id))
+        .map((item) => ({
+          id: item.id,
+          itemJson: JSON.stringify(item),
+          createdAt: Number(item.createdAt || 0),
+          updatedAt: item.updatedAt || null,
+        }))
+      if (itemRows.length) {
+        tx.insert(mediaItems).values(itemRows).run()
       }
 
-      insertItem.run(item.id, JSON.stringify(item), Number(item.createdAt || 0), item.updatedAt || null)
-    }
-
-    const insertDownloaded = db.prepare("INSERT INTO downloaded_job_ids (id, position) VALUES (?, ?)")
-    normalized.downloadedJobIds.forEach((id, index) => {
-      insertDownloaded.run(id, index)
-    })
-
-    const insertOrphan = db.prepare("INSERT INTO orphan_files (local_file, file_json) VALUES (?, ?)")
-    for (const file of normalized.orphanFiles) {
-      if (file?.localFile) {
-        insertOrphan.run(file.localFile, JSON.stringify(file))
+      const downloadedRows = normalized.downloadedJobIds.map((id, position) => ({ id, position }))
+      if (downloadedRows.length) {
+        tx.insert(downloadedJobIds).values(downloadedRows).run()
       }
-    }
 
-    const upsertMeta = db.prepare(`
-      INSERT INTO catalog_meta (key, value_json)
-      VALUES (?, ?)
-      ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
-    `)
-    upsertMeta.run("lastSeenJobId", JSON.stringify(normalized.lastSeenJobId || null))
-    upsertMeta.run("updatedAt", JSON.stringify(normalized.updatedAt || null))
-    upsertMeta.run("lastRun", JSON.stringify(normalized.lastRun || null))
+      const orphanRows = normalized.orphanFiles
+        .filter((file) => Boolean(file.localFile))
+        .map((file) => ({
+          localFile: file.localFile,
+          fileJson: JSON.stringify(file),
+        }))
+      if (orphanRows.length) {
+        tx.insert(orphanFiles).values(orphanRows).run()
+      }
 
-    db.exec("COMMIT")
-  } catch (error) {
-    db.exec("ROLLBACK")
-    throw error
-  }
+      upsertCatalogMeta(tx, "lastSeenJobId", normalized.lastSeenJobId || null)
+      upsertCatalogMeta(tx, "updatedAt", normalized.updatedAt || null)
+      upsertCatalogMeta(tx, "lastRun", normalized.lastRun || null)
+    },
+    { behavior: "immediate" },
+  )
 }
 
 export function readCatalogMeta(key: string): unknown {
@@ -291,8 +275,11 @@ export function readCatalogMeta(key: string): unknown {
 }
 
 export function writeCatalogMeta(key: string, value: unknown): void {
-  getCatalogOrm()
-    .insert(catalogMeta)
+  upsertCatalogMeta(getCatalogOrm(), key, value)
+}
+
+function upsertCatalogMeta(db: CatalogOrm, key: string, value: unknown): void {
+  db.insert(catalogMeta)
     .values({ key, valueJson: JSON.stringify(value) })
     .onConflictDoUpdate({
       target: catalogMeta.key,
@@ -308,92 +295,17 @@ export function saveCreationJob(creation: CreationInput, event: CreationEventOpt
     ...creation,
     updatedAt: creation.updatedAt || new Date().toISOString(),
   })
-  const db = getCatalogDb()
+  const row = creationJobToInsert(next)
+  const { id: _id, ...updateRow } = row
 
-  db.prepare(`
-    INSERT INTO creation_jobs (
-      id,
-      job_id,
-      status,
-      mode_id,
-      mode_label,
-      media_type,
-      template_id,
-      template_label,
-      source_json,
-      params_json,
-      request_json,
-      request_body_json,
-      workflow_json,
-      response_json,
-      job_json,
-      error,
-      input_url,
-      output_url,
-      external_task_id,
-      created_at,
-      created_at_iso,
-      created_locally_at,
-      submitted_at,
-      updated_at,
-      finished_at,
-      downloaded_item_id
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      job_id = excluded.job_id,
-      status = excluded.status,
-      mode_id = excluded.mode_id,
-      mode_label = excluded.mode_label,
-      media_type = excluded.media_type,
-      template_id = excluded.template_id,
-      template_label = excluded.template_label,
-      source_json = excluded.source_json,
-      params_json = excluded.params_json,
-      request_json = excluded.request_json,
-      request_body_json = excluded.request_body_json,
-      workflow_json = excluded.workflow_json,
-      response_json = excluded.response_json,
-      job_json = excluded.job_json,
-      error = excluded.error,
-      input_url = excluded.input_url,
-      output_url = excluded.output_url,
-      external_task_id = excluded.external_task_id,
-      created_at = excluded.created_at,
-      created_at_iso = excluded.created_at_iso,
-      created_locally_at = excluded.created_locally_at,
-      submitted_at = excluded.submitted_at,
-      updated_at = excluded.updated_at,
-      finished_at = excluded.finished_at,
-      downloaded_item_id = excluded.downloaded_item_id
-  `).run(
-    next.id,
-    next.jobId,
-    next.status,
-    next.modeId,
-    next.modeLabel,
-    next.mediaType,
-    next.templateId,
-    next.templateLabel,
-    stringifyNullable(next.source),
-    stringifyNullable(next.params),
-    stringifyNullable(next.request),
-    stringifyNullable(next.requestBody ? redactDataUrlFields(next.requestBody) : null),
-    stringifyNullable(next.workflow),
-    stringifyNullable(next.response),
-    stringifyNullable(next.job),
-    next.error,
-    next.inputUrl,
-    next.outputUrl,
-    next.externalTaskId,
-    next.createdAt,
-    next.createdAtIso,
-    next.createdLocallyAt,
-    next.submittedAt,
-    next.updatedAt,
-    next.finishedAt,
-    next.downloadedItemId,
-  )
+  getCatalogOrm()
+    .insert(creationJobs)
+    .values(row)
+    .onConflictDoUpdate({
+      target: creationJobs.id,
+      set: updateRow,
+    })
+    .run()
 
   const eventStatus = event.eventStatus || (existing?.status !== next.status ? next.status : null)
   if (eventStatus && (event.eventMessage || existing?.status !== next.status || !existing)) {
@@ -404,13 +316,13 @@ export function saveCreationJob(creation: CreationInput, event: CreationEventOpt
 }
 
 export function moveCreationJob(previousId: string, creation: CreationInput): CreationJob {
-  const db = getCatalogDb()
+  const db = getCatalogOrm()
   const existing = findCreationJob(previousId)
   const nextId = stringOrNull(creation.id) || existing?.id || previousId
 
   if (existing && previousId !== nextId) {
-    db.prepare("DELETE FROM creation_jobs WHERE id = ?").run(previousId)
-    db.prepare("UPDATE creation_events SET creation_id = ? WHERE creation_id = ?").run(nextId, previousId)
+    db.delete(creationJobs).where(eq(creationJobs.id, previousId)).run()
+    db.update(creationEvents).set({ creationId: nextId }).where(eq(creationEvents.creationId, previousId)).run()
   }
 
   return saveCreationJob({
@@ -420,9 +332,16 @@ export function moveCreationJob(previousId: string, creation: CreationInput): Cr
 }
 
 export function addCreationEvent(creationId: string, status: string, message: string | null, data: unknown = null): void {
-  getCatalogDb()
-    .prepare("INSERT INTO creation_events (creation_id, status, message, event_json, created_at) VALUES (?, ?, ?, ?, ?)")
-    .run(creationId, String(status || "updated"), message || null, stringifyNullable(data), new Date().toISOString())
+  getCatalogOrm()
+    .insert(creationEvents)
+    .values({
+      creationId,
+      status: String(status || "updated"),
+      message: message || null,
+      eventJson: stringifyNullable(data),
+      createdAt: new Date().toISOString(),
+    })
+    .run()
 }
 
 export function findCreationJob(id: string | null | undefined): CreationJob | null {
@@ -430,16 +349,23 @@ export function findCreationJob(id: string | null | undefined): CreationJob | nu
     return null
   }
 
-  const row = getCatalogDb().prepare("SELECT * FROM creation_jobs WHERE id = ? OR job_id = ? LIMIT 1").get(id, id)
+  const row = getCatalogOrm()
+    .select()
+    .from(creationJobs)
+    .where(or(eq(creationJobs.id, id), eq(creationJobs.jobId, id)))
+    .limit(1)
+    .get()
 
-  return isCreationRow(row) ? creationJobFromRow(row) : null
+  return row ? creationJobFromRow(row) : null
 }
 
 export function listCreationJobs({ status = "all", limit = 80 }: { status?: string; limit?: number } = {}): CreationJob[] {
-  const rows = getCatalogDb()
-    .prepare("SELECT * FROM creation_jobs ORDER BY updated_at DESC, created_locally_at DESC LIMIT ?")
-    .all(limit)
-    .filter(isCreationRow)
+  const rows = getCatalogOrm()
+    .select()
+    .from(creationJobs)
+    .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+    .limit(limit)
+    .all()
   const creations = rows.map(creationJobFromRow)
   const filtered = creations.filter((row) => {
     if (status === "active") return isActiveCreationStatus(row.status)
@@ -457,17 +383,19 @@ export function listCreationJobs({ status = "all", limit = 80 }: { status?: stri
 export function listCreationEvents(
   creationId: string,
 ): { id: number; status: string; message: string | null; data: unknown; createdAt: string }[] {
-  const rows = getCatalogDb()
-    .prepare("SELECT id, status, message, event_json, created_at FROM creation_events WHERE creation_id = ? ORDER BY id ASC")
-    .all(creationId)
-    .filter(isCreationEventRow)
+  const rows = getCatalogOrm()
+    .select()
+    .from(creationEvents)
+    .where(eq(creationEvents.creationId, creationId))
+    .orderBy(asc(creationEvents.id))
+    .all()
 
   return rows.map((row) => ({
     id: row.id,
     status: row.status,
     message: row.message,
-    data: parseJson(row.event_json, null),
-    createdAt: row.created_at,
+    data: parseJson(row.eventJson, null),
+    createdAt: row.createdAt,
   }))
 }
 
@@ -504,34 +432,65 @@ export function normalizeCreationJob(creation: CreationInput = {}): CreationJob 
   }
 }
 
-function creationJobFromRow(row: CreationRow): CreationJob {
+function creationJobToInsert(creation: CreationJob): CreationJobInsert {
+  return {
+    id: creation.id,
+    jobId: creation.jobId,
+    status: creation.status,
+    modeId: creation.modeId,
+    modeLabel: creation.modeLabel,
+    mediaType: creation.mediaType,
+    templateId: creation.templateId,
+    templateLabel: creation.templateLabel,
+    sourceJson: stringifyNullable(creation.source),
+    paramsJson: stringifyNullable(creation.params),
+    requestJson: stringifyNullable(creation.request),
+    requestBodyJson: stringifyNullable(creation.requestBody ? redactDataUrlFields(creation.requestBody) : null),
+    workflowJson: stringifyNullable(creation.workflow),
+    responseJson: stringifyNullable(creation.response),
+    jobJson: stringifyNullable(creation.job),
+    error: creation.error,
+    inputUrl: creation.inputUrl,
+    outputUrl: creation.outputUrl,
+    externalTaskId: creation.externalTaskId,
+    createdAt: creation.createdAt,
+    createdAtIso: creation.createdAtIso,
+    createdLocallyAt: creation.createdLocallyAt,
+    submittedAt: creation.submittedAt,
+    updatedAt: creation.updatedAt,
+    finishedAt: creation.finishedAt,
+    downloadedItemId: creation.downloadedItemId,
+  }
+}
+
+function creationJobFromRow(row: CreationJobRow): CreationJob {
   return normalizeCreationJob({
     id: row.id,
-    jobId: row.job_id,
+    jobId: row.jobId,
     status: row.status,
-    modeId: row.mode_id,
-    modeLabel: row.mode_label,
-    mediaType: row.media_type,
-    templateId: row.template_id,
-    templateLabel: row.template_label,
-    source: parseJson(row.source_json, null),
-    params: parseJson(row.params_json, {}),
-    request: parseJson(row.request_json, null),
-    requestBody: parseJson(row.request_body_json, null),
-    workflow: parseJson(row.workflow_json, null),
-    response: parseJson(row.response_json, null),
-    job: parseJson(row.job_json, null),
+    modeId: row.modeId,
+    modeLabel: row.modeLabel,
+    mediaType: row.mediaType,
+    templateId: row.templateId,
+    templateLabel: row.templateLabel,
+    source: parseJson(row.sourceJson, null),
+    params: parseJson(row.paramsJson, {}),
+    request: parseJson(row.requestJson, null),
+    requestBody: parseJson(row.requestBodyJson, null),
+    workflow: parseJson(row.workflowJson, null),
+    response: parseJson(row.responseJson, null),
+    job: parseJson(row.jobJson, null),
     error: row.error,
-    inputUrl: row.input_url,
-    outputUrl: row.output_url,
-    externalTaskId: row.external_task_id,
-    createdAt: row.created_at,
-    createdAtIso: row.created_at_iso,
-    createdLocallyAt: row.created_locally_at || null,
-    submittedAt: row.submitted_at,
-    updatedAt: row.updated_at || null,
-    finishedAt: row.finished_at,
-    downloadedItemId: row.downloaded_item_id,
+    inputUrl: row.inputUrl,
+    outputUrl: row.outputUrl,
+    externalTaskId: row.externalTaskId,
+    createdAt: row.createdAt,
+    createdAtIso: row.createdAtIso,
+    createdLocallyAt: row.createdLocallyAt || null,
+    submittedAt: row.submittedAt,
+    updatedAt: row.updatedAt || null,
+    finishedAt: row.finishedAt,
+    downloadedItemId: row.downloadedItemId,
   })
 }
 
@@ -630,14 +589,4 @@ function isOrphanFile(value: unknown): value is OrphanFile {
 
 function isTableInfoRow(value: unknown): value is TableInfoRow {
   return isRecord(value) && typeof value["name"] === "string"
-}
-
-function isCreationRow(value: unknown): value is CreationRow {
-  return isRecord(value) && typeof value["id"] === "string" && typeof value["status"] === "string"
-}
-
-function isCreationEventRow(value: unknown): value is CreationEventRow {
-  return (
-    isRecord(value) && typeof value["id"] === "number" && typeof value["status"] === "string" && typeof value["created_at"] === "string"
-  )
 }

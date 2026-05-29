@@ -1,5 +1,9 @@
 import { asc, desc } from "drizzle-orm"
-import { index, sqliteTable } from "drizzle-orm/sqlite-core"
+import { customType, index, sqliteTable } from "drizzle-orm/sqlite-core"
+
+const looseInteger = customType<{ data: string | number; driverData: string | number }>({
+  dataType: () => "integer",
+})
 
 export const catalogMeta = sqliteTable("catalog_meta", ({ text }) => ({
   key: text("key").primaryKey(),
@@ -29,7 +33,7 @@ export const orphanFiles = sqliteTable("orphan_files", ({ text }) => ({
 
 export const creationJobs = sqliteTable(
   "creation_jobs",
-  ({ integer, text }) => ({
+  ({ text }) => ({
     id: text("id").primaryKey(),
     jobId: text("job_id").unique(),
     status: text("status").notNull(),
@@ -49,7 +53,7 @@ export const creationJobs = sqliteTable(
     inputUrl: text("input_url"),
     outputUrl: text("output_url"),
     externalTaskId: text("external_task_id"),
-    createdAt: integer("created_at"),
+    createdAt: looseInteger("created_at"),
     createdAtIso: text("created_at_iso"),
     createdLocallyAt: text("created_locally_at"),
     submittedAt: text("submitted_at"),

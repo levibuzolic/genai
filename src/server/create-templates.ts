@@ -3,13 +3,13 @@ import { mkdir } from "node:fs/promises"
 
 import { fetchJobsPage } from "./api-client.ts"
 import { hasApiAuth } from "./auth-state.ts"
-import { findCreationJob, getCatalogDb, parseJson, readCatalogMeta, writeCatalogMeta } from "./catalog-db.ts"
+import { findCreationJob, listCatalogItemsByTemplate, readCatalogMeta, writeCatalogMeta } from "./catalog-db.ts"
 import { jobFromCatalogItem, loadCatalog, toPublicCatalogItem } from "./catalog.ts"
 import { CREATE_HISTORY_PAGE_LIMIT, MEDIA_DIR } from "./config.ts"
 import { CREATE_BUILTIN_TEMPLATE_SEEDS, CREATE_IMAGE_ACCEPT, CREATE_POLL_MS, CREATE_VIDEO_QUALITY_OPTIONS } from "./create-constants.ts"
 import { assertCreateTextAllowed, getReusableCreationSource } from "./create-shared.ts"
 import { httpError } from "./errors.ts"
-import { isCatalogItem, isRecord, paramsFromUnknown, recordOrEmpty, stringOrNull } from "./refinements.ts"
+import { paramsFromUnknown, recordOrEmpty, stringOrNull } from "./refinements.ts"
 import type {
   CatalogItem,
   CreateMode,
@@ -20,10 +20,6 @@ import type {
   TemplateSettings,
 } from "./types.ts"
 import { sanitizePathPart } from "./utils.ts"
-
-type CatalogItemRow = {
-  item_json: string
-}
 
 export function getCreateModeDefinitions(templates: CreateTemplate[] = []): CreateMode[] {
   const modes: CreateMode[] = [
@@ -452,14 +448,7 @@ export async function deleteCreateTemplate(id: string): Promise<{ ok: true; id: 
 }
 
 function getCreateTemplatePreviews(templateId: string, limit = 6): (CatalogItem & { posterUrl: string | null })[] {
-  const rows = getCatalogDb().prepare("SELECT item_json FROM media_items ORDER BY created_at DESC, id ASC").all().filter(isCatalogItemRow)
-
-  const items = rows
-    .map((row) => parseJson(row["item_json"], null))
-    .filter((item): item is CatalogItem => isCatalogItem(item) && item.templateId === templateId)
-    .slice(0, limit)
-
-  return items.map(toPublicCatalogItem)
+  return listCatalogItemsByTemplate(templateId, limit).map(toPublicCatalogItem)
 }
 
 export async function importCreateTemplateFromHistory(body: Record<string, unknown>): Promise<CreateTemplate> {
@@ -554,8 +543,4 @@ function isCreateTemplate(value: CreateTemplate | null): value is CreateTemplate
 
 function isTemplateSettings(value: TemplateSettings | null): value is TemplateSettings {
   return Boolean(value)
-}
-
-function isCatalogItemRow(value: unknown): value is CatalogItemRow {
-  return isRecord(value) && typeof value["item_json"] === "string"
 }

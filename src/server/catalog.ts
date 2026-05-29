@@ -4,10 +4,13 @@ import { copyFile, mkdir, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import path from "node:path"
 import { DatabaseSync, backup as backupSqliteDatabase } from "node:sqlite"
 
+import { count, eq } from "drizzle-orm"
+import { drizzle } from "drizzle-orm/node-sqlite"
+
 import { ensureVideoThumbnail } from "../thumbnails.ts"
 import { closeCatalogDb, getCatalogDb, parseJson, readCatalogFromDb, saveCatalog } from "./catalog-db.ts"
 import { BACKUP_DIR, CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
-import { isRecord } from "./refinements.ts"
+import { catalogMeta, catalogSchema, mediaItems } from "./db-schema.ts"
 import { sendJson } from "./static.ts"
 import type { Catalog, CatalogItem, GeneratePornJob, HttpResponse, LocalMediaFile, NormalizedJob, ThumbnailPatch } from "./types.ts"
 import { clamp, contentTypeFor, fileExists, hashBuffer, sanitizePathPart } from "./utils.ts"
@@ -683,10 +686,13 @@ function readCatalogDatabaseSummary(filePath: string): { itemCount: number | nul
 
   try {
     db = new DatabaseSync(filePath, { readOnly: true })
-    const itemCountRow = db.prepare("SELECT COUNT(*) AS count FROM media_items").get()
-    const updatedAtRow = db.prepare("SELECT value_json FROM catalog_meta WHERE key = 'updatedAt'").get()
-    const itemCount = isRecord(itemCountRow) && typeof itemCountRow["count"] === "number" ? itemCountRow["count"] : 0
-    const updatedAt = isRecord(updatedAtRow) && typeof updatedAtRow["value_json"] === "string" ? updatedAtRow["value_json"] : null
+    const backupDb = drizzle({ client: db, schema: catalogSchema })
+    const itemCount = backupDb.select({ value: count() }).from(mediaItems).get()?.value ?? 0
+    const updatedAt = backupDb
+      .select({ valueJson: catalogMeta.valueJson })
+      .from(catalogMeta)
+      .where(eq(catalogMeta.key, "updatedAt"))
+      .get()?.valueJson
 
     return {
       itemCount: Number(itemCount || 0),
@@ -707,8 +713,9 @@ async function isValidCatalogDatabase(filePath: string): Promise<boolean> {
 
   try {
     db = new DatabaseSync(filePath, { readOnly: true })
-    db.prepare("SELECT COUNT(*) AS count FROM media_items").get()
-    db.prepare("SELECT COUNT(*) AS count FROM catalog_meta").get()
+    const backupDb = drizzle({ client: db, schema: catalogSchema })
+    backupDb.select({ value: count() }).from(mediaItems).get()
+    backupDb.select({ value: count() }).from(catalogMeta).get()
     return true
   } catch {
     return false
