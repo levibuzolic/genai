@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Hearth • GenAI Focused Session</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', system_ui, sans-serif; }
+    .hearth-bg { background: #09090b; }
+    
+    .media-frame {
+      box-shadow: 0 30px 90px -20px rgb(0 0 0 / .7);
+      transition: box-shadow .4s ease;
+    }
+    
+    .media-frame:hover {
+      box-shadow: 0 40px 110px -15px rgb(0 0 0 / .75);
+    }
+    
+    .orb {
+      transition: transform .2s cubic-bezier(0.23,1,0.32,1), background .2s;
+    }
+    .orb:hover { transform: scale(1.1); }
+    
+    .action-gesture {
+      transition: all .1s ease;
+    }
+    .action-gesture:active { transform: scale(0.96); }
+    
+    .filmstrip-thumb {
+      transition: transform .2s ease, border-color .1s;
+    }
+    .filmstrip-thumb:hover { transform: translateY(-2px); }
+    .filmstrip-thumb.active { border-color: #fff; }
+    
+    .prompt-card {
+      backdrop-filter: blur(20px);
+      background: rgba(18,18,20,0.92);
+    }
+  </style>
+</head>
+<body class="hearth-bg text-[#ededf0] min-h-screen overflow-hidden">
+  <!-- Very minimal chrome -->
+  <div class="absolute top-0 inset-x-0 h-12 flex items-center px-8 z-50 justify-between text-xs">
+    <div class="flex items-center gap-x-2 text-[#9a9aa3]">
+      <div class="flex items-center gap-x-1.5">
+        <i class="fa-solid fa-fire text-orange-400"></i>
+        <span class="font-medium text-white">Hearth</span>
+      </div>
+      <div class="px-2 py-px bg-white/5 rounded text-[10px]">SESSION 04</div>
+    </div>
+    
+    <div class="flex items-center gap-x-4">
+      <div class="flex items-center gap-x-1 text-emerald-400 text-xs">
+        <span>●</span> <span class="text-white/70">Connected</span>
+      </div>
+      <div onclick="togglePrivacy()" class="cursor-pointer px-3 py-1 rounded-full bg-white/5 flex items-center gap-x-1.5 text-xs">
+        <i class="fa-solid fa-eye-slash"></i>
+        <span>Privacy</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- The Heart of the experience: the current work -->
+  <div class="pt-12 pb-8 flex flex-col items-center justify-center h-screen relative">
+    <div class="max-w-[820px] w-full px-6">
+      <!-- Current media (huge, beautiful) -->
+      <div id="main-media" 
+           class="media-frame aspect-[4/3] w-full rounded-[3rem] overflow-hidden relative border border-white/10 bg-[#111113] flex items-center justify-center cursor-pointer"
+           onclick="cycleMediaFocus()">
+        
+        <div id="media-content" class="w-full h-full flex items-center justify-center bg-gradient-to-br from-[#1f1f23] via-[#141416] to-black relative">
+          <!-- Dynamic content injected by JS -->
+          <div id="media-inner" class="text-center">
+            <i class="fa-solid fa-mountain text-[120px] text-white/10"></i>
+            <div class="mt-3 text-sm tracking-widest text-white/40">YOUR CURRENT WORK</div>
+          </div>
+        </div>
+        
+        <!-- Subtle lineage badge -->
+        <div class="absolute top-5 left-5 text-[10px] px-3 py-1 rounded-2xl bg-black/50 backdrop-blur flex items-center gap-x-1.5 border border-white/10">
+          <span class="text-white/60">FROM</span>
+          <span id="lineage-badge" class="font-medium">catalog · cat_03</span>
+        </div>
+        
+        <div class="absolute bottom-5 right-5 text-xs px-3 py-1 bg-black/50 backdrop-blur rounded-2xl border border-white/10 flex items-center gap-x-2">
+          <div class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
+          <span id="media-status">Ready for transformation</span>
+        </div>
+      </div>
+
+      <!-- Contextual prompt card that feels like part of the media -->
+      <div class="prompt-card mx-auto -mt-6 max-w-[560px] rounded-3xl border border-white/10 p-5 shadow-2xl relative z-10">
+        <div class="flex items-center gap-x-2 text-xs text-white/50 mb-1.5 px-1">
+          <span>WHAT DO YOU WANT TO DO WITH THIS?</span>
+        </div>
+        
+        <textarea id="immersive-prompt" rows="2" placeholder="Describe the next evolution..." 
+                  class="w-full resize-y bg-transparent border-0 text-lg placeholder:text-white/30 focus:outline-none leading-tight"></textarea>
+        
+        <div class="flex items-center gap-x-2 mt-3">
+          <!-- Intention / mode orbs -->
+          <div onclick="chooseIntention('edit')" class="orb cursor-pointer flex items-center gap-x-2 text-xs border border-white/10 px-3 py-1 rounded-2xl hover:border-white/40">
+            <i class="fa-solid fa-pen-nib"></i>
+            <span>Refine</span>
+          </div>
+          <div onclick="chooseIntention('animate')" class="orb cursor-pointer flex items-center gap-x-2 text-xs border border-white/10 px-3 py-1 rounded-2xl hover:border-white/40">
+            <i class="fa-solid fa-play"></i>
+            <span>Animate</span>
+          </div>
+          <div onclick="chooseIntention('nudify')" class="orb cursor-pointer flex items-center gap-x-2 text-xs border border-white/10 px-3 py-1 rounded-2xl hover:border-white/40">
+            <i class="fa-solid fa-magic"></i>
+            <span>Reveal</span>
+          </div>
+          <div onclick="chooseIntention('text2img')" class="orb cursor-pointer flex items-center gap-x-2 text-xs border border-white/10 px-3 py-1 rounded-2xl hover:border-white/40">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+            <span>New</span>
+          </div>
+          
+          <div class="flex-1"></div>
+          
+          <button onclick="castFromHearth()" 
+                  class="action-gesture px-6 h-9 rounded-2xl bg-white text-black text-sm font-semibold flex items-center gap-x-2 active:scale-95">
+            <span>CAST</span>
+            <i class="fa-solid fa-arrow-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom filmstrip of session history + quick reuse -->
+    <div class="absolute bottom-0 inset-x-0 border-t border-white/10 bg-[#09090b]/95 backdrop-blur-xl py-4">
+      <div class="max-w-6xl mx-auto px-6">
+        <div class="flex items-center gap-x-3 mb-2 px-1">
+          <div class="text-xs text-white/50">THIS SESSION</div>
+          <div class="flex-1 h-px bg-white/10"></div>
+          <div onclick="showSessionLibrary()" class="text-xs cursor-pointer flex items-center gap-x-1 text-white/50 hover:text-white">Full library →</div>
+        </div>
+        
+        <div id="filmstrip" class="flex gap-x-3 overflow-x-auto pb-2 snap-x">
+          <!-- Thumbs populated by JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Result celebration / next actions overlay (appears after cast) -->
+  <div id="result-overlay" onclick="if (event.target.id==='result-overlay') hideResultOverlay()" class="hidden fixed inset-0 bg-black/90 z-[70] flex items-center justify-center">
+    <div onclick="event.stopImmediatePropagation()" class="max-w-lg w-full px-6">
+      <div class="text-center mb-4 text-xs tracking-[2px] text-white/50">TRANSFORMATION COMPLETE</div>
+      
+      <div id="result-preview" class="aspect-video rounded-3xl overflow-hidden border border-white/10 mb-6 bg-black"></div>
+      
+      <div class="grid grid-cols-2 gap-3">
+        <button onclick="useResultAsSource()" class="h-12 rounded-2xl border border-white/20 text-sm font-medium flex items-center justify-center gap-x-2">USE AS NEW SOURCE</button>
+        <button onclick="saveResultToLibrary()" class="h-12 rounded-2xl bg-white text-black font-semibold flex items-center justify-center gap-x-2">SAVE TO LIBRARY</button>
+        
+        <button onclick="branchNewIdea()" class="col-span-2 h-12 rounded-2xl border border-white/20 text-sm flex items-center justify-center gap-x-2">START A BRANCHED SESSION FROM HERE</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentWork = {
+      id: 'w_01',
+      type: 'image',
+      prompt: 'reclining figure, dramatic side lighting, film grain',
+      source: 'catalog · cat_03',
+      url: 'https://picsum.photos/id/1005/1280/960'
+    }
+    
+    let sessionHistory = [
+      {id:'h1', type:'image', thumb:'https://picsum.photos/id/1005/240/180', label:'Original source'},
+      {id:'h2', type:'image', thumb:'https://picsum.photos/id/1012/240/180', label:'First edit'},
+    ]
+    
+    function renderMainMedia() {
+      const inner = document.getElementById('media-inner')
+      const frame = document.getElementById('main-media')
+      
+      if (currentWork.url) {
+        inner.innerHTML = `<img src="${currentWork.url}" class="w-full h-full object-cover" style="filter:saturate(0.92) contrast(1.02)">`
+      } else {
+        inner.innerHTML = `<div class="text-center"><i class="fa-solid fa-mountain text-[110px] text-white/10"></i></div>`
+      }
+      
+      document.getElementById('lineage-badge').textContent = currentWork.source
+      document.getElementById('immersive-prompt').value = currentWork.prompt
+    }
+    
+    function renderFilmstrip() {
+      const c = document.getElementById('filmstrip')
+      c.innerHTML = ''
+      
+      sessionHistory.forEach((item, idx) => {
+        const t = document.createElement('div')
+        t.className = `filmstrip-thumb flex-shrink-0 w-24 h-16 rounded-2xl overflow-hidden border border-white/20 snap-start cursor-pointer relative ${idx === 0 ? 'active' : ''}`
+        t.innerHTML = `
+          <img src="${item.thumb}" class="w-full h-full object-cover">
+          <div class="absolute bottom-0 inset-x-0 text-[9px] px-1.5 py-px bg-gradient-to-t from-black/70 text-white/80">${item.label}</div>
+        `
+        t.onclick = () => loadFromFilmstrip(item, idx)
+        c.appendChild(t)
+      })
+      
+      // Add "current" as last thumb
+      const cur = document.createElement('div')
+      cur.className = 'filmstrip-thumb flex-shrink-0 w-24 h-16 rounded-2xl overflow-hidden border border-white/60 ring-1 ring-white/30 snap-start'
+      cur.innerHTML = `<div class="w-full h-full bg-white/5 flex items-center justify-center text-[10px] text-center leading-none">CURRENT<br>WORK</div>`
+      cur.onclick = () => { /* already current */ }
+      c.appendChild(cur)
+    }
+    
+    function loadFromFilmstrip(item, idx) {
+      currentWork = {
+        id: item.id,
+        type: item.type || 'image',
+        prompt: item.label,
+        source: 'session history',
+        url: item.thumb.replace('240/180', '1280/960')
+      }
+      renderMainMedia()
+      // highlight
+      document.querySelectorAll('.filmstrip-thumb').forEach((el,i) => el.classList.toggle('active', i===idx))
+    }
+    
+    function cycleMediaFocus() {
+      // Fun: clicking the big media cycles through "focus modes" (different crops / overlays)
+      const frame = document.getElementById('main-media')
+      frame.style.filter = frame.style.filter ? '' : 'saturate(1.3) contrast(1.1) hue-rotate(8deg)'
+      setTimeout(() => { frame.style.filter = '' }, 1600)
+    }
+    
+    function chooseIntention(kind) {
+      const ta = document.getElementById('immersive-prompt')
+      
+      if (kind === 'edit') {
+        ta.value = 'soften skin, gentle smile, warmer tones'
+      } else if (kind === 'animate') {
+        ta.value = 'slow breathing motion, subtle camera push, 8 seconds'
+        document.getElementById('media-status').textContent = 'Video mode selected'
+      } else if (kind === 'nudify') {
+        ta.value = 'Remove all clothing, fully nude, keep face and pose unchanged'
+      } else if (kind === 'text2img') {
+        ta.value = 'brand new portrait in the same lighting and mood'
+        currentWork.source = 'text prompt only'
+        document.getElementById('lineage-badge').textContent = 'text → image'
+      }
+      
+      // Auto-cast hint
+      setTimeout(() => {
+        document.getElementById('media-status').textContent = 'Ready — press CAST or hit Enter'
+      }, 900)
+    }
+    
+    function castFromHearth() {
+      const prompt = document.getElementById('immersive-prompt').value.trim()
+      if (!prompt) return alert('Describe something beautiful first.')
+      
+      const overlay = document.getElementById('result-overlay')
+      const preview = document.getElementById('result-preview')
+      
+      // Fake generation
+      preview.innerHTML = `
+        <div class="w-full h-full flex items-center justify-center bg-black">
+          <div class="text-center">
+            <i class="fa-solid fa-spinner fa-spin text-4xl text-white/40 mb-4"></i>
+            <div class="text-xs text-white/50 tracking-widest">CASTING INTO THE HEARTH...</div>
+          </div>
+        </div>
+      `
+      overlay.classList.remove('hidden')
+      overlay.classList.add('flex')
+      
+      setTimeout(() => {
+        const newUrl = `https://picsum.photos/id/${Math.floor(Math.random()*60)+20}/1280/960`
+        preview.innerHTML = `<img src="${newUrl}" class="w-full h-full object-cover">`
+        
+        // Add to session history
+        sessionHistory.push({
+          id: 'h' + Date.now(),
+          type: prompt.toLowerCase().includes('video') ? 'video' : 'image',
+          thumb: newUrl.replace('1280/960','240/180'),
+          label: prompt.slice(0, 28)
+        })
+        renderFilmstrip()
+        
+        // Update current work
+        currentWork = {
+          id: 'w_new',
+          type: 'image',
+          prompt,
+          source: 'hearth cast',
+          url: newUrl
+        }
+        renderMainMedia()
+      }, 1650)
+    }
+    
+    function useResultAsSource() {
+      hideResultOverlay()
+      // The result preview already became the new currentWork via the timeout above
+      document.getElementById('media-status').textContent = 'Result is now your source'
+    }
+    
+    function saveResultToLibrary() {
+      hideResultOverlay()
+      const saved = document.createElement('div')
+      saved.className = 'fixed bottom-5 right-5 bg-[#18181b] border border-white/10 px-4 py-2 rounded-2xl text-sm flex items-center gap-x-2 z-[80]'
+      saved.innerHTML = `Saved to library. <span class="text-emerald-400">Open library →</span>`
+      document.body.appendChild(saved)
+      setTimeout(() => saved.remove(), 2200)
+    }
+    
+    function branchNewIdea() {
+      hideResultOverlay()
+      // Start a "new session" feel while keeping the current media
+      document.getElementById('immersive-prompt').value = ''
+      document.getElementById('media-status').textContent = 'New branch started'
+      sessionHistory = sessionHistory.slice(-2) // keep only last couple
+      renderFilmstrip()
+    }
+    
+    function hideResultOverlay() {
+      const o = document.getElementById('result-overlay')
+      o.classList.add('hidden')
+      o.classList.remove('flex')
+    }
+    
+    function togglePrivacy() {
+      const frame = document.getElementById('main-media')
+      if (frame.style.filter.includes('blur')) {
+        frame.style.filter = ''
+      } else {
+        frame.style.filter = 'blur(22px)'
+      }
+    }
+    
+    function showSessionLibrary() {
+      alert('In the real app this would open the full library filtered to creations from this session, with the ability to bring any back into the Hearth as a new source.')
+    }
+    
+    function initKeyboard() {
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && document.activeElement.id === 'immersive-prompt') {
+          e.preventDefault()
+          castFromHearth()
+        }
+        if (e.key.toLowerCase() === 'p') togglePrivacy()
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') castFromHearth()
+      })
+    }
+    
+    function bootstrap() {
+      renderMainMedia()
+      renderFilmstrip()
+      initKeyboard()
+      
+      // Gentle onboarding hint
+      setTimeout(() => {
+        const status = document.getElementById('media-status')
+        if (status.textContent.includes('Ready')) {
+          status.textContent = 'Try the intention orbs or just type + CAST'
+        }
+      }, 4200)
+      
+      console.log('%c[Hearth] This prototype explores immersive, low-chrome, high-emotion creation. The media is the hero. Everything else orbits it.', 'color:#666')
+    }
+    
+    window.onload = bootstrap
+  </script>
+</body>
+</html>

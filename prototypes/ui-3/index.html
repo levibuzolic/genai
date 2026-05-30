@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Loom • GenAI Workflow Weaver</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    body { font-family: 'Inter', system_ui, sans-serif; }
+    .font-display { font-family: 'Space Grotesk', 'Inter', system_ui, sans-serif; }
+    
+    .loom-bg { background: #0a0a0b; }
+    .panel { background: #121214; border: 1px solid #242428; }
+    
+    .step-card {
+      transition: all .2s cubic-bezier(0.23,1,0.32,1);
+    }
+    .step-card:hover { transform: translateY(-1px); }
+    .step-card.active { border-color: #6366f1; box-shadow: 0 0 0 1px #6366f1; }
+    
+    .thread-line {
+      background: linear-gradient(#242428, #242428);
+      background-size: 3px 3px;
+    }
+    
+    .loom-node {
+      transition: transform .15s ease, box-shadow .15s;
+    }
+    .loom-node:hover { transform: scale(1.015); }
+    
+    .flow-connector {
+      height: 2px;
+      background: repeating-linear-gradient(90deg, #3f3f46, #3f3f46 6px, transparent 6px, transparent 12px);
+    }
+    
+    .template-pill {
+      font-size: 11px;
+      padding: 1px 9px;
+      border-radius: 999px;
+      background: #1a1a1d;
+      border: 1px solid #242428;
+    }
+  </style>
+</head>
+<body class="loom-bg text-[#ededf0]">
+  <div class="h-14 border-b border-[#242428] flex items-center px-6 justify-between">
+    <div class="flex items-center gap-x-3">
+      <div class="flex items-center gap-x-2">
+        <i class="fa-solid fa-infinity text-3xl text-violet-400"></i>
+        <span class="font-display text-3xl tracking-[-1.2px]">Loom</span>
+      </div>
+      <div class="text-xs px-2 py-px bg-violet-900/30 text-violet-300 rounded">WORKFLOWS + TEMPLATES</div>
+    </div>
+    <div class="flex items-center gap-x-3 text-xs">
+      <div class="px-3 py-1 bg-[#121214] border border-[#242428] rounded-2xl">3 saved looms • 1 imported this week</div>
+      <button onclick="exportLoom()" class="px-4 h-8 rounded-2xl border border-[#242428] flex items-center gap-x-2 text-xs"><i class="fa-solid fa-download"></i> EXPORT</button>
+      <button onclick="saveCurrentLoom()" class="px-5 h-8 rounded-2xl bg-violet-500 text-white font-medium flex items-center gap-x-2 text-xs"><i class="fa-solid fa-save"></i> SAVE AS TEMPLATE</button>
+    </div>
+  </div>
+
+  <div class="flex h-[calc(100vh-3.5rem)]">
+    <!-- Left: Source + Templates -->
+    <div class="w-72 border-r border-[#242428] p-4 flex flex-col">
+      <div class="text-[10px] font-semibold tracking-widest text-[#9a9aa3] px-1 mb-2">SOURCE (FLOWS THROUGH EVERY STEP)</div>
+      
+      <div class="panel rounded-3xl p-3 mb-4">
+        <div onclick="pickSource()" class="cursor-pointer flex items-center gap-3 text-sm p-2 hover:bg-[#18181b] rounded-2xl">
+          <div class="w-9 h-9 bg-[#18181b] rounded-2xl flex-shrink-0 flex items-center justify-center">
+            <i class="fa-solid fa-image text-xl text-white/60"></i>
+          </div>
+          <div class="min-w-0">
+            <div id="source-name" class="font-medium truncate">No source — click to choose</div>
+            <div id="source-meta" class="text-xs text-[#9a9aa3]">Catalog, upload or URL supported</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="text-[10px] font-semibold tracking-widest text-[#9a9aa3] px-1 mb-1.5">SAVED LOOMS (TEMPLATES)</div>
+      <div class="space-y-1.5 mb-4" id="saved-looms">
+        <!-- JS -->
+      </div>
+      
+      <div class="mt-auto">
+        <div class="text-[10px] text-[#9a9aa3] px-1">Workflows are executed as chained jobs on the backend. Each step can be a preset, custom, or another template.</div>
+      </div>
+    </div>
+
+    <!-- Center: The Loom Canvas -->
+    <div class="flex-1 p-6 overflow-auto">
+      <div class="max-w-4xl mx-auto">
+        <div class="flex justify-between items-end mb-3 px-1">
+          <div>
+            <div class="font-semibold text-xl tracking-tight">Current Loom</div>
+            <div class="text-xs text-[#9a9aa3]">Drag steps to reorder • Click a step to edit its parameters</div>
+          </div>
+          <div class="flex gap-x-2">
+            <button onclick="addStep('custom-image')" class="text-xs px-3 h-8 rounded-2xl border border-[#242428] flex items-center gap-x-2 hover:bg-[#121214]"><i class="fa-solid fa-plus"></i> <span>Image step</span></button>
+            <button onclick="addStep('custom-video')" class="text-xs px-3 h-8 rounded-2xl border border-[#242428] flex items-center gap-x-2 hover:bg-[#121214]"><i class="fa-solid fa-plus"></i> <span>Video step</span></button>
+            <button onclick="addStep('nudify')" class="text-xs px-3 h-8 rounded-2xl border border-[#242428] flex items-center gap-x-2 hover:bg-[#121214]"><i class="fa-solid fa-plus"></i> <span>Nudify step</span></button>
+          </div>
+        </div>
+
+        <!-- The actual visual pipeline -->
+        <div id="loom-canvas" class="panel rounded-3xl p-6 min-h-[380px]">
+          <div id="loom-steps" class="space-y-3">
+            <!-- Populated by JS as connected nodes -->
+          </div>
+          
+          <div onclick="addStep()" class="mt-4 border border-dashed border-[#3f3f46] hover:border-violet-400 cursor-pointer rounded-3xl h-14 flex items-center justify-center text-sm text-[#9a9aa3]">
+            + Add another processing step
+          </div>
+        </div>
+
+        <div class="text-[10px] mt-3 px-1 flex items-center gap-x-2 text-[#9a9aa3]">
+          <i class="fa-solid fa-info-circle"></i>
+          <span>Backend will run steps sequentially. Results of step N become the source for step N+1 using the same source resolution rules (image_base64 vs input_url).</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Step Inspector + Run -->
+    <div class="w-80 border-l border-[#242428] p-4 flex flex-col">
+      <div class="panel rounded-3xl p-4 flex-1">
+        <div class="text-xs font-semibold tracking-widest mb-3 text-[#9a9aa3]">STEP INSPECTOR</div>
+        
+        <div id="inspector-empty" class="text-sm text-[#9a9aa3] py-8 text-center">
+          Click any step in the loom to inspect and tweak its parameters.
+        </div>
+        
+        <div id="inspector-content" class="hidden">
+          <div class="mb-3">
+            <div class="text-xs text-[#9a9aa3]">STEP TYPE</div>
+            <div id="insp-type" class="font-semibold text-lg"></div>
+          </div>
+          
+          <div class="space-y-3 text-sm">
+            <div>
+              <div class="text-xs text-[#9a9aa3] mb-1">PROMPT FOR THIS STEP</div>
+              <textarea id="insp-prompt" class="w-full h-20 bg-[#0a0a0b] border border-[#242428] rounded-2xl p-3 text-sm"></textarea>
+            </div>
+            
+            <div id="insp-quality-wrap">
+              <div class="text-xs text-[#9a9aa3] mb-1">QUALITY</div>
+              <select id="insp-quality" class="w-full bg-[#0a0a0b] border border-[#242428] rounded-2xl px-3 py-2 text-sm">
+                <option value="720p-4">720p · 4s</option>
+                <option value="1080p-10">1080p · 10s</option>
+                <option value="1080p-15">1080p · 15s</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="mt-4 flex gap-2">
+            <button onclick="applyInspectorChanges()" class="flex-1 h-9 text-sm rounded-2xl bg-violet-500">Apply changes</button>
+            <button onclick="deleteCurrentStep()" class="px-4 h-9 text-sm rounded-2xl border border-[#242428]">Delete</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <button onclick="runLoom()" 
+                class="w-full h-12 rounded-3xl bg-white text-black font-semibold flex items-center justify-center gap-x-3 active:scale-[0.985]">
+          <i class="fa-solid fa-play"></i>
+          <span>WEAVE &amp; EXECUTE</span>
+        </button>
+        <div class="text-center text-[10px] text-[#9a9aa3] mt-1.5">Will create one creation record with full workflow trace</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Live execution modal -->
+  <div id="exec-modal" class="hidden fixed inset-0 bg-black/80 z-[80] flex items-center justify-center">
+    <div class="w-[520px] panel rounded-3xl p-6">
+      <div class="flex justify-between items-center mb-4">
+        <div class="font-semibold">Executing Loom</div>
+        <div id="exec-status" class="text-emerald-400 text-xs font-medium">RUNNING</div>
+      </div>
+      
+      <div id="exec-steps" class="space-y-2 text-sm"></div>
+      
+      <div class="mt-6 text-xs text-[#9a9aa3]">
+        Each step is a real /api/jobs/edit or /api/jobs/video call. The local server tracks the full lineage.
+      </div>
+      
+      <button onclick="closeExecModal()" class="mt-4 w-full h-10 rounded-2xl border border-[#242428]">Close when finished</button>
+    </div>
+  </div>
+
+  <script>
+    let currentSource = null
+    let steps = []
+    let selectedStepIndex = null
+    let savedTemplates = [
+      {id: 't1', label: 'Soft Portrait Motion', steps: [{type:'custom-image', prompt:'soften skin, gentle smile'}, {type:'custom-video', prompt:'slow push in, breathing'}]},
+      {id: 't2', label: 'Nudify + 8s 720p', steps: [{type:'nudify'}, {type:'custom-video', prompt:'sensual slow motion'}]},
+    ]
+    
+    function pickSource() {
+      const names = ['Portrait by window', 'Lake at dusk', 'Reclining study', 'Neon profile']
+      const choice = names[Math.floor(Math.random()*names.length)]
+      currentSource = { kind: 'catalog', label: choice }
+      document.getElementById('source-name').textContent = choice
+      document.getElementById('source-meta').textContent = 'Catalog image • reusable in every step'
+    }
+    
+    function renderSavedLooms() {
+      const c = document.getElementById('saved-looms')
+      c.innerHTML = ''
+      savedTemplates.forEach(t => {
+        const el = document.createElement('div')
+        el.className = 'panel rounded-2xl px-3 py-2 text-xs cursor-pointer hover:border-violet-400 border border-[#242428]'
+        el.innerHTML = `
+          <div class="font-medium">${t.label}</div>
+          <div class="text-[#9a9aa3]">${t.steps.length} steps</div>
+        `
+        el.onclick = () => loadTemplate(t)
+        c.appendChild(el)
+      })
+    }
+    
+    function loadTemplate(t) {
+      steps = JSON.parse(JSON.stringify(t.steps))
+      selectedStepIndex = null
+      renderLoom()
+      document.getElementById('inspector-content').classList.add('hidden')
+      document.getElementById('inspector-empty').classList.remove('hidden')
+    }
+    
+    function addStep(preferredType) {
+      const type = preferredType || (steps.length % 2 === 0 ? 'custom-image' : 'custom-video')
+      const newStep = {
+        id: 'step_' + Date.now(),
+        type,
+        prompt: type.includes('video') ? 'slow elegant motion, soft light' : 'enhance detail, natural skin',
+        quality: type.includes('video') ? '1080p-10' : null
+      }
+      steps.push(newStep)
+      renderLoom()
+      selectStep(steps.length - 1)
+    }
+    
+    function renderLoom() {
+      const c = document.getElementById('loom-steps')
+      c.innerHTML = ''
+      
+      if (steps.length === 0) {
+        c.innerHTML = `<div class="text-center py-10 text-sm text-[#9a9aa3]">Start by adding steps above or load a saved loom.</div>`
+        return
+      }
+      
+      steps.forEach((step, idx) => {
+        const div = document.createElement('div')
+        div.className = `step-card loom-node panel rounded-3xl px-4 py-3 flex gap-4 items-start border ${selectedStepIndex === idx ? 'active border-violet-400' : 'border-[#242428]'}`
+        
+        const icon = step.type.includes('video') ? 'fa-video' : (step.type === 'nudify' ? 'fa-magic' : 'fa-image')
+        
+        div.innerHTML = `
+          <div class="mt-0.5 w-6 text-violet-400"><i class="fa-solid ${icon}"></i></div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between">
+              <div class="font-semibold">${step.type.replace(/-/g, ' ')}</div>
+              <div class="flex items-center gap-x-1 text-xs">
+                ${step.quality ? `<span class="template-pill">${step.quality}</span>` : ''}
+                <button class="px-2 text-[#9a9aa3] hover:text-white" data-idx="${idx}" data-act="edit"><i class="fa-solid fa-edit"></i></button>
+                <button class="px-2 text-[#9a9aa3] hover:text-white" data-idx="${idx}" data-act="up"><i class="fa-solid fa-arrow-up"></i></button>
+                <button class="px-2 text-[#9a9aa3] hover:text-white" data-idx="${idx}" data-act="down"><i class="fa-solid fa-arrow-down"></i></button>
+              </div>
+            </div>
+            <div class="text-xs text-[#c3c3c8] mt-px line-clamp-1">${step.prompt}</div>
+          </div>
+        `
+        
+        div.onclick = (e) => {
+          if (e.target.closest('button')) return
+          selectStep(idx)
+        }
+        
+        div.querySelectorAll('button').forEach(btn => {
+          btn.onclick = (e) => {
+            e.stopImmediatePropagation()
+            const act = btn.dataset.act
+            const i = parseInt(btn.dataset.idx)
+            if (act === 'edit') selectStep(i)
+            if (act === 'up' && i > 0) { [steps[i-1], steps[i]] = [steps[i], steps[i-1]]; renderLoom(); selectStep(i-1) }
+            if (act === 'down' && i < steps.length-1) { [steps[i], steps[i+1]] = [steps[i+1], steps[i]]; renderLoom(); selectStep(i+1) }
+          }
+        })
+        
+        c.appendChild(div)
+        
+        // Connector line between steps
+        if (idx < steps.length - 1) {
+          const conn = document.createElement('div')
+          conn.className = 'ml-3 h-4 w-0.5 bg-[#242428]'
+          c.appendChild(conn)
+        }
+      })
+    }
+    
+    function selectStep(idx) {
+      selectedStepIndex = idx
+      renderLoom()
+      
+      const step = steps[idx]
+      const empty = document.getElementById('inspector-empty')
+      const content = document.getElementById('inspector-content')
+      
+      empty.classList.add('hidden')
+      content.classList.remove('hidden')
+      
+      document.getElementById('insp-type').textContent = step.type
+      document.getElementById('insp-prompt').value = step.prompt || ''
+      
+      const qWrap = document.getElementById('insp-quality-wrap')
+      const qSel = document.getElementById('insp-quality')
+      
+      if (step.type.includes('video')) {
+        qWrap.style.display = 'block'
+        qSel.value = step.quality || '1080p-10'
+      } else {
+        qWrap.style.display = 'none'
+      }
+    }
+    
+    function applyInspectorChanges() {
+      if (selectedStepIndex === null) return
+      const step = steps[selectedStepIndex]
+      step.prompt = document.getElementById('insp-prompt').value.trim()
+      if (step.type.includes('video')) {
+        step.quality = document.getElementById('insp-quality').value
+      }
+      renderLoom()
+    }
+    
+    function deleteCurrentStep() {
+      if (selectedStepIndex === null) return
+      steps.splice(selectedStepIndex, 1)
+      selectedStepIndex = null
+      document.getElementById('inspector-content').classList.add('hidden')
+      document.getElementById('inspector-empty').classList.remove('hidden')
+      renderLoom()
+    }
+    
+    function runLoom() {
+      if (!currentSource) {
+        alert('Choose a source first (left panel)')
+        return
+      }
+      if (steps.length === 0) {
+        alert('Add at least one step')
+        return
+      }
+      
+      const modal = document.getElementById('exec-modal')
+      modal.classList.remove('hidden')
+      modal.classList.add('flex')
+      
+      const container = document.getElementById('exec-steps')
+      container.innerHTML = ''
+      
+      let i = 0
+      function runNext() {
+        if (i >= steps.length) {
+          document.getElementById('exec-status').textContent = 'COMPLETE — result added to catalog + history'
+          document.getElementById('exec-status').className = 'text-emerald-400 text-xs font-medium'
+          return
+        }
+        
+        const step = steps[i]
+        const row = document.createElement('div')
+        row.className = 'flex items-center gap-x-3 px-3 py-2 bg-[#0a0a0b] rounded-2xl'
+        row.innerHTML = `
+          <div class="font-mono text-xs w-5 text-right">${i+1}</div>
+          <div class="flex-1">${step.type} — ${step.prompt.slice(0,42)}…</div>
+          <div class="text-emerald-400 text-xs">RUNNING</div>
+        `
+        container.appendChild(row)
+        
+        setTimeout(() => {
+          row.querySelector('.text-emerald-400').textContent = 'DONE'
+          row.querySelector('.text-emerald-400').classList.add('text-white')
+          i++
+          runNext()
+        }, 1350)
+      }
+      runNext()
+    }
+    
+    function closeExecModal() {
+      const m = document.getElementById('exec-modal')
+      m.classList.add('hidden')
+      m.classList.remove('flex')
+      // In real life this would have created a creation job with workflow:true and full trace
+    }
+    
+    function saveCurrentLoom() {
+      if (steps.length === 0) return alert('Nothing to save')
+      const name = prompt('Template name?', 'My new workflow')
+      if (!name) return
+      savedTemplates.push({ id: 't' + Date.now(), label: name, steps: JSON.parse(JSON.stringify(steps)) })
+      renderSavedLooms()
+      alert('Saved. In the real app this hits POST /api/create/templates and becomes available in /api/create/modes.')
+    }
+    
+    function exportLoom() {
+      const data = { source: currentSource, steps }
+      const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'})
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = 'loom-export.json'
+      a.click()
+    }
+    
+    function initDemo() {
+      // Start with a nice two-step loom
+      steps = [
+        { id:'s1', type:'custom-image', prompt:'soften expression, delicate skin texture' },
+        { id:'s2', type:'custom-video', prompt:'slow gentle breathing motion, 8 seconds', quality:'720p-8' }
+      ]
+      currentSource = { kind:'catalog', label:'Portrait by window' }
+      document.getElementById('source-name').textContent = 'Portrait by window'
+      document.getElementById('source-meta').textContent = 'Catalog image • reusable in every step'
+      
+      renderLoom()
+      renderSavedLooms()
+      
+      // Pre-select first step
+      setTimeout(() => selectStep(0), 180)
+    }
+    
+    window.onload = initDemo
+  </script>
+</body>
+</html>

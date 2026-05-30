@@ -1,0 +1,1406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Forge • GenAI Creation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+    
+    :root {
+      --bg: #0a0a0b;
+      --panel: #141416;
+      --panel-elev: #1a1a1d;
+      --line: #27272a;
+      --text: #ededf0;
+      --muted: #9a9aa3;
+      --accent: #3b82f6;
+      --success: #22c55e;
+      --warning: #eab308;
+      --danger: #ef4444;
+    }
+    
+    body {
+      font-family: 'Inter', system_ui, sans-serif;
+    }
+    
+    .font-display {
+      font-family: 'Space Grotesk', 'Inter', system_ui, sans-serif;
+      font-weight: 600;
+    }
+
+    .forge-bg {
+      background: 
+        radial-gradient(circle at 25% 20%, rgba(59, 130, 246, 0.04) 0%, transparent 50%),
+        radial-gradient(circle at 75% 80%, rgba(163, 163, 172, 0.03) 0%, transparent 50%),
+        #0a0a0b;
+    }
+
+    .media-card {
+      transition: transform 0.2s cubic-bezier(0.23, 1, 0.32, 1), 
+                  box-shadow 0.2s cubic-bezier(0.23, 1, 0.32, 1),
+                  border-color 0.1s;
+      border: 1px solid var(--line);
+    }
+    
+    .media-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 10px 30px -15px rgb(0 0 0 / 0.5);
+      border-color: #3f3f46;
+    }
+    
+    .media-card.selected {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 1px #3b82f6;
+    }
+
+    .stage {
+      background: 
+        linear-gradient(#1a1a1d 1px, transparent 1px),
+        linear-gradient(90deg, #1a1a1d 1px, transparent 1px);
+      background-size: 28px 28px;
+      box-shadow: inset 0 0 120px rgb(0 0 0 / 0.6);
+    }
+
+    .stage-item {
+      transition: all 0.2s cubic-bezier(0.23, 1.0, 0.32, 1);
+      cursor: grab;
+    }
+    
+    .stage-item:active {
+      cursor: grabbing;
+      transform: scale(0.98);
+    }
+
+    .mode-chip {
+      transition: all 0.1s ease;
+    }
+    
+    .mode-chip:hover {
+      transform: translateY(-1px);
+      border-color: #3b82f6;
+    }
+    
+    .mode-chip.active {
+      background-color: #3b82f6;
+      color: white;
+      border-color: #3b82f6;
+    }
+
+    .result-card {
+      transition: transform .3s cubic-bezier(0.23, 1, 0.32, 1), 
+                  box-shadow .3s;
+    }
+    
+    .result-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+    }
+
+    .forge-label {
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .prompt-text {
+      font-size: 13px;
+      line-height: 1.35;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .subtle-grid {
+      background-image: 
+        linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+
+    .creation-log {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 11px;
+    }
+
+    .media-placeholder {
+      background: linear-gradient(145deg, #18181b, #27272a);
+    }
+
+    .nav-active {
+      background: #18181b;
+      color: white;
+      border-radius: 6px;
+    }
+
+    .step-node {
+      transition: all 0.2s ease;
+    }
+
+    .step-node.active {
+      box-shadow: 0 0 0 2px #3b82f6;
+    }
+
+    .floating {
+      animation: float 3s ease-in-out infinite;
+    }
+  </style>
+</head>
+<body class="bg-[#0a0a0b] text-[#ededf0] min-h-screen overflow-hidden">
+  <!-- Top Command Bar -->
+  <div class="h-14 border-b border-[#27272a] bg-[#0a0a0b] flex items-center px-6 justify-between z-50 relative">
+    <div class="flex items-center gap-x-4">
+      <div class="flex items-center gap-x-2.5">
+        <div class="w-8 h-8 rounded-xl bg-white flex items-center justify-center">
+          <i class="fa-solid fa-hammer text-[#0a0a0b] text-xl"></i>
+        </div>
+        <div>
+          <span class="font-display text-2xl tracking-tighter font-semibold">Forge</span>
+          <span class="text-[10px] font-mono text-[#9a9aa3] ml-1">v4</span>
+        </div>
+      </div>
+      
+      <div class="h-5 w-px bg-[#27272a]"></div>
+      
+      <div class="flex items-center gap-x-1.5 text-sm">
+        <div class="px-2.5 py-1 bg-[#18181b] rounded-md flex items-center gap-x-1.5 text-xs">
+          <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+          <span class="text-emerald-400 font-medium">Connected</span>
+        </div>
+        <div onclick="showAuthModal()" class="px-2.5 py-1 hover:bg-[#18181b] rounded-md text-xs flex items-center gap-x-1.5 cursor-pointer transition-colors">
+          <i class="fa-solid fa-user-shield text-[#9a9aa3]"></i>
+          <span class="text-[#9a9aa3]">GP • max</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-x-3 text-sm">
+      <!-- Global status -->
+      <div class="flex items-center gap-x-2 px-3 py-1.5 bg-[#141416] rounded-xl border border-[#27272a]">
+        <div class="flex items-center gap-x-1.5">
+          <i class="fa-solid fa-sync text-[#9a9aa3] text-xs"></i>
+          <span class="text-xs text-[#9a9aa3]">Sync</span>
+          <span class="font-mono text-[10px] text-emerald-400">2m ago</span>
+        </div>
+        <div class="h-3 w-px bg-[#27272a]"></div>
+        <div class="text-xs text-[#9a9aa3]">
+          <span class="font-medium text-white">1,284</span> items
+        </div>
+      </div>
+
+      <button onclick="resetEverything()" 
+              class="px-3 py-1.5 text-xs hover:bg-[#18181b] border border-[#27272a] rounded-xl flex items-center gap-x-2 transition-colors active:scale-[0.985]">
+        <i class="fa-solid fa-undo text-xs"></i>
+        <span>Reset bench</span>
+      </button>
+      
+      <button onclick="showApiLog()" 
+              class="px-3 py-1.5 text-xs bg-[#18181b] hover:bg-[#27272a] border border-[#27272a] rounded-xl flex items-center gap-x-2 transition-colors">
+        <i class="fa-solid fa-terminal text-xs"></i>
+        <span>API Trace</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="flex h-[calc(100vh-3.5rem)]">
+    <!-- Media Shelf (Catalog Source) -->
+    <div class="w-80 border-r border-[#27272a] bg-[#0a0a0b] flex flex-col">
+      <div class="px-5 pt-5 pb-3 flex items-center justify-between">
+        <div>
+          <div class="font-semibold tracking-tight">Media Shelf</div>
+          <div class="text-[10px] text-[#9a9aa3]">Drag images onto the stage • 184 images</div>
+        </div>
+        <button onclick="filterShelf()" class="text-[#9a9aa3] hover:text-white transition-colors">
+          <i class="fa-solid fa-filter text-sm"></i>
+        </button>
+      </div>
+      
+      <!-- Shelf search + filters -->
+      <div class="px-5 pb-3">
+        <div class="relative">
+          <input id="shelf-search" type="text" placeholder="Search prompts..." 
+                 onkeyup="filterShelf()"
+                 class="w-full bg-[#141416] border border-[#27272a] text-sm rounded-2xl pl-9 py-2 placeholder:text-[#9a9aa3] focus:outline-none focus:border-[#3b82f6]">
+          <i class="fa-solid fa-search absolute left-3.5 top-3 text-[#9a9aa3]"></i>
+        </div>
+        <div class="flex gap-x-1 mt-2">
+          <div onclick="setShelfFilter('all')" id="filter-all"
+               class="cursor-pointer text-xs px-2.5 py-0.5 rounded-full bg-[#3b82f6] text-white flex-1 text-center">All</div>
+          <div onclick="setShelfFilter('image')" id="filter-image"
+               class="cursor-pointer text-xs px-2.5 py-0.5 rounded-full bg-[#18181b] hover:bg-[#27272a] flex-1 text-center">Images</div>
+          <div onclick="setShelfFilter('video')" id="filter-video"
+               class="cursor-pointer text-xs px-2.5 py-0.5 rounded-full bg-[#18181b] hover:bg-[#27272a] flex-1 text-center">Video</div>
+        </div>
+      </div>
+
+      <!-- Shelf grid -->
+      <div id="shelf-grid" class="flex-1 overflow-auto px-4 pb-4 grid grid-cols-2 gap-3 content-start">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- The Forge Stage -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <div class="px-8 pt-6 pb-3 border-b border-[#27272a] flex items-end justify-between bg-[#0a0a0b]">
+        <div>
+          <div class="flex items-baseline gap-x-3">
+            <h1 class="font-display text-4xl tracking-tighter">The Forge</h1>
+            <div class="text-xs px-2 py-px bg-[#18181b] text-[#9a9aa3] rounded">STAGE 01</div>
+          </div>
+          <p class="text-[#9a9aa3] text-sm mt-0.5">Compose sources • Apply modes • Iterate results</p>
+        </div>
+        
+        <div class="flex items-center gap-x-2 text-xs">
+          <div class="px-3 py-1.5 rounded-2xl bg-[#141416] border border-[#27272a] flex items-center gap-2">
+            <span class="text-[#9a9aa3]">Active on stage:</span> 
+            <span id="stage-count" class="font-mono font-semibold text-white">0</span>
+          </div>
+          <button onclick="clearStage()" 
+                  class="px-3 py-1.5 rounded-2xl border border-[#27272a] hover:bg-[#18181b] transition-colors flex items-center gap-x-2 text-xs">
+            <i class="fa-solid fa-times"></i>
+            <span>Clear stage</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Main Stage -->
+      <div id="stage" 
+           ondrop="handleStageDrop(event)" 
+           ondragover="allowDrop(event)"
+           ondragleave="handleDragLeave(event)"
+           class="stage flex-1 p-8 subtle-grid relative overflow-auto">
+        
+        <div id="stage-empty" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div class="text-center">
+            <div class="mx-auto w-16 h-16 rounded-3xl border border-dashed border-[#3f3f46] flex items-center justify-center mb-4">
+              <i class="fa-solid fa-image text-3xl text-[#3f3f46]"></i>
+            </div>
+            <div class="text-[#9a9aa3]">Drag media from the shelf<br>or drop an upload here</div>
+            <div class="mt-3 flex justify-center gap-x-2">
+              <button onclick="triggerUpload()" 
+                      class="pointer-events-auto text-xs flex items-center gap-x-2 px-4 h-8 rounded-2xl bg-[#18181b] hover:bg-[#27272a] border border-[#27272a]">
+                <i class="fa-solid fa-upload"></i>
+                <span>Upload image</span>
+              </button>
+              <button onclick="useUrlSource()" 
+                      class="pointer-events-auto text-xs flex items-center gap-x-2 px-4 h-8 rounded-2xl bg-[#18181b] hover:bg-[#27272a] border border-[#27272a]">
+                <i class="fa-solid fa-link"></i>
+                <span>Paste URL</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Stage items rendered here by JS -->
+        <div id="stage-items" class="flex flex-wrap gap-6 min-h-[260px]"></div>
+      </div>
+
+      <!-- Mode Toolbelt -->
+      <div class="border-t border-[#27272a] bg-[#0a0a0b] px-6 py-5">
+        <div class="flex items-center justify-between mb-3 px-1">
+          <div class="text-xs font-semibold tracking-widest text-[#9a9aa3]">APPLY A MODE TO SELECTED PIECE</div>
+          <div onclick="showModeHelp()" class="cursor-pointer text-xs flex items-center gap-x-1 text-[#9a9aa3] hover:text-white">
+            <span>What's possible?</span>
+            <i class="fa-solid fa-question-circle"></i>
+          </div>
+        </div>
+        
+        <div id="mode-toolbelt" class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9 gap-2">
+          <!-- Populated by JS with mode chips -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Inspector / Results Rail -->
+    <div class="w-96 border-l border-[#27272a] bg-[#0a0a0b] flex flex-col">
+      <div class="px-5 pt-5 pb-3 flex items-center justify-between border-b border-[#27272a]">
+        <div class="font-semibold tracking-tight">Results &amp; Lineage</div>
+        <div class="text-[10px] px-2 py-0.5 rounded bg-[#18181b] text-[#9a9aa3]">12 this session</div>
+      </div>
+
+      <div class="flex-1 overflow-auto p-4 space-y-4" id="results-rail">
+        <!-- Populated dynamically -->
+        <div class="px-3 py-8 text-center text-xs text-[#9a9aa3]">
+          Completed creations will appear here.<br>
+          Drag results back onto the stage to continue.
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-[#27272a] bg-[#141416]">
+        <div class="text-[10px] font-medium mb-2 px-1 text-[#9a9aa3]">CURRENT SELECTION</div>
+        <div id="selection-info" class="text-sm px-3 py-3 rounded-2xl bg-[#18181b] min-h-[54px] border border-[#27272a]">
+          <span class="text-[#9a9aa3]">No piece selected on stage</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompt / Params floating panel (contextual) -->
+  <div id="params-panel" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[460px] bg-[#141416] border border-[#3f3f46] shadow-2xl rounded-3xl p-5 z-[60]">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-x-2">
+        <div id="params-mode-label" class="font-semibold"></div>
+        <div id="params-mode-badge" class="text-[10px] px-2 py-px rounded-full bg-[#27272a]"></div>
+      </div>
+      <button onclick="closeParamsPanel()" class="text-[#9a9aa3] hover:text-white"><i class="fa-solid fa-times"></i></button>
+    </div>
+
+    <div class="space-y-3">
+      <!-- Prompt -->
+      <div>
+        <div class="flex justify-between items-baseline mb-1 px-0.5">
+          <div class="text-xs text-[#9a9aa3]">PROMPT</div>
+          <div id="prompt-count" class="font-mono text-[10px] text-[#9a9aa3]"></div>
+        </div>
+        <textarea id="prompt-input" rows="2" 
+                  oninput="updatePromptCount()"
+                  class="w-full resize-y min-h-[58px] bg-[#0a0a0b] border border-[#27272a] rounded-2xl p-3 text-sm focus:border-[#3b82f6] placeholder:text-[#9a9aa3]"></textarea>
+      </div>
+
+      <!-- Negative prompt (conditional) -->
+      <div id="negative-group" class="hidden">
+        <div class="text-xs text-[#9a9aa3] mb-1 px-0.5">NEGATIVE PROMPT</div>
+        <textarea id="negative-input" rows="1" 
+                  class="w-full resize-y bg-[#0a0a0b] border border-[#27272a] rounded-2xl p-3 text-sm focus:border-[#3b82f6]"></textarea>
+      </div>
+
+      <!-- Quality / Aspect -->
+      <div id="quality-group" class="hidden">
+        <div class="text-xs text-[#9a9aa3] mb-1 px-0.5">QUALITY</div>
+        <div id="quality-options" class="flex gap-2 flex-wrap"></div>
+      </div>
+
+      <div class="flex items-center justify-between pt-1">
+        <button onclick="submitFromParams()" 
+                class="flex-1 h-10 rounded-2xl bg-white text-black font-semibold flex items-center justify-center gap-x-2 active:scale-[0.985] transition-transform">
+          <i class="fa-solid fa-magic"></i>
+          <span id="submit-btn-label">CAST INTO FORGE</span>
+        </button>
+        <button onclick="closeParamsPanel()" 
+                class="ml-2 px-4 text-sm h-10 rounded-2xl border border-[#27272a]">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toast-container" class="fixed bottom-4 right-4 z-[70] space-y-2"></div>
+
+  <!-- Modals -->
+  <div id="auth-modal" onclick="if (event.target.id === 'auth-modal') hideAuthModal()" class="hidden fixed inset-0 bg-black/70 z-[80] flex items-center justify-center">
+    <div onclick="event.stopImmediatePropagation()" class="bg-[#141416] w-[380px] rounded-3xl border border-[#27272a] p-6">
+      <div class="flex justify-between">
+        <div class="font-semibold">Auth Browser</div>
+        <button onclick="hideAuthModal()" class="text-[#9a9aa3]"><i class="fa-solid fa-times"></i></button>
+      </div>
+      <div class="mt-4 text-sm leading-snug text-[#9a9aa3]">
+        The local server manages a persistent Chrome profile. Click below to open a visible login window (email + OTP required once).
+      </div>
+      <div class="mt-5 flex gap-3">
+        <button onclick="connectAuth()" class="flex-1 h-9 rounded-2xl bg-[#3b82f6] text-white text-sm">Open visible login</button>
+        <button onclick="hideAuthModal()" class="flex-1 h-9 rounded-2xl border border-[#27272a]">Close</button>
+      </div>
+      <div class="text-[10px] text-center mt-4 text-[#9a9aa3]">Profile persists at <span class="font-mono">media/_auth_browser_profile</span></div>
+    </div>
+  </div>
+
+  <div id="url-modal" onclick="if (event.target.id === 'url-modal') hideUrlModal()" class="hidden fixed inset-0 bg-black/70 z-[80] flex items-center justify-center">
+    <div onclick="event.stopImmediatePropagation()" class="bg-[#141416] w-[400px] rounded-3xl border border-[#27272a] p-6">
+      <div class="font-semibold mb-1">Add source via URL</div>
+      <div class="text-xs text-[#9a9aa3] mb-4">Must be a publicly accessible https image URL</div>
+      
+      <input id="url-input" type="url" placeholder="https://..." 
+             class="w-full bg-[#0a0a0b] border border-[#27272a] px-4 py-3 rounded-2xl text-sm">
+      
+      <div class="mt-4 flex gap-3">
+        <button onclick="addUrlSource()" class="flex-1 h-10 rounded-2xl bg-white text-black font-medium">Add to stage</button>
+        <button onclick="hideUrlModal()" class="flex-1 h-10 rounded-2xl border border-[#27272a]">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Tailwind script
+    function initTailwind() {
+      document.documentElement.style.setProperty('--accent', '#3b82f6');
+    }
+    
+    // Realistic mode definitions matching backend create-templates.ts + constants
+    const MODES = [
+      { id: "custom-image", label: "Edit Image", kind: "custom", mediaType: "image", endpoint: "edit", 
+        source: { required: true, acceptedKinds: ["catalog","upload","url"] },
+        desc: "Prompt-guided image edit", icon: "fa-image", time: "~25s" },
+      
+      { id: "text-to-image", label: "Text to Image", kind: "custom", mediaType: "image", endpoint: "text2image",
+        source: { required: false, acceptedKinds: [] },
+        desc: "Generate from prompt only", icon: "fa-magic", time: "~30s", fields: [{name:"aspectRatio", options:["3:4","1:1","4:3"]}] },
+      
+      { id: "nudify", label: "Nudify", kind: "preset", mediaType: "image", endpoint: "edit",
+        source: { required: true, acceptedKinds: ["catalog","upload","url"] },
+        desc: "Remove clothing, preserve pose", icon: "fa-user", time: "~22s", fixed: true },
+      
+      { id: "custom-video", label: "Custom Video", kind: "custom", mediaType: "video", endpoint: "video",
+        source: { required: true, acceptedKinds: ["catalog","upload","url"] },
+        desc: "Image → video with motion", icon: "fa-video", time: "2–3m",
+        fields: [{name:"quality", options: ["720p-4","720p-8","1080p-10","1080p-15"]}] },
+      
+      { id: "custom-image-video", label: "Image + Video", kind: "workflow", mediaType: "video", endpoint: "workflow",
+        source: { required: true, acceptedKinds: ["catalog","upload","url"] },
+        desc: "Edit image then animate", icon: "fa-link", time: "3–4m" },
+      
+      { id: "nudify-video", label: "Nudify + Video", kind: "workflow", mediaType: "video", endpoint: "workflow",
+        source: { required: true, acceptedKinds: ["catalog","upload","url"] },
+        desc: "Nudify first, then motion", icon: "fa-link", time: "3m 20s" },
+      
+      { id: "blowjob-video", label: "Blowjob (Template)", kind: "template", mediaType: "video", endpoint: "video",
+        source: { required: true, acceptedKinds: ["catalog","upload","url"] },
+        desc: "Seeded template motion", icon: "fa-play", time: "~2m 40s", disabled: true, disabledReason: "Import from history" },
+    ]
+
+    // Sample catalog items (images primarily, some video for realism)
+    let CATALOG = [
+      { id: "cat_01", type: "image", prompt: "closeup portrait, soft window light, delicate expression, subtle smile", local: true, favorited: true },
+      { id: "cat_02", type: "image", prompt: "woman standing by lake at dusk, wind in hair, cinematic lighting", local: true },
+      { id: "cat_03", type: "image", prompt: "reclining figure, dramatic side lighting, film grain", local: true, favorited: true },
+      { id: "cat_04", type: "video", prompt: "slow sensual dance, warm interior, gentle motion", local: true, duration: 8 },
+      { id: "cat_05", type: "image", prompt: "extreme closeup eyes, wet lashes, intimate detail", local: true },
+      { id: "cat_06", type: "image", prompt: "full body in silk robe, morning light, elegant pose", local: true },
+      { id: "cat_07", type: "video", prompt: "playful hair flip and smile, soft bokeh", local: true, duration: 4 },
+      { id: "cat_08", type: "image", prompt: "profile against neon, moody cyberpunk tones", local: true },
+      { id: "cat_09", type: "image", prompt: "towel wrapped, steam, bathroom mirror selfie", local: true, favorited: true },
+      { id: "cat_10", type: "image", prompt: "lying on bed, sheets, natural window light", local: true },
+    ]
+
+    let stageItems = []
+    let results = []
+    let selectedStageId = null
+    let currentParamsContext = null   // {stageId, modeId}
+    let apiLog = []
+    let shelfFilter = 'all'
+    let shelfQuery = ''
+
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toast-container')
+      const el = document.createElement('div')
+      el.className = `px-4 py-2.5 rounded-2xl shadow-xl text-sm flex items-center gap-x-2 border ${type === 'error' ? 'bg-red-950 border-red-900 text-red-200' : 'bg-[#18181b] border-[#27272a]'}`
+      el.innerHTML = `
+        <span>${msg}</span>
+        <button class="ml-2 text-[#9a9aa3]" onclick="this.parentElement.remove()">×</button>
+      `
+      container.appendChild(el)
+      setTimeout(() => { if (el.parentElement) el.remove() }, 3800)
+    }
+
+    function logApi(action, payload) {
+      apiLog.unshift({
+        ts: new Date().toISOString(),
+        action,
+        payload: JSON.parse(JSON.stringify(payload))
+      })
+      if (apiLog.length > 30) apiLog.pop()
+    }
+
+    function showApiLog() {
+      const modal = document.createElement('div')
+      modal.className = 'fixed inset-0 bg-black/70 z-[90] flex items-center justify-center p-6'
+      modal.innerHTML = `
+        <div class="bg-[#0a0a0b] border border-[#27272a] w-full max-w-3xl rounded-3xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-[#27272a] flex justify-between items-center">
+            <div class="font-semibold flex items-center gap-x-2">
+              <i class="fa-solid fa-terminal"></i> 
+              <span>API Trace — Real Request Shapes</span>
+            </div>
+            <button class="text-[#9a9aa3] hover:text-white" onclick="this.closest('.fixed').remove()">Close</button>
+          </div>
+          <div class="p-5 max-h-[520px] overflow-auto creation-log text-xs space-y-4 bg-[#111113]">
+            ${apiLog.length === 0 ? '<div class="text-[#9a9aa3]">No API calls yet in this session.</div>' : 
+              apiLog.map(entry => `
+                <div>
+                  <div class="flex justify-between text-[10px] mb-1 text-[#9a9aa3]">
+                    <div>${entry.ts}</div>
+                    <div class="font-medium">${entry.action}</div>
+                  </div>
+                  <pre class="bg-black/60 p-3 rounded-2xl overflow-auto text-emerald-300">${JSON.stringify(entry.payload, null, 2)}</pre>
+                </div>
+              `).join('')}
+          </div>
+          <div class="px-6 py-3 bg-[#141416] text-[10px] text-[#9a9aa3]">
+            These shapes are exactly what the real backend translates into image_base64 / input_url + prompt + resolution/duration for /api/jobs/edit and /api/jobs/video.
+          </div>
+        </div>
+      `
+      document.body.appendChild(modal)
+    }
+
+    function renderShelf() {
+      const grid = document.getElementById('shelf-grid')
+      grid.innerHTML = ''
+      
+      let items = CATALOG
+      
+      if (shelfFilter !== 'all') {
+        items = items.filter(i => i.type === shelfFilter)
+      }
+      if (shelfQuery) {
+        const q = shelfQuery.toLowerCase()
+        items = items.filter(i => i.prompt.toLowerCase().includes(q))
+      }
+      
+      items.forEach(item => {
+        const card = document.createElement('div')
+        card.className = `media-card group relative aspect-[4/3] rounded-3xl overflow-hidden cursor-grab active:cursor-grabbing bg-[#18181b] flex flex-col`
+        card.draggable = true
+        
+        const isVideo = item.type === 'video'
+        
+        card.innerHTML = `
+          <div class="flex-1 media-placeholder relative flex items-center justify-center">
+            <div class="absolute inset-0 bg-[radial-gradient(#27272a_0.8px,transparent_1px)] bg-[length:5px_5px] opacity-60"></div>
+            
+            ${isVideo ? `
+              <div class="relative z-10">
+                <i class="fa-solid fa-video text-3xl text-white/70"></i>
+                <div class="absolute -bottom-1 -right-1 bg-black/70 text-[9px] px-1 rounded font-mono">${item.duration || 4}s</div>
+              </div>
+            ` : `
+              <i class="fa-solid fa-image text-4xl text-white/30"></i>
+            `}
+            
+            ${item.favorited ? `<div class="absolute top-2 right-2"><i class="fa-solid fa-heart text-red-400 text-xs"></i></div>` : ''}
+          </div>
+          
+          <div class="px-2.5 py-2 text-[10px] leading-tight border-t border-[#27272a]">
+            <div class="prompt-text text-[#c3c3c8]">${item.prompt}</div>
+            <div class="flex items-center mt-1 justify-between">
+              <div class="text-[9px] font-mono text-[#9a9aa3]">${item.id}</div>
+              ${isVideo ? '<div class="text-[9px] px-1.5 bg-[#27272a] rounded text-[#9a9aa3]">VIDEO</div>' : ''}
+            </div>
+          </div>
+        `
+        
+        // Drag start
+        card.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'catalog', id: item.id }))
+          card.style.opacity = '0.5'
+        })
+        card.addEventListener('dragend', () => card.style.opacity = '1')
+        
+        // Click to add directly to stage
+        card.addEventListener('click', () => {
+          addCatalogToStage(item.id)
+        })
+        
+        grid.appendChild(card)
+      })
+    }
+
+    function setShelfFilter(f) {
+      shelfFilter = f
+      document.querySelectorAll('[id^="filter-"]').forEach(el => el.classList.remove('bg-[#3b82f6]', 'text-white'))
+      document.getElementById('filter-' + f).classList.add('bg-[#3b82f6]', 'text-white')
+      renderShelf()
+    }
+
+    function filterShelf() {
+      shelfQuery = document.getElementById('shelf-search').value.trim()
+      renderShelf()
+    }
+
+    function addCatalogToStage(itemId) {
+      const item = CATALOG.find(c => c.id === itemId)
+      if (!item) return
+      
+      const stageItem = {
+        id: 'stg_' + Date.now(),
+        kind: 'catalog',
+        catalogId: item.id,
+        type: item.type,
+        prompt: item.prompt,
+        addedAt: new Date()
+      }
+      stageItems.push(stageItem)
+      renderStage()
+      showToast(`Added “${item.prompt.slice(0, 36)}…” to stage`)
+    }
+
+    function handleStageDrop(e) {
+      e.preventDefault()
+      const stageEl = document.getElementById('stage')
+      stageEl.classList.remove('!border-[#3b82f6]')
+      
+      try {
+        const raw = e.dataTransfer.getData('text/plain')
+        const data = JSON.parse(raw)
+        
+        if (data.kind === 'catalog') {
+          addCatalogToStage(data.id)
+        } else if (data.kind === 'result') {
+          // Bring a previous result back onto the stage as a new source (powerful reuse pattern)
+          const res = results.find(r => r.id === data.id)
+          if (res && res.outputUrl) {
+            const stageItem = {
+              id: 'stg_' + Date.now(),
+              kind: 'result',
+              resultId: res.id,
+              type: res.mediaType || 'image',
+              prompt: res.prompt,
+              outputUrl: res.outputUrl,
+              addedAt: new Date()
+            }
+            stageItems.push(stageItem)
+            renderStage()
+            showToast('Reused previous result on stage — great for chaining')
+          }
+        } else if (data.kind === 'upload') {
+          addUploadToStage(data.dataUrl, data.name)
+        }
+      } catch (err) {}
+    }
+
+    function allowDrop(e) {
+      e.preventDefault()
+      const stageEl = document.getElementById('stage')
+      stageEl.classList.add('!border-[#3b82f6]')
+    }
+    
+    function handleDragLeave(e) {
+      const stageEl = document.getElementById('stage')
+      stageEl.classList.remove('!border-[#3b82f6]')
+    }
+
+    function renderStage() {
+      const container = document.getElementById('stage-items')
+      const empty = document.getElementById('stage-empty')
+      container.innerHTML = ''
+      
+      document.getElementById('stage-count').textContent = stageItems.length
+      
+      if (stageItems.length === 0) {
+        empty.style.display = 'flex'
+        updateSelectionInfo()
+        return
+      }
+      empty.style.display = 'none'
+      
+      stageItems.forEach((item, idx) => {
+        const el = document.createElement('div')
+        el.className = `stage-item w-[210px] rounded-3xl overflow-hidden bg-[#141416] border ${selectedStageId === item.id ? 'border-[#3b82f6]' : 'border-[#27272a]'} shadow-xl`
+        
+        const isVideo = item.type === 'video'
+        const displayPrompt = item.prompt || 'Uploaded source'
+        
+        el.innerHTML = `
+          <div class="h-32 relative media-placeholder flex items-center justify-center cursor-pointer" data-id="${item.id}">
+            ${item.kind === 'result' && item.outputUrl ? 
+              `<img src="${item.outputUrl}" class="object-cover w-full h-full" style="filter: saturate(0.9)">` : 
+              `<div class="text-center">
+                 <i class="fa-solid ${isVideo ? 'fa-video' : 'fa-image'} text-4xl text-white/40"></i>
+               </div>`
+            }
+            
+            <div class="absolute top-2.5 left-2.5 text-[9px] px-2 py-px rounded-full bg-black/60 backdrop-blur font-mono tracking-[0.5px] flex items-center gap-x-1">
+              <span>${item.kind.toUpperCase()}</span>
+            </div>
+            
+            ${isVideo ? `<div class="absolute bottom-2 right-2 text-[9px] bg-black/70 px-1.5 rounded font-mono">VIDEO</div>` : ''}
+            
+            <div class="absolute top-2.5 right-2.5 flex gap-x-1">
+              <button class="w-6 h-6 bg-black/70 hover:bg-black/90 rounded-full flex items-center justify-center text-[10px]" data-action="select" data-id="${item.id}">
+                <i class="fa-solid fa-crosshairs text-xs"></i>
+              </button>
+              <button class="w-6 h-6 bg-black/70 hover:bg-red-900/70 rounded-full flex items-center justify-center text-[10px]" data-action="remove" data-id="${item.id}">
+                <i class="fa-solid fa-trash text-xs"></i>
+              </button>
+            </div>
+          </div>
+          
+          <div class="px-3 py-2.5 text-xs">
+            <div class="prompt-text leading-snug text-[#c3c3c8]">${displayPrompt}</div>
+            <div class="flex justify-between items-center mt-1.5 text-[10px]">
+              <span class="text-[#9a9aa3]">${item.kind === 'catalog' ? item.catalogId : item.kind}</span>
+              <span class="font-mono text-[9px] text-[#9a9aa3]">${new Date(item.addedAt).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</span>
+            </div>
+          </div>
+        `
+        
+        // Click handlers
+        el.querySelector('[data-action="select"]').addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          selectStageItem(item.id)
+        })
+        
+        el.querySelector('[data-action="remove"]').addEventListener('click', (ev) => {
+          ev.stopPropagation()
+          removeFromStage(item.id)
+        })
+        
+        el.querySelector('.media-placeholder').addEventListener('click', () => {
+          selectStageItem(item.id)
+        })
+        
+        // Allow dragging results from stage back into results? Or just info.
+        el.draggable = true
+        el.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'stage-item', id: item.id }))
+        })
+        
+        container.appendChild(el)
+      })
+      
+      updateSelectionInfo()
+    }
+
+    function selectStageItem(id) {
+      selectedStageId = (selectedStageId === id) ? null : id
+      renderStage()
+      updateSelectionInfo()
+    }
+
+    function updateSelectionInfo() {
+      const box = document.getElementById('selection-info')
+      
+      if (!selectedStageId) {
+        box.innerHTML = `<span class="text-[#9a9aa3]">No piece selected on stage</span>`
+        return
+      }
+      
+      const item = stageItems.find(s => s.id === selectedStageId)
+      if (!item) return
+      
+      box.innerHTML = `
+        <div class="flex items-start gap-x-3">
+          <div class="text-xs mt-0.5"><i class="fa-solid ${item.type === 'video' ? 'fa-video' : 'fa-image'}"></i></div>
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate">${item.prompt ? item.prompt.slice(0, 58) : 'Custom upload'}</div>
+            <div class="text-[#9a9aa3] text-[10px] mt-px">${item.kind} • ${item.catalogId || item.resultId || 'new source'}</div>
+          </div>
+        </div>
+      `
+    }
+
+    function removeFromStage(id) {
+      stageItems = stageItems.filter(s => s.id !== id)
+      if (selectedStageId === id) selectedStageId = null
+      renderStage()
+    }
+
+    function clearStage() {
+      stageItems = []
+      selectedStageId = null
+      renderStage()
+    }
+
+    function renderModeToolbelt() {
+      const belt = document.getElementById('mode-toolbelt')
+      belt.innerHTML = ''
+      
+      MODES.forEach(mode => {
+        const chip = document.createElement('button')
+        chip.className = `mode-chip group px-3 py-2 text-left rounded-2xl border text-xs flex flex-col border-[#27272a] bg-[#141416] hover:border-[#3b82f6] ${mode.disabled ? 'opacity-50 cursor-not-allowed' : ''}`
+        
+        chip.innerHTML = `
+          <div class="flex items-center gap-x-2">
+            <i class="fa-solid ${mode.icon} w-3.5"></i>
+            <span class="font-medium">${mode.label}</span>
+            ${mode.fixed ? '<span class="text-[9px] ml-auto text-amber-400">PRESET</span>' : ''}
+            ${mode.kind === 'workflow' ? '<span class="text-[9px] ml-auto text-violet-400">FLOW</span>' : ''}
+          </div>
+          <div class="text-[10px] text-[#9a9aa3] mt-px pl-5">${mode.desc}</div>
+          <div class="pl-5 mt-1 flex items-center gap-x-2 text-[10px]">
+            <span class="font-mono text-emerald-400">${mode.time}</span>
+            ${mode.disabled ? `<span class="text-amber-400">needs import</span>` : ''}
+          </div>
+        `
+        
+        if (!mode.disabled) {
+          chip.addEventListener('click', () => {
+            applyMode(mode)
+          })
+        } else {
+          chip.addEventListener('click', () => {
+            showToast('This template needs to be imported from history first', 'error')
+          })
+        }
+        
+        belt.appendChild(chip)
+      })
+    }
+
+    function applyMode(mode) {
+      const selected = stageItems.find(s => s.id === selectedStageId)
+      
+      if (mode.source.required && !selected) {
+        showToast('This mode requires a source image. Select or drag one onto the stage first.', 'error')
+        return
+      }
+      
+      if (!mode.source.required && selected) {
+        // text2image with a source selected is allowed but unusual — we still proceed
+      }
+      
+      // Open the contextual params panel
+      currentParamsContext = { stageId: selected ? selected.id : null, modeId: mode.id }
+      
+      const panel = document.getElementById('params-panel')
+      panel.style.display = 'block'
+      
+      document.getElementById('params-mode-label').innerHTML = `<span class="font-semibold">${mode.label}</span>`
+      document.getElementById('params-mode-badge').innerHTML = `<span class="text-[10px]">${mode.mediaType.toUpperCase()} • ${mode.kind}</span>`
+      
+      // Prompt
+      const promptField = document.getElementById('prompt-input')
+      promptField.value = selected ? (selected.prompt || '') : ''
+      
+      // For presets like nudify, prompt is fixed
+      if (mode.fixed) {
+        promptField.value = 'Remove all clothing, fully nude, keep face and pose unchanged'
+        promptField.disabled = true
+      } else {
+        promptField.disabled = false
+      }
+      
+      updatePromptCount()
+      
+      // Negative prompt only for video modes
+      const negGroup = document.getElementById('negative-group')
+      if (mode.mediaType === 'video' && mode.id !== 'text-to-image') {
+        negGroup.classList.remove('hidden')
+        document.getElementById('negative-input').value = mode.fixed ? 'slow motion, morphing, distorted face, hands merging' : ''
+      } else {
+        negGroup.classList.add('hidden')
+      }
+      
+      // Quality / aspect controls
+      const qGroup = document.getElementById('quality-group')
+      const qOpts = document.getElementById('quality-options')
+      qOpts.innerHTML = ''
+      
+      if (mode.id === 'text-to-image') {
+        qGroup.classList.remove('hidden')
+        const ratios = ['3:4', '1:1', '4:3']
+        ratios.forEach(r => {
+          const b = document.createElement('button')
+          b.className = `px-3 py-1 rounded-xl text-xs border ${r === '3:4' ? 'bg-[#3b82f6] border-[#3b82f6] text-white' : 'border-[#27272a]'}`
+          b.textContent = r
+          b.onclick = () => {
+            qOpts.querySelectorAll('button').forEach(bb => bb.className = `px-3 py-1 rounded-xl text-xs border border-[#27272a]`)
+            b.className = `px-3 py-1 rounded-xl text-xs border bg-[#3b82f6] border-[#3b82f6] text-white`
+            b.dataset.selected = 'true'
+          }
+          qOpts.appendChild(b)
+        })
+      } else if (mode.mediaType === 'video') {
+        qGroup.classList.remove('hidden')
+        const qualities = ['720p-4','720p-8','1080p-10','1080p-15']
+        qualities.forEach(q => {
+          const b = document.createElement('button')
+          b.className = `px-3 py-1 rounded-xl text-xs border ${q === '1080p-15' ? 'bg-[#3b82f6] border-[#3b82f6] text-white' : 'border-[#27272a]'}`
+          b.textContent = q.replace('-', ' · ') + 's'
+          b.onclick = () => {
+            qOpts.querySelectorAll('button').forEach(bb => bb.className = `px-3 py-1 rounded-xl text-xs border border-[#27272a]`)
+            b.className = `px-3 py-1 rounded-xl text-xs border bg-[#3b82f6] border-[#3b82f6] text-white`
+          }
+          qOpts.appendChild(b)
+        })
+      } else {
+        qGroup.classList.add('hidden')
+      }
+      
+      document.getElementById('submit-btn-label').textContent = mode.mediaType === 'video' ? 'START RENDER' : 'CAST'
+    }
+
+    function updatePromptCount() {
+      const ta = document.getElementById('prompt-input')
+      const c = document.getElementById('prompt-count')
+      if (!c) return
+      c.textContent = `${ta.value.length} chars`
+    }
+
+    function closeParamsPanel() {
+      const panel = document.getElementById('params-panel')
+      panel.style.display = 'none'
+      currentParamsContext = null
+    }
+
+    function submitFromParams() {
+      if (!currentParamsContext) return
+      
+      const mode = MODES.find(m => m.id === currentParamsContext.modeId)
+      const stageItem = stageItems.find(s => s.id === currentParamsContext.stageId)
+      
+      const prompt = document.getElementById('prompt-input').value.trim()
+      const negative = document.getElementById('negative-input') ? document.getElementById('negative-input').value.trim() : ''
+      
+      if (!prompt && !mode.fixed) {
+        showToast('Prompt is required', 'error')
+        return
+      }
+      
+      // Build the EXACT shape the backend will send (fidelity)
+      let apiBody = {}
+      let sourceInfo = null
+      
+      if (mode.endpoint === 'text2image') {
+        apiBody = {
+          prompt,
+          modelId: 'qwen-image-2.0-pro',
+          aspectRatio: '3:4'
+        }
+        sourceInfo = { kind: 'none' }
+      } else {
+        // Resolve source exactly like resolveCreateSource
+        if (stageItem) {
+          if (stageItem.kind === 'catalog') {
+            const cat = CATALOG.find(c => c.id === stageItem.catalogId)
+            sourceInfo = { kind: 'catalog', itemId: cat.id }
+            // In real app: if outputUrl present use input_url, else convert local to base64
+            apiBody.input_url = `https://catalog.local/${cat.id}.jpg` // simulated
+          } else if (stageItem.kind === 'result') {
+            sourceInfo = { kind: 'catalog', itemId: stageItem.resultId } // reused result becomes catalog-like
+            apiBody.input_url = stageItem.outputUrl
+          } else if (stageItem.kind === 'upload') {
+            sourceInfo = { kind: 'upload' }
+            apiBody.image_base64 = stageItem.dataUrl.substring(0, 80) + '...[redacted base64]'
+          }
+        }
+        
+        apiBody.prompt = prompt
+        
+        if (mode.mediaType === 'video') {
+          apiBody.resolution = '1080p'
+          apiBody.duration = 15
+          if (negative) apiBody.negative_prompt = negative
+        }
+        
+        if (mode.id === 'custom-image' || mode.id === 'custom-video') {
+          apiBody.seed = null
+        }
+      }
+      
+      // Log the real request shape
+      logApi('POST /api/create/jobs', {
+        modeId: mode.id,
+        source: sourceInfo,
+        params: apiBody,
+        _note: 'This is the normalized local payload. Backend will translate to the exact GeneratePorn.ai shape.'
+      })
+      
+      // Create a local creation record (mirrors catalog-db + create-jobs)
+      const creation = {
+        id: 'cre_' + Date.now(),
+        modeId: mode.id,
+        modeLabel: mode.label,
+        mediaType: mode.mediaType,
+        status: 'submitted',
+        prompt,
+        negativePrompt: negative || null,
+        source: sourceInfo,
+        request: apiBody,
+        createdLocallyAt: new Date().toISOString(),
+        submittedAt: new Date().toISOString()
+      }
+      
+      results.unshift(creation)
+      renderResultsRail()
+      
+      closeParamsPanel()
+      
+      // Kick off simulated polling (exactly like the real poll loop at 2s)
+      simulateJobLifecycle(creation, mode, stageItem)
+      
+      showToast(`Submitted ${mode.label} — polling job status...`)
+    }
+
+    function simulateJobLifecycle(creation, mode, sourceStageItem) {
+      let elapsed = 0
+      const pollInterval = 1800
+      
+      creation.status = 'pending'
+      renderResultsRail()
+      
+      const timer = setInterval(() => {
+        elapsed += pollInterval
+        
+        const isVideo = mode.mediaType === 'video'
+        const totalMs = isVideo ? 165000 : 28000
+        
+        if (elapsed < totalMs * 0.3) {
+          creation.status = 'queued'
+        } else if (elapsed < totalMs * 0.75) {
+          creation.status = 'processing'
+          creation.progress = Math.round((elapsed / totalMs) * 100)
+        } else if (elapsed < totalMs) {
+          creation.status = 'processing'
+          creation.progress = 92
+        } else {
+          clearInterval(timer)
+          
+          // Terminal state
+          const success = Math.random() > 0.07 // occasional failure for realism
+          
+          if (success) {
+            creation.status = 'done'
+            creation.jobId = 'gp_' + Math.random().toString(36).slice(2, 10)
+            creation.externalTaskId = 'ext_' + Date.now()
+            
+            // Generate a "new" result using picsum (different each time for visual difference)
+            const seed = Math.floor(Math.random() * 200)
+            creation.outputUrl = `https://picsum.photos/id/${seed}/720/960`
+            creation.finishedAt = new Date().toISOString()
+            
+            // Add as a draggable result that can be pulled back to stage
+            const resultForStage = {
+              id: 'stg_' + Date.now(),
+              kind: 'result',
+              resultId: creation.id,
+              type: creation.mediaType,
+              prompt: creation.prompt,
+              outputUrl: creation.outputUrl,
+              addedAt: new Date()
+            }
+            
+            // Auto-pin a fresh copy of this result to the stage for immediate reuse (huge UX win)
+            stageItems.unshift(resultForStage)
+            renderStage()
+            
+            showToast(`${mode.label} complete — result ready on stage and in results rail`, 'success')
+          } else {
+            creation.status = 'failed'
+            creation.error = 'Generation failed. Coins refunded if charged.'
+            showToast('Job failed. Try again with different source or prompt.', 'error')
+          }
+          
+          renderResultsRail()
+        }
+        
+        renderResultsRail()
+      }, pollInterval)
+    }
+
+    function renderResultsRail() {
+      const rail = document.getElementById('results-rail')
+      rail.innerHTML = ''
+      
+      if (results.length === 0) {
+        rail.innerHTML = `<div class="px-3 py-8 text-center text-xs text-[#9a9aa3]">Completed creations will appear here.<br>Drag results back onto the stage to continue.</div>`
+        return
+      }
+      
+      results.forEach((c, idx) => {
+        const div = document.createElement('div')
+        div.className = `result-card group border border-[#27272a] rounded-3xl p-3 bg-[#141416] ${c.status === 'done' ? 'cursor-grab' : ''}`
+        
+        const isActive = ['submitted','queued','pending','processing'].includes(c.status)
+        
+        let inner = `
+          <div class="flex gap-x-3">
+            <div class="w-16 h-16 rounded-2xl overflow-hidden flex-shrink-0 media-placeholder relative border border-[#27272a]">
+              ${c.status === 'done' && c.outputUrl ? 
+                `<img src="${c.outputUrl}" class="w-full h-full object-cover">` : 
+                `<div class="absolute inset-0 flex items-center justify-center">
+                   <i class="fa-solid ${c.mediaType === 'video' ? 'fa-video' : 'fa-magic'} text-white/50"></i>
+                 </div>`
+              }
+              ${isActive ? `<div class="absolute inset-0 bg-black/40 flex items-center justify-center"><i class="fa-solid fa-spinner fa-spin text-white"></i></div>` : ''}
+            </div>
+            
+            <div class="min-w-0 flex-1 pt-0.5">
+              <div class="flex items-center gap-x-2">
+                <div class="font-medium text-sm truncate">${c.modeLabel}</div>
+                <div class="text-[10px] px-1.5 py-px rounded ${c.status === 'done' ? 'bg-emerald-900 text-emerald-300' : c.status === 'failed' ? 'bg-red-900 text-red-300' : 'bg-amber-900 text-amber-300'}">${c.status}</div>
+              </div>
+              
+              <div class="text-[11px] text-[#9a9aa3] mt-0.5 leading-snug line-clamp-2">${c.prompt}</div>
+        `
+        
+        if (isActive && c.progress) {
+          inner += `<div class="h-1 mt-2 bg-[#27272a] rounded"><div class="h-1 bg-[#3b82f6] rounded" style="width:${c.progress}%"></div></div>`
+        }
+        
+        if (c.error) {
+          inner += `<div class="text-red-400 text-xs mt-1">${c.error}</div>`
+        }
+        
+        inner += `</div></div>`
+        
+        if (c.status === 'done') {
+          inner += `
+            <div class="mt-2 pt-2 border-t border-[#27272a] flex gap-x-1.5 text-xs">
+              <button data-act="reuse" class="flex-1 py-1 bg-[#18181b] hover:bg-[#3b82f6] hover:text-white rounded-2xl transition-colors">Reuse on stage</button>
+              <button data-act="save-template" class="flex-1 py-1 bg-[#18181b] hover:bg-[#27272a] rounded-2xl">Save template</button>
+            </div>
+          `
+        }
+        
+        div.innerHTML = inner
+        
+        // Wire actions
+        if (c.status === 'done') {
+          div.querySelector('[data-act="reuse"]').addEventListener('click', () => {
+            // Put this result back on stage (core value prop)
+            const stageItem = {
+              id: 'stg_' + Date.now(),
+              kind: 'result',
+              resultId: c.id,
+              type: c.mediaType,
+              prompt: c.prompt,
+              outputUrl: c.outputUrl,
+              addedAt: new Date()
+            }
+            stageItems.unshift(stageItem)
+            renderStage()
+            showToast('Result added to stage — ready for next transformation')
+          })
+          
+          div.querySelector('[data-act="save-template"]').addEventListener('click', () => {
+            saveAsTemplate(c)
+          })
+          
+          // Make entire done card draggable back to stage
+          div.draggable = true
+          div.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', JSON.stringify({ kind: 'result', id: c.id }))
+          })
+        }
+        
+        rail.appendChild(div)
+      })
+    }
+
+    function saveAsTemplate(creation) {
+      const name = prompt('Template name?', creation.modeLabel + ' variation')
+      if (!name) return
+      
+      showToast(`Saved “${name}” as reusable template (would persist via /api/create/templates)`)
+      
+      // In a real prototype we could add it to MODES dynamically, but for now just celebrate
+      logApi('POST /api/create/templates', { fromCreation: creation.id, label: name })
+    }
+
+    function triggerUpload() {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = 'image/jpeg,image/png,image/webp,image/bmp'
+      input.onchange = () => {
+        if (input.files[0]) handleFileUpload(input.files[0], 'picker')
+      }
+      input.click()
+    }
+
+    function handleFileUpload(file, sourceType) {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const dataUrl = e.target.result
+        addUploadToStage(dataUrl, file.name || 'uploaded.jpg')
+      }
+      reader.readAsDataURL(file)
+    }
+
+    function addUploadToStage(dataUrl, name) {
+      const item = {
+        id: 'stg_' + Date.now(),
+        kind: 'upload',
+        type: 'image',
+        prompt: `Uploaded: ${name}`,
+        dataUrl: dataUrl,
+        name,
+        addedAt: new Date()
+      }
+      stageItems.unshift(item)
+      renderStage()
+      showToast('Upload added to stage')
+    }
+
+    function useUrlSource() {
+      document.getElementById('url-modal').classList.remove('hidden')
+      document.getElementById('url-modal').classList.add('flex')
+      setTimeout(() => document.getElementById('url-input').focus(), 50)
+    }
+    
+    function hideUrlModal() {
+      const m = document.getElementById('url-modal')
+      m.classList.remove('flex')
+      m.classList.add('hidden')
+    }
+    
+    function addUrlSource() {
+      const input = document.getElementById('url-input')
+      const url = input.value.trim()
+      
+      if (!url.startsWith('https://')) {
+        showToast('URL must start with https://', 'error')
+        return
+      }
+      
+      const item = {
+        id: 'stg_' + Date.now(),
+        kind: 'url',
+        type: 'image',
+        prompt: `Remote URL source`,
+        url: url,
+        addedAt: new Date()
+      }
+      stageItems.unshift(item)
+      renderStage()
+      hideUrlModal()
+      input.value = ''
+      showToast('URL source added')
+    }
+
+    function showAuthModal() {
+      document.getElementById('auth-modal').classList.remove('hidden')
+      document.getElementById('auth-modal').classList.add('flex')
+    }
+    
+    function hideAuthModal() {
+      const m = document.getElementById('auth-modal')
+      m.classList.remove('flex')
+      m.classList.add('hidden')
+    }
+    
+    function connectAuth() {
+      hideAuthModal()
+      const orig = document.querySelector('.fa-user-shield')
+      if (orig) orig.classList.add('text-emerald-400')
+      showToast('Auth browser window opened. Complete login + OTP there.')
+      
+      setTimeout(() => {
+        showToast('Session captured. Tokens will refresh automatically.')
+      }, 2400)
+    }
+
+    function showModeHelp() {
+      const modal = document.createElement('div')
+      modal.className = 'fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-6'
+      modal.innerHTML = `
+        <div class="max-w-lg bg-[#141416] border border-[#27272a] rounded-3xl p-7 text-sm">
+          <div class="font-semibold mb-4 flex items-center gap-x-2"><i class="fa-solid fa-info-circle"></i> How the Forge maps to the real backend</div>
+          
+          <div class="space-y-4 text-[#c3c3c8]">
+            <div>• <strong>Source resolution</strong> happens exactly like resolveCreateSource(): catalog items prefer remote outputUrl (input_url), local files become image_base64.</div>
+            <div>• <strong>Workflow modes</strong> (Image+Video, Nudify+Video) are executed as multi-job chains on the server — the local creation record tracks every sub-step.</div>
+            <div>• Results land in your local catalog and become instantly reusable as sources. This is the killer feature of the local app vs the upstream site.</div>
+            <div>• Templates are stored in catalog.sqlite under createTemplateRegistry and can seed future runs or be imported from history jobs.</div>
+          </div>
+          
+          <button onclick="this.closest('.fixed').remove()" class="mt-6 w-full h-10 bg-white text-black font-medium rounded-2xl">Got it</button>
+        </div>
+      `
+      document.body.appendChild(modal)
+    }
+
+    function updatePromptCountGlobal() {
+      // helper used inside panel
+    }
+
+    function filterShelfGlobal() {
+      // already wired
+    }
+
+    function setShelfFilterGlobal(f) {
+      // wired via onclick in HTML
+    }
+
+    function resetEverything() {
+      if (!confirm('Reset the entire Forge session?')) return
+      stageItems = []
+      results = []
+      selectedStageId = null
+      apiLog = []
+      document.getElementById('stage-items').innerHTML = ''
+      document.getElementById('results-rail').innerHTML = ''
+      document.getElementById('stage-count').textContent = '0'
+      document.getElementById('selection-info').innerHTML = `<span class="text-[#9a9aa3]">No piece selected on stage</span>`
+      renderStage()
+      renderResultsRail()
+      showToast('Bench cleared')
+    }
+
+    function initDragAndDropGlobal() {
+      // Global paste + drop for uploads (mimics the real app hooks)
+      document.addEventListener('paste', async (e) => {
+        const items = e.clipboardData?.items
+        if (!items) return
+        for (const item of items) {
+          if (item.type.startsWith('image')) {
+            const file = item.getAsFile()
+            if (file) {
+              const reader = new FileReader()
+              reader.onload = (ev) => addUploadToStage(ev.target.result, 'pasted-image.png')
+              reader.readAsDataURL(file)
+              e.preventDefault()
+            }
+          }
+        }
+      })
+      
+      // Allow dropping files anywhere on the page to add to stage
+      document.addEventListener('drop', (e) => {
+        if (e.dataTransfer.files.length) {
+          e.preventDefault()
+          handleFileUpload(e.dataTransfer.files[0], 'drop')
+        }
+      })
+      document.addEventListener('dragover', (e) => e.preventDefault())
+    }
+
+    function initKeyboard() {
+      document.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          const panel = document.getElementById('params-panel')
+          if (panel.style.display === 'block') {
+            e.preventDefault()
+            submitFromParams()
+          }
+        }
+        if (e.key === '/' && document.activeElement.tagName === 'BODY') {
+          e.preventDefault()
+          document.getElementById('shelf-search').focus()
+        }
+        if (e.key.toLowerCase() === '?' && document.activeElement.tagName === 'BODY') {
+          showModeHelp()
+        }
+      })
+      
+      // Show hint
+      setTimeout(() => {
+        const hint = document.createElement('div')
+        hint.className = 'fixed bottom-3 left-6 text-[10px] text-[#9a9aa3] hidden md:block'
+        hint.textContent = 'Tip: Press / to search shelf • Cmd/Ctrl+Enter submits from the panel • Drag results back to stage'
+        document.body.appendChild(hint)
+        setTimeout(() => hint.remove(), 6200)
+      }, 7000)
+    }
+
+    function initFilters() {
+      // Set initial active filter pill
+      document.getElementById('filter-all').classList.add('bg-[#3b82f6]', 'text-white')
+    }
+
+    function bootstrap() {
+      initTailwind()
+      renderShelf()
+      renderModeToolbelt()
+      renderStage()
+      renderResultsRail()
+      initDragAndDropGlobal()
+      initKeyboard()
+      initFilters()
+      
+      // Seed one item on stage for instant delight
+      setTimeout(() => {
+        addCatalogToStage('cat_03')
+        showToast('Welcome to the Forge. Try dragging more media or applying a mode.')
+      }, 420)
+      
+      // Keyboard hint in console
+      console.log('%c[Forge] Prototypes respect the real backend: source kinds (catalog/upload/url), mode shapes, image_base64 vs input_url, workflow steps, creation history, and template saving.', 'color:#9a9aa3')
+    }
+
+    window.onload = bootstrap
+  </script>
+</body>
+</html>

@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Flight Deck • GenAI Rapid Creation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=Space+Grotesk:wght@500;600&amp;display=swap');
+    
+    body { font-family: 'Inter', system_ui, sans-serif; }
+    .font-display { font-family: 'Space Grotesk', 'Inter', system_ui, sans-serif; font-weight: 600; letter-spacing: -0.02em; }
+    
+    :root { --bg:#0a0a0b; --panel:#121214; --line:#242428; }
+    
+    .cockpit { background: #0a0a0b; }
+    
+    .instrument {
+      background: #121214;
+      border: 1px solid #242428;
+      transition: border-color .1s, box-shadow .1s;
+    }
+    
+    .instrument.active {
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.3);
+    }
+    
+    .job-row {
+      transition: background .1s;
+    }
+    .job-row:hover { background: #18181b; }
+    
+    .hud-label {
+      font-size: 9px;
+      letter-spacing: 0.75px;
+      text-transform: uppercase;
+      font-weight: 600;
+      color: #9a9aa3;
+    }
+    
+    .metric {
+      font-variant-numeric: tabular-nums;
+    }
+    
+    .cmd-input {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    .variant-card {
+      transition: transform .2s cubic-bezier(0.23,1,0.32,1);
+    }
+    .variant-card:hover { transform: translateY(-1px); }
+
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 999px;
+    }
+    
+    .dense {
+      font-size: 12px;
+      line-height: 1.3;
+    }
+
+    .section-head {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: #9a9aa3;
+    }
+
+    .kbar {
+      box-shadow: 0 10px 40px -10px rgb(0 0 0 / .6);
+    }
+  </style>
+</head>
+<body class="cockpit text-[#ededf0] min-h-screen">
+  <!-- Top HUD -->
+  <div class="h-[52px] border-b border-[#242428] px-5 flex items-center justify-between text-sm">
+    <div class="flex items-center gap-x-5">
+      <div class="flex items-center gap-x-2">
+        <div class="w-7 h-7 bg-white rounded-xl flex items-center justify-center"><i class="fa-solid fa-plane text-black text-xl -rotate-45"></i></div>
+        <div class="font-display text-2xl tracking-[-1.5px]">FLIGHT DECK</div>
+      </div>
+      
+      <div class="flex items-center gap-x-px text-xs">
+        <div class="px-3 py-1 bg-[#18181b] rounded-l-2xl flex items-center gap-x-1.5 border border-[#242428]">
+          <span class="text-emerald-400">●</span>
+          <span class="font-medium">LIVE</span>
+        </div>
+        <div class="px-3 py-1 bg-[#18181b] rounded-r-2xl border border-l-0 border-[#242428] text-[#9a9aa3]">GP • max • 4,812 coins</div>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-2 text-xs">
+      <div class="px-3 py-1 rounded-2xl bg-[#18181b] border border-[#242428] flex items-center gap-x-2">
+        <span>Auto-sync</span> <span class="font-mono text-emerald-400">ON</span>
+      </div>
+      <button onclick="showCommandBar()" class="px-4 py-1 rounded-2xl border border-[#242428] hover:bg-[#18181b] flex items-center gap-x-2">
+        <i class="fa-solid fa-terminal text-xs"></i>
+        <span class="font-medium">Command Bar</span>
+        <span class="font-mono text-[#9a9aa3]">⌘K</span>
+      </button>
+      <button onclick="spawnVariantBatch()" class="px-4 py-1 bg-[#3b82f6] text-white text-xs font-semibold rounded-2xl flex items-center gap-x-2 active:scale-[0.985]">
+        <i class="fa-solid fa-bolt-lightning"></i>
+        <span>SPAWN 4 VARIANTS</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="flex h-[calc(100vh-52px)]">
+    <!-- Left: Command + Source -->
+    <div class="w-[300px] border-r border-[#242428] p-4 flex flex-col">
+      <div class="section-head mb-2 px-1">MISSION BRIEF</div>
+      
+      <!-- Source selector - extremely compact -->
+      <div class="instrument rounded-3xl p-3 mb-3">
+        <div class="hud-label mb-1.5 px-1">SOURCE</div>
+        
+        <div class="grid grid-cols-3 gap-1.5 text-xs">
+          <div onclick="selectSourceKind('catalog')" id="src-catalog"
+               class="cursor-pointer bg-[#0a0a0b] hover:bg-[#18181b] border border-[#242428] rounded-2xl p-2 text-center active:scale-[0.985]">
+            <i class="fa-solid fa-database block text-lg mb-0.5"></i>
+            <div>Catalog</div>
+          </div>
+          <div onclick="selectSourceKind('upload')" id="src-upload"
+               class="cursor-pointer bg-[#0a0a0b] hover:bg-[#18181b] border border-[#242428] rounded-2xl p-2 text-center active:scale-[0.985]">
+            <i class="fa-solid fa-upload block text-lg mb-0.5"></i>
+            <div>Upload</div>
+          </div>
+          <div onclick="selectSourceKind('url')" id="src-url"
+               class="cursor-pointer bg-[#0a0a0b] hover:bg-[#18181b] border border-[#242428] rounded-2xl p-2 text-center active:scale-[0.985]">
+            <i class="fa-solid fa-link block text-lg mb-0.5"></i>
+            <div>URL</div>
+          </div>
+        </div>
+        
+        <div id="source-detail" class="mt-2 px-1 text-xs min-h-[22px] text-[#9a9aa3]">
+          No source selected — text-to-image available
+        </div>
+      </div>
+
+      <!-- Mode quick picker -->
+      <div class="instrument rounded-3xl p-3 flex-1 flex flex-col">
+        <div class="hud-label mb-1.5 px-1 flex justify-between">
+          <span>MODE</span>
+          <span onclick="showAllModes()" class="cursor-pointer hover:text-white">ALL</span>
+        </div>
+        
+        <div class="space-y-1 text-sm flex-1 overflow-auto pr-1" id="mode-list">
+          <!-- JS populated compact rows -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Center: Active Missions + Prompt -->
+    <div class="flex-1 p-4 flex flex-col min-w-0">
+      <div class="flex items-center justify-between mb-2 px-1">
+        <div class="section-head">ACTIVE MISSIONS <span class="font-mono text-emerald-400" id="active-count">3</span></div>
+        <div class="text-xs text-[#9a9aa3]">Polling every 2s • Esc to cancel focused</div>
+      </div>
+
+      <!-- Active jobs - dense live instruments -->
+      <div id="active-missions" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-4">
+        <!-- Populated live -->
+      </div>
+
+      <!-- Prompt + Launch controls -->
+      <div class="instrument rounded-3xl p-4 flex-1 flex flex-col">
+        <div class="flex items-center justify-between mb-2">
+          <div class="hud-label">PROMPT / BRIEF</div>
+          <div class="text-[10px] text-[#9a9aa3]">Shift+Enter = new variant • Ctrl+Enter = launch</div>
+        </div>
+        
+        <textarea id="main-prompt" rows="3" placeholder="Describe the desired output or change..." 
+                  class="flex-1 resize-none bg-[#0a0a0b] border border-[#242428] rounded-2xl p-4 text-[15px] focus:outline-none focus:border-[#3b82f6]"></textarea>
+        
+        <div class="flex gap-2 mt-3">
+          <button onclick="launchCurrent()" 
+                  class="flex-1 h-11 bg-white text-black font-semibold rounded-2xl flex items-center justify-center gap-x-2 active:scale-[0.985]">
+            <i class="fa-solid fa-rocket"></i>
+            <span>LAUNCH</span>
+          </button>
+          
+          <button onclick="launchAsWorkflow()" 
+                  class="px-5 h-11 border border-[#242428] rounded-2xl flex items-center gap-x-2 hover:bg-[#18181b]">
+            <i class="fa-solid fa-link"></i>
+            <span class="text-sm">Workflow</span>
+          </button>
+          
+          <button onclick="openAdvancedParams()" class="px-4 h-11 border border-[#242428] rounded-2xl hover:bg-[#18181b]">
+            <i class="fa-solid fa-sliders-h"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: History + Variants -->
+    <div class="w-96 border-l border-[#242428] flex flex-col">
+      <div class="p-4 border-b border-[#242428]">
+        <div class="section-head mb-2 flex justify-between items-baseline">
+          <div>RECENT SORTIES</div>
+          <div onclick="clearHistory()" class="text-[#9a9aa3] hover:text-white cursor-pointer text-xs">CLEAR</div>
+        </div>
+        
+        <div id="recent-list" class="space-y-1 text-xs max-h-[210px] overflow-auto pr-1">
+          <!-- JS -->
+        </div>
+      </div>
+
+      <div class="p-4 flex-1 flex flex-col">
+        <div class="section-head mb-2 px-1">QUICK VARIANTS</div>
+        <div class="text-xs text-[#9a9aa3] mb-2">Spawn controlled differences from the last successful result</div>
+        
+        <div class="grid grid-cols-2 gap-2" id="variant-suggestions">
+          <!-- Populated -->
+        </div>
+        
+        <div class="mt-auto pt-4">
+          <div class="text-[10px] px-3 py-2 bg-[#18181b] rounded-2xl border border-[#242428] text-[#9a9aa3]">
+            <span class="font-medium text-white">Pro tip:</span> After any done job, press <span class="font-mono bg-black px-1 rounded">V</span> to open the variant launcher focused on it.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating command bar (KBar style) -->
+  <div id="command-bar" onclick="if (event.target.id==='command-bar') hideCommandBar()" class="hidden fixed inset-0 bg-black/60 z-[90] flex items-start justify-center pt-[18vh]">
+    <div onclick="event.stopImmediatePropagation()" class="kbar w-[560px] bg-[#0a0a0b] border border-[#242428] rounded-3xl overflow-hidden shadow-2xl">
+      <div class="p-2">
+        <input id="cmd-input" placeholder="Type a command...  e.g.  use last, nudify video, 1080p 15s" 
+               class="cmd-input w-full bg-transparent text-lg px-4 py-3 placeholder:text-[#9a9aa3] focus:outline-none">
+      </div>
+      <div class="border-t border-[#242428] px-2 py-2 text-xs max-h-[260px] overflow-auto" id="cmd-results">
+        <!-- populated on input -->
+      </div>
+      <div class="bg-[#111113] px-4 py-2 text-[10px] text-[#9a9aa3] flex gap-x-4">
+        <div><span class="font-mono">↑↓</span> navigate</div>
+        <div><span class="font-mono">⏎</span> run</div>
+        <div><span class="font-mono">esc</span> close</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Advanced params sheet -->
+  <div id="advanced-sheet" onclick="if (event.target.id==='advanced-sheet') hideAdvanced()" class="hidden fixed inset-0 bg-black/60 z-[95] flex items-end justify-center">
+    <div onclick="event.stopImmediatePropagation()" class="w-full max-w-2xl bg-[#0a0a0b] border-t border-[#242428] rounded-t-3xl p-6">
+      <div class="flex justify-between mb-4">
+        <div class="font-semibold">Advanced Parameters</div>
+        <button onclick="hideAdvanced()" class="text-[#9a9aa3]">Close</button>
+      </div>
+      
+      <div class="grid grid-cols-2 gap-x-8 gap-y-5 text-sm">
+        <div>
+          <div class="text-xs text-[#9a9aa3] mb-1">SEED (optional)</div>
+          <input id="adv-seed" type="text" class="w-full bg-[#121214] border border-[#242428] px-3 py-2 rounded-2xl" placeholder="Leave blank for random">
+        </div>
+        <div>
+          <div class="text-xs text-[#9a9aa3] mb-1">PRIORITY</div>
+          <select class="w-full bg-[#121214] border border-[#242428] px-3 py-2 rounded-2xl">
+            <option>normal</option>
+            <option>high (costs more)</option>
+          </select>
+        </div>
+        
+        <div class="col-span-2">
+          <label class="flex items-center gap-x-2 text-sm">
+            <input type="checkbox" checked class="accent-[#3b82f6]"> 
+            <span>Auto-download finished result into library</span>
+          </label>
+        </div>
+      </div>
+      
+      <div class="mt-6 flex justify-end gap-x-3">
+        <button onclick="hideAdvanced()" class="px-6 h-10 rounded-2xl border border-[#242428]">Cancel</button>
+        <button onclick="applyAdvancedAndLaunch()" class="px-6 h-10 rounded-2xl bg-[#3b82f6] text-white font-medium">Launch with these params</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden fixed bottom-4 right-4 bg-[#18181b] border border-[#242428] px-4 py-2 rounded-2xl text-sm shadow-xl"></div>
+
+  <script>
+    const MODES = [
+      {id:'custom-image', label:'Edit Image', media:'image', time:'~25s'},
+      {id:'text-to-image', label:'Text → Image', media:'image', time:'~30s'},
+      {id:'nudify', label:'Nudify', media:'image', time:'~22s'},
+      {id:'custom-video', label:'Custom Video', media:'video', time:'2–3m'},
+      {id:'custom-image-video', label:'Edit + Animate', media:'video', time:'3–4m'},
+      {id:'nudify-video', label:'Nudify + Video', media:'video', time:'3m'},
+    ]
+    
+    let currentSource = null   // {kind, ref}
+    let currentMode = 'custom-image'
+    let activeJobs = []
+    let history = []
+    let selectedJobForVariants = null
+    
+    function toast(msg) {
+      const t = document.getElementById('toast')
+      t.textContent = msg
+      t.classList.remove('hidden')
+      t.classList.add('flex', 'items-center')
+      setTimeout(() => t.classList.add('hidden'), 2100)
+    }
+
+    function selectSourceKind(kind) {
+      ['catalog','upload','url'].forEach(k => {
+        const el = document.getElementById('src-' + k)
+        if (el) el.classList.remove('!border-[#3b82f6]', '!bg-[#1a2333]')
+      })
+      
+      const el = document.getElementById('src-' + kind)
+      if (el) el.classList.add('!border-[#3b82f6]', '!bg-[#1a2333]')
+      
+      if (kind === 'catalog') {
+        // Fake a quick catalog picker
+        const picker = document.createElement('div')
+        picker.className = 'fixed inset-0 bg-black/70 z-[70] flex items-center justify-center'
+        picker.innerHTML = `
+          <div class="bg-[#0a0a0b] border border-[#242428] w-[620px] rounded-3xl p-5">
+            <div class="font-semibold mb-3">Choose from catalog (last 30 days)</div>
+            <div class="grid grid-cols-4 gap-3 text-xs">
+              ${[1,2,3,4,5,6,7,8].map(i => `
+                <div onclick="pickCatalogItem(${i}, this)" class="cursor-pointer aspect-video bg-[#18181b] rounded-2xl flex items-center justify-center border border-[#242428] hover:border-[#3b82f6]">
+                  <div class="text-center"><i class="fa-solid fa-image text-2xl text-white/40"></i><div class="text-[9px] mt-1 text-[#9a9aa3]">IMG_${1000+i}</div></div>
+                </div>
+              `).join('')}
+            </div>
+            <div class="text-right mt-4">
+              <button onclick="this.closest('.fixed').remove()" class="text-xs px-4 py-1 border border-[#242428] rounded-2xl">Cancel</button>
+            </div>
+          </div>
+        `
+        document.body.appendChild(picker)
+      } else if (kind === 'upload') {
+        const inp = document.createElement('input')
+        inp.type = 'file'
+        inp.accept = 'image/*'
+        inp.onchange = () => {
+          if (inp.files[0]) {
+            currentSource = { kind: 'upload', name: inp.files[0].name }
+            updateSourceUI()
+            toast('Upload staged')
+          }
+        }
+        inp.click()
+      } else if (kind === 'url') {
+        const u = prompt('Image URL (https):')
+        if (u && u.startsWith('https://')) {
+          currentSource = { kind: 'url', url: u }
+          updateSourceUI()
+        }
+      }
+    }
+    
+    function pickCatalogItem(n, el) {
+      el.closest('.fixed').remove()
+      currentSource = { kind: 'catalog', id: 'cat_' + (100 + n), label: `IMG_${1000+n}` }
+      updateSourceUI()
+    }
+    
+    function updateSourceUI() {
+      const box = document.getElementById('source-detail')
+      if (!currentSource) {
+        box.innerHTML = `No source selected — text-to-image available`
+        return
+      }
+      if (currentSource.kind === 'catalog') {
+        box.innerHTML = `<span class="font-medium text-white">${currentSource.label}</span> <span class="text-emerald-400">catalog</span>`
+      } else if (currentSource.kind === 'upload') {
+        box.innerHTML = `<span class="font-medium text-white">${currentSource.name}</span> <span class="text-amber-400">upload</span>`
+      } else {
+        box.innerHTML = `<span class="font-medium text-white">Remote URL</span> <span class="text-sky-400">url</span>`
+      }
+    }
+
+    function renderModes() {
+      const c = document.getElementById('mode-list')
+      c.innerHTML = ''
+      MODES.forEach(m => {
+        const row = document.createElement('div')
+        row.className = `px-3 py-1.5 rounded-2xl flex justify-between items-center cursor-pointer text-sm ${currentMode === m.id ? 'bg-[#1a2333] border border-[#3b82f6]' : 'hover:bg-[#18181b]'}`
+        row.innerHTML = `
+          <div class="flex items-center gap-x-2">
+            <span>${m.label}</span>
+            ${m.media === 'video' ? '<span class="text-[9px] text-violet-400">VIDEO</span>' : ''}
+          </div>
+          <div class="font-mono text-[10px] text-[#9a9aa3]">${m.time}</div>
+        `
+        row.onclick = () => {
+          currentMode = m.id
+          renderModes()
+        }
+        c.appendChild(row)
+      })
+    }
+
+    function renderActiveMissions() {
+      const c = document.getElementById('active-missions')
+      c.innerHTML = ''
+      document.getElementById('active-count').textContent = activeJobs.filter(j => !j.terminal).length
+      
+      if (activeJobs.length === 0) {
+        c.innerHTML = `<div class="col-span-3 text-xs text-[#9a9aa3] px-1 py-3">No active jobs. Launch something.</div>`
+        return
+      }
+      
+      activeJobs.forEach(job => {
+        const el = document.createElement('div')
+        el.className = `instrument rounded-3xl p-3 text-xs flex flex-col ${!job.terminal ? 'active' : ''}`
+        
+        let progressHTML = ''
+        if (!job.terminal && job.progress != null) {
+          progressHTML = `<div class="h-px bg-[#242428] mt-2"><div class="h-px bg-[#3b82f6]" style="width:${job.progress}%"></div></div>`
+        }
+        
+        el.innerHTML = `
+          <div class="flex justify-between">
+            <div class="font-medium">${job.modeLabel}</div>
+            <div class="flex items-center gap-x-1">
+              <span class="status-dot ${job.terminal ? (job.status==='done' ? 'bg-emerald-400' : 'bg-red-400') : 'bg-amber-400 animate-pulse'}"></span>
+              <span class="font-mono text-[10px]">${job.status}</span>
+            </div>
+          </div>
+          <div class="text-[#9a9aa3] mt-px truncate">${job.prompt}</div>
+          ${progressHTML}
+          <div class="flex items-center justify-between mt-3 text-[10px]">
+            <div class="font-mono text-[#9a9aa3]">${job.elapsed || '0:00'}</div>
+            <div class="flex gap-x-1">
+              ${!job.terminal ? `<button onclick="cancelJob('${job.id}', event)" class="px-2 py-px hover:bg-red-900/30 rounded">CANCEL</button>` : ''}
+              ${job.status === 'done' ? `<button onclick="focusJobForVariants('${job.id}', event)" class="px-2 py-px hover:bg-[#3b82f6] hover:text-white rounded">VARIANTS</button>` : ''}
+            </div>
+          </div>
+        `
+        c.appendChild(el)
+      })
+    }
+
+    function launchCurrent() {
+      const prompt = document.getElementById('main-prompt').value.trim() || 'subtle motion, elegant light'
+      const mode = MODES.find(m => m.id === currentMode)
+      
+      const job = {
+        id: 'job_' + Date.now(),
+        modeId: currentMode,
+        modeLabel: mode.label,
+        prompt,
+        source: currentSource,
+        status: 'submitted',
+        terminal: false,
+        progress: 0,
+        started: Date.now(),
+        elapsed: '0:00'
+      }
+      
+      activeJobs.unshift(job)
+      renderActiveMissions()
+      
+      // Simulate realistic polling lifecycle
+      simulateFlight(job)
+      
+      // Clear prompt for next rapid launch
+      document.getElementById('main-prompt').value = ''
+    }
+    
+    function simulateFlight(job) {
+      const isVideo = job.modeLabel.toLowerCase().includes('video')
+      const duration = isVideo ? 142000 : 26000
+      let tick = 0
+      
+      const iv = setInterval(() => {
+        tick += 1900
+        const pct = Math.min(99, Math.floor((tick / duration) * 100))
+        
+        job.progress = pct
+        job.elapsed = Math.floor(tick / 60000) + ':' + String(Math.floor((tick % 60000) / 1000)).padStart(2, '0')
+        
+        if (pct > 22) job.status = 'processing'
+        if (pct > 68) job.status = 'finalizing'
+        
+        if (tick >= duration) {
+          clearInterval(iv)
+          job.terminal = true
+          job.status = Math.random() > 0.06 ? 'done' : 'failed'
+          job.progress = 100
+          job.elapsed = isVideo ? '2:22' : '0:24'
+          
+          if (job.status === 'done') {
+            job.outputUrl = `https://picsum.photos/id/${Math.floor(Math.random()*80)}/640/800`
+            history.unshift(job)
+            renderHistory()
+            selectedJobForVariants = job.id
+            renderVariantSuggestions()
+          }
+        }
+        
+        renderActiveMissions()
+      }, 1900)
+    }
+    
+    function cancelJob(id, ev) {
+      ev.stopImmediatePropagation()
+      const j = activeJobs.find(x => x.id === id)
+      if (j) {
+        j.status = 'cancelled'
+        j.terminal = true
+      }
+      renderActiveMissions()
+    }
+    
+    function focusJobForVariants(id, ev) {
+      ev.stopImmediatePropagation()
+      selectedJobForVariants = id
+      renderVariantSuggestions()
+      toast('Variants focused on this sortie. Click any suggestion.')
+    }
+    
+    function renderHistory() {
+      const c = document.getElementById('recent-list')
+      c.innerHTML = ''
+      
+      history.slice(0, 6).forEach(h => {
+        const row = document.createElement('div')
+        row.className = 'job-row px-2 py-1 rounded-xl flex justify-between items-center cursor-pointer'
+        row.innerHTML = `
+          <div class="flex items-center gap-x-2 min-w-0">
+            <span class="font-medium truncate">${h.modeLabel}</span>
+            <span class="text-[9px] text-[#9a9aa3] truncate max-w-[110px]">${h.prompt.slice(0,28)}</span>
+          </div>
+          <div class="font-mono text-[10px] text-emerald-400">${h.status}</div>
+        `
+        row.onclick = () => {
+          selectedJobForVariants = h.id
+          renderVariantSuggestions()
+          document.getElementById('main-prompt').value = h.prompt
+          toast('Loaded into prompt + variants')
+        }
+        c.appendChild(row)
+      })
+    }
+    
+    function renderVariantSuggestions() {
+      const c = document.getElementById('variant-suggestions')
+      c.innerHTML = ''
+      
+      const base = history.find(h => h.id === selectedJobForVariants) || history[0]
+      if (!base) {
+        c.innerHTML = `<div class="col-span-2 text-xs text-[#9a9aa3] px-1">Complete a job to unlock rapid variants.</div>`
+        return
+      }
+      
+      const suggestions = [
+        {label: 'Slight motion', delta: 'gentle camera push, micro expression'},
+        {label: 'Dramatic light', delta: 'hard side light, high contrast'},
+        {label: 'Different angle', delta: 'three-quarter view, lower camera'},
+        {label: 'Softer mood', delta: 'diffused light, dreamy expression'},
+      ]
+      
+      suggestions.forEach(s => {
+        const card = document.createElement('div')
+        card.className = 'variant-card cursor-pointer border border-[#242428] rounded-2xl p-2.5 text-xs hover:border-[#3b82f6] active:scale-[0.985]'
+        card.innerHTML = `
+          <div class="font-medium">${s.label}</div>
+          <div class="text-[#9a9aa3] text-[10px] mt-px">${s.delta}</div>
+        `
+        card.onclick = () => spawnVariantFrom(base, s)
+        c.appendChild(card)
+      })
+    }
+    
+    function spawnVariantFrom(base, suggestion) {
+      const mode = MODES.find(m => m.id === base.modeId) || MODES[0]
+      
+      const job = {
+        id: 'job_' + Date.now(),
+        modeId: base.modeId,
+        modeLabel: base.modeLabel + ' • var',
+        prompt: base.prompt + ' — ' + suggestion.delta,
+        source: base.source,
+        status: 'submitted',
+        terminal: false,
+        progress: 5,
+        started: Date.now(),
+        elapsed: '0:00'
+      }
+      
+      activeJobs.unshift(job)
+      renderActiveMissions()
+      simulateFlight(job)
+      toast('Variant launched')
+    }
+    
+    function spawnVariantBatch() {
+      if (history.length === 0) {
+        toast('Need at least one completed job first')
+        return
+      }
+      const base = history[0]
+      const deltas = ['close crop', 'wider framing', 'cooler tones', 'more motion']
+      
+      deltas.forEach((d, i) => {
+        setTimeout(() => {
+          const j = {
+            id: 'job_b' + Date.now() + i,
+            modeId: base.modeId,
+            modeLabel: base.modeLabel,
+            prompt: base.prompt + ' — ' + d,
+            source: base.source,
+            status: 'submitted',
+            terminal: false,
+            progress: 0,
+            started: Date.now(),
+            elapsed: '0:00'
+          }
+          activeJobs.unshift(j)
+          renderActiveMissions()
+          simulateFlight(j)
+        }, i * 180)
+      })
+    }
+    
+    function launchAsWorkflow() {
+      const prompt = document.getElementById('main-prompt').value.trim() || 'subtle motion'
+      const job = {
+        id: 'job_w' + Date.now(),
+        modeId: 'custom-image-video',
+        modeLabel: 'Image + Video (workflow)',
+        prompt,
+        source: currentSource,
+        status: 'submitted',
+        terminal: false,
+        progress: 0,
+        started: Date.now(),
+        elapsed: '0:00',
+        workflow: true
+      }
+      activeJobs.unshift(job)
+      renderActiveMissions()
+      simulateWorkflow(job)
+    }
+    
+    function simulateWorkflow(job) {
+      // Two phases
+      let phase = 0
+      const iv = setInterval(() => {
+        if (phase === 0) {
+          job.status = 'phase 1/2 (image)'
+          job.progress = 38
+          phase = 1
+        } else if (phase === 1) {
+          job.status = 'phase 2/2 (video)'
+          job.progress = 71
+          phase = 2
+        } else {
+          clearInterval(iv)
+          job.terminal = true
+          job.status = 'done'
+          job.progress = 100
+          job.outputUrl = 'https://picsum.photos/id/1011/720/960'
+          history.unshift(job)
+          renderHistory()
+          selectedJobForVariants = job.id
+          renderVariantSuggestions()
+        }
+        renderActiveMissions()
+      }, 2100)
+    }
+    
+    function openAdvancedParams() {
+      document.getElementById('advanced-sheet').classList.remove('hidden')
+      document.getElementById('advanced-sheet').classList.add('flex')
+    }
+    function hideAdvanced() {
+      const s = document.getElementById('advanced-sheet')
+      s.classList.remove('flex')
+      s.classList.add('hidden')
+    }
+    function applyAdvancedAndLaunch() {
+      hideAdvanced()
+      launchCurrent()
+    }
+
+    // Command bar (the real power feature)
+    let cmdIndex = 0
+    
+    function showCommandBar() {
+      const bar = document.getElementById('command-bar')
+      bar.classList.remove('hidden')
+      bar.classList.add('flex')
+      const input = document.getElementById('cmd-input')
+      input.value = ''
+      input.focus()
+      
+      input.oninput = () => renderCommandResults(input.value)
+      input.onkeydown = (e) => {
+        if (e.key === 'Enter') {
+          executeCommand(input.value)
+          hideCommandBar()
+        }
+        if (e.key === 'Escape') hideCommandBar()
+      }
+      renderCommandResults('')
+    }
+    
+    function hideCommandBar() {
+      const bar = document.getElementById('command-bar')
+      bar.classList.remove('flex')
+      bar.classList.add('hidden')
+    }
+    
+    function renderCommandResults(q) {
+      const c = document.getElementById('cmd-results')
+      c.innerHTML = ''
+      const qq = q.toLowerCase().trim()
+      
+      const commands = [
+        {cmd: 'use last result', action: () => { currentSource = {kind:'catalog', id:'last', label:'LAST RESULT'}; updateSourceUI(); toast('Source = last result') }},
+        {cmd: 'nudify video', action: () => { currentMode = 'nudify-video'; renderModes(); toast('Mode = Nudify + Video') }},
+        {cmd: 'text to image 3:4', action: () => { currentMode = 'text-to-image'; renderModes(); toast('Text-to-image ready') }},
+        {cmd: '1080p 15s', action: () => { toast('Quality locked to 1080p 15s for next launch') }},
+        {cmd: 'spawn 3 variants', action: () => spawnVariantBatch() },
+        {cmd: 'clear active', action: () => { activeJobs = []; renderActiveMissions() }},
+      ]
+      
+      commands.filter(x => !qq || x.cmd.includes(qq)).forEach((c, i) => {
+        const r = document.createElement('div')
+        r.className = `px-4 py-2 text-sm flex justify-between rounded-2xl ${i===cmdIndex ? 'bg-[#1a2333]' : ''}`
+        r.innerHTML = `<div>${c.cmd}</div><div class="text-[#9a9aa3]">⏎</div>`
+        r.onclick = () => { c.action(); hideCommandBar() }
+        c.appendChild(r)
+      })
+    }
+    
+    function executeCommand(raw) {
+      const q = raw.toLowerCase()
+      if (q.includes('last')) { currentSource = {kind:'catalog', label:'LAST RESULT'}; updateSourceUI() }
+      if (q.includes('nudify')) { currentMode = 'nudify-video'; renderModes() }
+      if (q.includes('text')) { currentMode = 'text-to-image'; renderModes() }
+      if (q.includes('spawn')) spawnVariantBatch()
+      if (q.includes('launch') || q.includes('go')) launchCurrent()
+    }
+
+    function clearHistory() {
+      history = []
+      renderHistory()
+      document.getElementById('variant-suggestions').innerHTML = ''
+    }
+    
+    function showAllModes() {
+      toast('All modes shown in left rail — click any to switch instantly')
+    }
+
+    function initKeyboard() {
+      document.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault()
+          showCommandBar()
+        }
+        if (e.key === 'v' && document.activeElement.tagName === 'BODY') {
+          if (history.length) {
+            selectedJobForVariants = history[0].id
+            renderVariantSuggestions()
+            toast('Variant panel focused')
+          }
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          launchCurrent()
+        }
+      })
+      
+      // Demo seed data
+      setTimeout(() => {
+        // one done job for instant variant play
+        const demo = {
+          id: 'job_demo1',
+          modeId: 'custom-video',
+          modeLabel: 'Custom Video',
+          prompt: 'slow circling shot, gentle breathing, soft morning light',
+          status: 'done',
+          terminal: true,
+          outputUrl: 'https://picsum.photos/id/1005/720/960'
+        }
+        history.push(demo)
+        renderHistory()
+        selectedJobForVariants = demo.id
+        renderVariantSuggestions()
+      }, 800)
+    }
+    
+    function bootstrap() {
+      renderModes()
+      renderActiveMissions()
+      renderHistory()
+      
+      // Default source hint
+      document.getElementById('src-catalog').classList.add('!border-[#3b82f6]', '!bg-[#1a2333]')
+      currentSource = { kind: 'catalog', label: 'Recent selection' }
+      document.getElementById('source-detail').innerHTML = `<span class="font-medium text-white">Recent selection</span> <span class="text-emerald-400">catalog</span>`
+      
+      initKeyboard()
+      
+      // Live clock on one instrument
+      setInterval(() => {
+        const act = activeJobs.filter(j => !j.terminal)
+        if (act.length) {
+          act.forEach(j => {
+            const sec = Math.floor((Date.now() - j.started) / 1000)
+            j.elapsed = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2,'0')
+          })
+          renderActiveMissions()
+        }
+      }, 1000)
+      
+      console.log('%c[Flight Deck] Keyboard: ⌘K command bar, V for variants, Ctrl+Enter launch. Fully standalone UX prototype.', 'color:#666')
+    }
+    
+    window.onload = bootstrap
+  </script>
+</body>
+</html>
