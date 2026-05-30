@@ -1,4 +1,5 @@
 import { Clapperboard, Copy, FileDown, FileQuestion, Heart, ImageIcon, Info, Loader2, Sparkles, Trash2, WandSparkles } from "lucide-react"
+import * as React from "react"
 
 import { Button } from "@/components/ui/button"
 import { formatDuration, formatShortMonthDay } from "@/lib/format"
@@ -30,6 +31,7 @@ export function MediaCard({
   onDeleteRemote: () => void
   onToggleFavorite: () => void
 }) {
+  const [previewActive, setPreviewActive] = React.useState(false)
   const mediaUrl = mediaUrlForItem(item)
   const isVideo = isVideoItem(item)
   const isImage = isImageItem(item)
@@ -51,6 +53,12 @@ export function MediaCard({
       data-media-state={isPendingMedia ? "loading" : mediaUrl ? "ready" : "missing"}
       data-remote-deleted={isDeleted ? "true" : undefined}
       data-media-loaded="true"
+      onMouseEnter={() => setPreviewActive(true)}
+      onMouseLeave={() => setPreviewActive(false)}
+      onFocus={() => setPreviewActive(true)}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setPreviewActive(false)
+      }}
     >
       {isPendingMedia ? (
         <div className="preview pendingPreview">
@@ -72,9 +80,19 @@ export function MediaCard({
         <div className="preview videoPreview">
           <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
             {item.posterUrl ? (
-              <img src={item.posterUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
+              <img
+                className={cn("videoPoster", previewActive && "is-hidden")}
+                src={item.posterUrl}
+                alt={item.prompt || item.id}
+                loading="lazy"
+                decoding="async"
+              />
             ) : (
-              <span className="thumbnailFallback">Thumbnail pending</span>
+              <span className={cn("thumbnailFallback", previewActive && "is-hidden")}>Thumbnail pending</span>
+            )}
+            {previewActive && (
+              // oxlint-disable-next-line jsx-a11y/media-has-caption -- Generated/local gallery preview videos do not include caption tracks.
+              <video className="hoverPreviewVideo" src={mediaUrl} autoPlay muted loop playsInline preload="auto" aria-hidden="true" />
             )}
           </button>
           <span className="previewOpenBadge" aria-hidden="true">

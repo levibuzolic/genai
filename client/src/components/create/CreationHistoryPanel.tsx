@@ -1,4 +1,4 @@
-import { Clapperboard, Clock3, CopyPlus, ExternalLink, ImageIcon, Loader2, RefreshCw, Save } from "lucide-react"
+import { Clapperboard, Clock3, CopyPlus, ExternalLink, ImageIcon, ImagePlus, Loader2, RefreshCw, Save } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -82,7 +82,7 @@ export function CreationHistoryPanel({
   onRefresh: () => Promise<void>
   onDetails: (creation: Creation) => Promise<void>
   onCloseDetails: () => void
-  onDuplicate: (creation: Creation) => Promise<void>
+  onDuplicate: (creation: Creation, options?: { includeSource?: boolean }) => Promise<void>
   onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
   const active = creations.filter((creation) => creation.active)
@@ -167,6 +167,10 @@ export function CreationHistoryPanel({
                       <CopyPlus />
                       Copy settings
                     </Button>
+                    <Button variant="outline" onClick={() => void onDuplicate(selectedCreation, { includeSource: true })}>
+                      <ImagePlus />
+                      Copy with source
+                    </Button>
                     <Button variant="outline" onClick={() => void onSaveTemplate(selectedCreation)}>
                       <Save />
                       Save template
@@ -239,7 +243,7 @@ function CreationHistoryRow({
   creation: Creation
   prominent?: boolean
   onDetails: (creation: Creation) => Promise<void>
-  onDuplicate: (creation: Creation) => Promise<void>
+  onDuplicate: (creation: Creation, options?: { includeSource?: boolean }) => Promise<void>
   onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
   const previewUrl = creationPreviewUrl(creation)
@@ -267,8 +271,17 @@ function CreationHistoryRow({
       <Badge className="creationHistoryStatusBadge" variant={statusVariant(creation.status)}>
         {statusLabel(creation.status)}
       </Badge>
-      <Button variant="outline" size="icon-xs" onClick={() => void onDuplicate(creation)} aria-label="Copy" title="Copy settings">
+      <Button variant="outline" size="icon-xs" onClick={() => void onDuplicate(creation)} aria-label="Copy settings" title="Copy settings">
         <CopyPlus />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon-xs"
+        onClick={() => void onDuplicate(creation, { includeSource: true })}
+        aria-label="Copy settings and source"
+        title="Copy settings and source"
+      >
+        <ImagePlus />
       </Button>
       <Button variant="outline" size="icon-xs" onClick={() => void onSaveTemplate(creation)} aria-label="Save" title="Save template">
         <Save />

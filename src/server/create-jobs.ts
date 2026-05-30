@@ -642,7 +642,7 @@ export async function getCreationDetails(id: string): Promise<CreationDetailsRes
   }
 }
 
-export async function duplicateCreation(id: string): Promise<DuplicateCreationResponse> {
+export async function duplicateCreation(id: string, options: Record<string, unknown> = {}): Promise<DuplicateCreationResponse> {
   const creation = findCreationJob(id)
 
   if (!creation) {
@@ -650,6 +650,8 @@ export async function duplicateCreation(id: string): Promise<DuplicateCreationRe
   }
 
   const now = new Date().toISOString()
+  const includeSource = options["includeSource"] === true
+  const source = includeSource ? getReusableCreationSource(creation.source) : null
   const draft = {
     id: `draft-${randomUUID()}`,
     status: "draft",
@@ -658,7 +660,7 @@ export async function duplicateCreation(id: string): Promise<DuplicateCreationRe
     mediaType: creation.mediaType,
     templateId: creation.templateId,
     templateLabel: creation.templateLabel,
-    source: getReusableCreationSource(creation.source),
+    source,
     params: creation.params || {},
     createdLocallyAt: now,
     updatedAt: now,
@@ -675,8 +677,8 @@ export async function duplicateCreation(id: string): Promise<DuplicateCreationRe
     form: {
       modeId: draft.modeId,
       templateId: draft.templateId,
-      source: draft.source,
       params: draft.params,
+      ...(includeSource ? { source: draft.source } : {}),
     },
   }
 }

@@ -49,7 +49,7 @@ describe("CreationHistoryPanel", () => {
         onRefresh={vi.fn<() => Promise<void>>()}
         onDetails={vi.fn<(creation: Creation) => Promise<void>>()}
         onCloseDetails={vi.fn<() => void>()}
-        onDuplicate={vi.fn<(creation: Creation) => Promise<void>>()}
+        onDuplicate={vi.fn<(creation: Creation, options?: { includeSource?: boolean }) => Promise<void>>()}
         onSaveTemplate={vi.fn<(creation: Creation) => Promise<void>>()}
       />,
     )
@@ -60,7 +60,7 @@ describe("CreationHistoryPanel", () => {
   })
 
   it("offers copy settings from rows and the detail dialog", () => {
-    const onDuplicate = vi.fn<(creation: Creation) => Promise<void>>(async () => undefined)
+    const onDuplicate = vi.fn<(creation: Creation, options?: { includeSource?: boolean }) => Promise<void>>(async () => undefined)
     const props = {
       creations: [finishedCreation],
       activeCount: 0,
@@ -75,10 +75,16 @@ describe("CreationHistoryPanel", () => {
     }
     const { rerender } = render(<CreationHistoryPanel {...props} selectedCreation={null} />)
 
-    fireEvent.click(screen.getByRole("button", { name: /^copy$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /^copy settings$/i }))
+    fireEvent.click(screen.getByRole("button", { name: /copy settings and source/i }))
     rerender(<CreationHistoryPanel {...props} selectedCreation={finishedCreation} />)
-    fireEvent.click(screen.getByRole("button", { name: /copy settings/i }))
+    fireEvent.click(screen.getAllByRole("button", { name: /^copy settings$/i }).at(-1) as HTMLElement)
+    fireEvent.click(screen.getByRole("button", { name: /^copy with source$/i }))
 
-    expect(onDuplicate).toHaveBeenCalledTimes(2)
+    expect(onDuplicate).toHaveBeenCalledTimes(4)
+    expect(onDuplicate).toHaveBeenNthCalledWith(1, finishedCreation)
+    expect(onDuplicate).toHaveBeenNthCalledWith(2, finishedCreation, { includeSource: true })
+    expect(onDuplicate).toHaveBeenNthCalledWith(3, finishedCreation)
+    expect(onDuplicate).toHaveBeenNthCalledWith(4, finishedCreation, { includeSource: true })
   })
 })

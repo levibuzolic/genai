@@ -46,6 +46,13 @@ describe("MediaCard", () => {
     expect(screen.queryByRole("button", { name: /^details$/i })).toBeNull()
     expect(screen.getByRole("img", { name: /soft studio portrait/i }).getAttribute("src")).toBe("/media/_thumbnails/clip.jpg")
 
+    fireEvent.mouseEnter(container.querySelector(".media-card") as HTMLElement)
+    const hoverVideo = container.querySelector("video")
+    expect(hoverVideo?.getAttribute("src")).toBe("/media/renders/clip.mp4")
+    expect(hoverVideo?.controls).toBe(false)
+    expect(hoverVideo?.muted).toBe(true)
+    expect(hoverVideo?.loop).toBe(true)
+
     fireEvent.click(screen.getByRole("button", { name: /open video details/i }))
 
     expect(onDetails).toHaveBeenCalledTimes(1)

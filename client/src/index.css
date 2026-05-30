@@ -265,6 +265,15 @@
   @apply h-full w-full;
 }
 
+.hoverPreviewVideo {
+  @apply pointer-events-none absolute inset-0 h-full w-full object-cover;
+}
+
+.videoPoster.is-hidden,
+.thumbnailFallback.is-hidden {
+  @apply opacity-0;
+}
+
 .thumbnailFallback {
   @apply text-xs text-muted-foreground;
 }
@@ -582,7 +591,7 @@
 }
 
 .creationHistoryRow {
-  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-1.5 border-b bg-transparent py-1.5 xl:min-h-11;
+  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-1.5 border-b bg-transparent py-1.5 xl:min-h-11;
 }
 
 .creationHistoryRow.is-active {
@@ -626,11 +635,24 @@
 }
 
 .creationDetailDialog {
-  @apply max-w-[900px] border-border bg-card;
+  @apply w-[calc(100dvw-2rem)] max-w-[900px] min-w-0 border-border bg-card;
+}
+
+.creationDetailDialog .dialogHeader {
+  @apply min-w-0;
+}
+
+.creationDetailDialog [data-slot="dialog-title"],
+.creationDetailDialog [data-slot="dialog-description"] {
+  @apply min-w-0 truncate pr-8;
 }
 
 .creationDetailBody {
-  @apply grid max-h-[calc(100dvh-9rem)] gap-4 overflow-auto p-5;
+  @apply grid min-w-0 max-w-full max-h-[calc(100dvh-9rem)] gap-4 overflow-y-auto overflow-x-hidden p-5;
+}
+
+.creationDetailBody > section {
+  @apply min-w-0 max-w-full;
 }
 
 .creationDetailBody h4 {
@@ -638,15 +660,25 @@
 }
 
 .creationDetailSummary {
-  @apply grid gap-3 border bg-background p-3;
+  @apply grid min-w-0 max-w-full gap-3 border bg-background p-3;
 }
 
 .creationDetailSummary p {
-  @apply text-[13px] leading-5;
+  @apply min-w-0 break-words text-[13px] leading-5;
+  overflow-wrap: anywhere;
+}
+
+.detailFacts {
+  @apply grid min-w-0 max-w-full gap-0.5;
+}
+
+.detailFacts dd {
+  @apply min-w-0 break-words text-muted-foreground;
+  overflow-wrap: anywhere;
 }
 
 .creationTimeline {
-  @apply grid gap-2 border bg-background p-3;
+  @apply grid min-w-0 gap-2 border bg-background p-3;
 }
 
 .creationTimeline li {
@@ -667,7 +699,7 @@
 }
 
 .creationJson {
-  @apply max-h-52 overflow-auto border bg-background p-3 text-xs text-muted-foreground;
+  @apply max-w-full min-w-0 max-h-52 overflow-auto border bg-background p-3 text-xs text-muted-foreground;
 }
 
 .templateBrowser {

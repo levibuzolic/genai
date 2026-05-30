@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -759,6 +759,21 @@ test("catalog backups can be created, listed, and restored safely", async () => 
   const backup = await server.createCatalogBackup("manual test")
   assert.equal(backup.file.endsWith(".sqlite"), true)
   assert.equal(backup.itemCount, 1)
+  assert.equal(await server.createCatalogBackup("same ids"), null)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/changed.png",
+        createdAt: 1779769800,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+  assert.equal(await server.createCatalogBackup("same ids changed metadata"), null)
   const listener = await listenOnRandomPort(server.server)
 
   try {
@@ -792,6 +807,45 @@ test("catalog backups can be created, listed, and restored safely", async () => 
     await assert.rejects(() => server.restoreCatalogBackup("../backup.sqlite"), /Invalid backup filename/)
   } finally {
     await listener.close()
+  }
+})
+
+test("catalog backups are pruned into exponentially wider time gaps", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-backup-retention-"))
+  const id = "eeeeeeee-5555-4eee-8eee-eeeeeeeeeeee"
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/original.png",
+        createdAt: 1779769800,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+
+  const backupDir = path.join(mediaDir, "_catalog_backups")
+  await mkdir(backupDir, { recursive: true })
+  const sourceDbPath = path.join(mediaDir, "catalog.sqlite")
+  const now = Date.now()
+  const agesMinutes = [10, 20, 40, 80, 140, 220, 320, 420, 480, 600, 780, 1140, 1500, 1860, 2220, 2580, 4320, 5040, 5760, 7200]
+  for (const minutes of agesMinutes) {
+    await copyFile(sourceDbPath, path.join(backupDir, backupFilenameForAge(now, minutes)))
+  }
+
+  const server = await importServer(mediaDir)
+  assert.equal(await server.createCatalogBackup("same ids prune"), null)
+
+  const backups = await server.listCatalogBackups()
+  assert.ok(backups.length < agesMinutes.length, `expected retention pruning to remove dense backups, got ${backups.length}`)
+
+  for (let index = 1; index < backups.length; index += 1) {
+    const newer = Date.parse(backups[index - 1].createdAt)
+    const older = Date.parse(backups[index].createdAt)
+    assert.ok(newer - older >= expectedBackupSpacingMs(now - older), `${backups[index - 1].file} is too close to ${backups[index].file}`)
   }
 })
 
@@ -866,3 +920,17 @@ test("auto sync trigger skips while another library job is running", async () =>
   assert.equal(server.autoSyncState.lastSkipReason, "sync-running")
   assert.equal(typeof server.autoSyncState.lastSkippedAt, "string")
 })
+
+function backupFilenameForAge(now, minutesAgo) {
+  return `${new Date(now - minutesAgo * 60 * 1000).toISOString().replace(/[:.]/g, "-")}_fixture.sqlite`
+}
+
+function expectedBackupSpacingMs(ageMs) {
+  const hourMs = 60 * 60 * 1000
+  const dayMs = 24 * hourMs
+  if (ageMs < 6 * hourMs) return hourMs
+  if (ageMs < 2 * dayMs) return 6 * hourMs
+  if (ageMs < 14 * dayMs) return dayMs
+  if (ageMs < 60 * dayMs) return 3 * dayMs
+  return 7 * dayMs
+}

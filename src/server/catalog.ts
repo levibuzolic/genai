@@ -40,9 +40,19 @@ type CatalogFacets = {
 }
 
 type CatalogBackupSummary = BackupSummary
+type CreateCatalogBackupOptions = {
+  allowEmpty?: boolean
+  protectedFiles?: string[]
+}
+type BackupRetentionCandidate = CatalogBackupSummary & {
+  path: string
+  createdAtMs: number
+}
 
 const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
 const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
+const HOUR_MS = 60 * 60 * 1000
+const DAY_MS = 24 * HOUR_MS
 
 export async function downloadJob(job: GeneratePornJob): Promise<Partial<CatalogItem>> {
   const normalizedJob = normalizeJob(job)
@@ -837,7 +847,7 @@ export function normalizeJob(job: GeneratePornJob): NormalizedJob {
 
 export async function createCatalogBackup(
   reason = "manual",
-  { allowEmpty = false }: { allowEmpty?: boolean } = {},
+  { allowEmpty = false, protectedFiles = [] }: CreateCatalogBackupOptions = {},
 ): Promise<CatalogBackupSummary | null> {
   const catalog = await loadCatalog()
 
@@ -846,13 +856,109 @@ export async function createCatalogBackup(
   }
 
   await mkdir(BACKUP_DIR, { recursive: true })
+  if (await latestCatalogBackupHasSameItemIds(catalog)) {
+    await pruneCatalogBackups({ protectedFiles })
+    return null
+  }
+
   const timestamp = new Date().toISOString()
   const safeReason = sanitizePathPart(reason).toLowerCase()
   const filename = `${timestamp.replace(/[:.]/g, "-")}_${safeReason}.sqlite`
   const backupPath = path.join(BACKUP_DIR, filename)
   await backupSqliteDatabase(getCatalogDb(), backupPath)
+  await pruneCatalogBackups({ protectedFiles: [filename, ...protectedFiles] })
 
   return backupSummaryFromSqliteFile(filename, backupPath, timestamp, safeReason)
+}
+
+async function pruneCatalogBackups({ protectedFiles = [] }: { protectedFiles?: string[] } = {}): Promise<void> {
+  const candidates = await listCatalogBackupRetentionCandidates()
+  if (candidates.length <= 1) return
+
+  const protectedSet = new Set(protectedFiles)
+  const keep = new Set<string>()
+  let newestKeptAt: number | null = null
+  const now = Date.now()
+
+  for (const candidate of candidates) {
+    if (protectedSet.has(candidate.file)) {
+      keep.add(candidate.file)
+      newestKeptAt = candidate.createdAtMs
+      continue
+    }
+
+    if (newestKeptAt === null) {
+      keep.add(candidate.file)
+      newestKeptAt = candidate.createdAtMs
+      continue
+    }
+
+    const spacing = backupRetentionSpacingMs(now - candidate.createdAtMs)
+    if (newestKeptAt - candidate.createdAtMs >= spacing) {
+      keep.add(candidate.file)
+      newestKeptAt = candidate.createdAtMs
+    }
+  }
+
+  await Promise.all(candidates.filter((candidate) => !keep.has(candidate.file)).map((candidate) => rm(candidate.path, { force: true })))
+}
+
+async function listCatalogBackupRetentionCandidates(): Promise<BackupRetentionCandidate[]> {
+  let entries: Dirent<string>[]
+
+  try {
+    entries = await readdir(BACKUP_DIR, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const candidates: BackupRetentionCandidate[] = []
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".sqlite")) continue
+
+    const filePath = path.join(BACKUP_DIR, entry.name)
+    const summary = await backupSummaryFromSqliteFile(entry.name, filePath)
+    const createdAtMs = Date.parse(summary.createdAt || "")
+    if (!Number.isFinite(createdAtMs)) continue
+    candidates.push({ ...summary, path: filePath, createdAtMs })
+  }
+
+  return candidates.toSorted((a, b) => b.createdAtMs - a.createdAtMs || b.file.localeCompare(a.file))
+}
+
+function backupRetentionSpacingMs(ageMs: number): number {
+  if (ageMs < 6 * HOUR_MS) return HOUR_MS
+  if (ageMs < 2 * DAY_MS) return 6 * HOUR_MS
+  if (ageMs < 14 * DAY_MS) return DAY_MS
+  if (ageMs < 60 * DAY_MS) return 3 * DAY_MS
+  return 7 * DAY_MS
+}
+
+async function latestCatalogBackupHasSameItemIds(catalog: Catalog): Promise<boolean> {
+  const latestBackupPath = await latestCatalogBackupPath()
+  if (!latestBackupPath) return false
+
+  const currentIds = catalogItemIdSignature(catalog.items)
+  const backupIds = readCatalogItemIdsFromSqliteFile(latestBackupPath)
+  if (!backupIds) return false
+
+  return currentIds.length === backupIds.length && currentIds.every((id, index) => id === backupIds[index])
+}
+
+async function latestCatalogBackupPath(): Promise<string | null> {
+  let entries: Dirent<string>[]
+
+  try {
+    entries = await readdir(BACKUP_DIR, { withFileTypes: true })
+  } catch {
+    return null
+  }
+
+  const sqliteEntries = entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".sqlite"))
+    .toSorted((a, b) => b.name.localeCompare(a.name))
+
+  return sqliteEntries[0] ? path.join(BACKUP_DIR, sqliteEntries[0].name) : null
 }
 
 export async function listCatalogBackups(): Promise<CatalogBackupSummary[]> {
@@ -885,7 +991,7 @@ export async function restoreCatalogBackup(filename: string): Promise<CatalogBac
     throw new Error("Selected backup is not a valid catalog.")
   }
 
-  await createCatalogBackup("before-restore", { allowEmpty: true })
+  await createCatalogBackup("before-restore", { allowEmpty: true, protectedFiles: [path.basename(backupPath)] })
   closeCatalogDb()
   await copyFile(backupPath, CATALOG_DB_PATH)
   getCatalogDb()
@@ -981,6 +1087,27 @@ function readCatalogDatabaseSummary(filePath: string): { itemCount: number | nul
   } finally {
     db?.close()
   }
+}
+
+function readCatalogItemIdsFromSqliteFile(filePath: string): string[] | null {
+  let db: DatabaseSync | null = null
+
+  try {
+    db = new DatabaseSync(filePath, { readOnly: true })
+    const rows = db.prepare("SELECT id FROM media_items ORDER BY id ASC").all() as Array<{ id: unknown }>
+    return rows.map((row) => String(row.id || "")).filter(Boolean)
+  } catch {
+    return null
+  } finally {
+    db?.close()
+  }
+}
+
+function catalogItemIdSignature(items: CatalogItem[] = []): string[] {
+  return items
+    .map((item) => item.id)
+    .filter(Boolean)
+    .toSorted()
 }
 
 async function isValidCatalogDatabase(filePath: string): Promise<boolean> {

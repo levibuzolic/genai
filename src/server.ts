@@ -190,7 +190,8 @@ const server = http.createServer(async (request, response) => {
 
     const creationDuplicateMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/duplicate$/)
     if (request.method === "POST" && creationDuplicateMatch) {
-      return sendJson(response, await duplicateCreation(creationDuplicateMatch[1] || ""))
+      const body = await readJsonBody(request)
+      return sendJson(response, await duplicateCreation(creationDuplicateMatch[1] || "", body))
     }
 
     const creationTemplateMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/template$/)

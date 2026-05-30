@@ -28,6 +28,12 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
   await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseUrl })
 
   try {
+    await page.goto(`${baseUrl}/create`)
+    await page.waitForSelector(".createOverlay #createArea", { timeout: 10000 })
+    await page.reload()
+    await page.waitForSelector(".createOverlay #createArea", { timeout: 10000 })
+    assert.equal(page.url(), `${baseUrl}/create`)
+
     await page.goto(baseUrl)
     await page.waitForFunction(
       () =>
@@ -207,6 +213,8 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     await page.waitForFunction(() => window.localStorage.getItem("detailVideoMuted") === "true")
     await page.keyboard.press("Escape")
     await page.waitForSelector("#itemDialog", { state: "detached", timeout: 5000 })
+    await page.mouse.move(8, 8)
+    await page.waitForFunction(() => document.querySelectorAll(".card video").length === 0, { timeout: 5000 })
 
     const lazyState = await page.evaluate(() => {
       const media = [...document.querySelectorAll(".preview img, .preview video")]
@@ -230,6 +238,28 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.equal(lazyState.mountedVideos, 0)
     assert.ok(lazyState.videoPreviewButtons > 0)
     assert.equal(lazyState.visibleLoaded, true)
+
+    await page.locator('.card[data-media="video"][data-media-state="ready"]').first().hover()
+    await page.waitForSelector('.card[data-media="video"][data-media-state="ready"] .hoverPreviewVideo[src]', { timeout: 5000 })
+    const hoverPreviewState = await page.evaluate(() => {
+      const video = document.querySelector('.card[data-media="video"][data-media-state="ready"] .hoverPreviewVideo')
+      return video instanceof HTMLVideoElement
+        ? {
+            controls: video.controls,
+            muted: video.muted,
+            loop: video.loop,
+            playsInline: video.playsInline,
+            ariaHidden: video.getAttribute("aria-hidden"),
+          }
+        : null
+    })
+    assert.deepEqual(hoverPreviewState, {
+      controls: false,
+      muted: true,
+      loop: true,
+      playsInline: true,
+      ariaHidden: "true",
+    })
 
     await page.locator('.card[data-media="video"] .mediaPreviewButton').first().click()
     await page.waitForSelector("#detailPreview video[src]", { timeout: 5000 })

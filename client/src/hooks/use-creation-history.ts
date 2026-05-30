@@ -107,13 +107,15 @@ export function useCreationHistory(
     setSelectedEvents((current) => replaceEqualJson(current, data.events || []))
   }
 
-  async function duplicateSettings(creation: Creation) {
+  async function duplicateSettings(creation: Creation, { includeSource = false }: { includeSource?: boolean } = {}) {
     const data = await fetchJson<DuplicateCreationResponse>(`/api/creations/${encodeURIComponent(creation.id)}/duplicate`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ includeSource }),
     })
     await onApplyDraft(data.form)
     await loadCreations()
-    setStatusMessage("Settings copied into a new draft.")
+    setStatusMessage(includeSource ? "Settings and source copied into a new draft." : "Settings copied into a new draft.")
   }
 
   return {

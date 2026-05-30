@@ -8,6 +8,7 @@ import type { HttpRequest, HttpResponse } from "./types.ts"
 import { contentTypeFor, fileExists } from "./utils.ts"
 
 type RangeResult = { ok: true; start: number; end: number } | { ok: false } | null
+const APP_ROUTE_PREFIXES = new Set(["create", "items", "settings", "templates"])
 
 export async function serveStatic(response: HttpResponse, pathname: string): Promise<void> {
   const cleanPath = pathname === "/" ? "/index.html" : pathname
@@ -19,7 +20,7 @@ export async function serveStatic(response: HttpResponse, pathname: string): Pro
 
   if (!(await fileExists(filePath))) {
     const indexPath = path.resolve(PUBLIC_DIR, "./index.html")
-    if (path.extname(cleanPath) || !(await fileExists(indexPath))) {
+    if (!isAppRoutePath(cleanPath) || !(await fileExists(indexPath))) {
       return sendJson(response, { error: "Not found" }, 404)
     }
     filePath = indexPath
@@ -29,6 +30,19 @@ export async function serveStatic(response: HttpResponse, pathname: string): Pro
     "content-type": contentTypeFor(filePath),
   })
   createReadStream(filePath).pipe(response)
+}
+
+export function isAppRoutePath(pathname: string): boolean {
+  if (pathname === "/" || pathname === "/index.html") {
+    return true
+  }
+
+  if (path.extname(pathname)) {
+    return false
+  }
+
+  const prefix = pathname.split("/").find(Boolean)
+  return APP_ROUTE_PREFIXES.has(prefix || "")
 }
 
 export async function serveMedia(request: HttpRequest, response: HttpResponse, mediaPath: string): Promise<void> {

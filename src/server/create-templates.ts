@@ -10,7 +10,7 @@ import type {
 } from "../types/routes.ts"
 import { fetchJobsPage } from "./api-client.ts"
 import { hasApiAuth } from "./auth-state.ts"
-import { findCreationJob, listCatalogItemsByTemplate, readCatalogMeta, writeCatalogMeta } from "./catalog-db.ts"
+import { findCreationJob, listCatalogItemsByPrompts, readCatalogMeta, writeCatalogMeta } from "./catalog-db.ts"
 import { jobFromCatalogItem, loadCatalog, toPublicCatalogItem } from "./catalog.ts"
 import { CREATE_HISTORY_PAGE_LIMIT, MEDIA_DIR } from "./config.ts"
 import {
@@ -312,7 +312,7 @@ export async function getCreateTemplateRegistryResponse(): Promise<CreateTemplat
     updatedAt: registry.updatedAt,
     templates: registry.templates.map((template) =>
       Object.assign(toPublicCreateTemplate(template), {
-        previews: getCreateTemplatePreviews(template.id),
+        previews: getCreateTemplatePreviews(template),
       }),
     ),
   }
@@ -584,7 +584,7 @@ export async function saveCreateTemplateFromRequest(
 
   return {
     ...toPublicCreateTemplate(template),
-    previews: getCreateTemplatePreviews(template.id),
+    previews: getCreateTemplatePreviews(template),
   }
 }
 
@@ -632,8 +632,24 @@ export async function deleteCreateTemplate(id: string): Promise<{ ok: true; id: 
   }
 }
 
-function getCreateTemplatePreviews(templateId: string, limit = 6): PublicCatalogItem[] {
-  return listCatalogItemsByTemplate(templateId, limit).map(toPublicCatalogItem)
+function getCreateTemplatePreviews(template: CreateTemplate, limit = 6): PublicCatalogItem[] {
+  return listCatalogItemsByPrompts(templatePreviewPrompts(template), limit).map(toPublicCatalogItem)
+}
+
+function templatePreviewPrompts(template: CreateTemplate): string[] {
+  const prompts = new Set<string>()
+  addPromptLink(prompts, template.prompt)
+  addPromptLink(prompts, template.settings.params?.["prompt"])
+  for (const step of template.workflow) {
+    addPromptLink(prompts, step.params?.["prompt"])
+  }
+
+  return [...prompts]
+}
+
+function addPromptLink(prompts: Set<string>, prompt: unknown): void {
+  const normalized = String(prompt || "").trim()
+  if (normalized) prompts.add(normalized)
 }
 
 export async function importCreateTemplateFromHistory(body: Record<string, unknown>): Promise<PublicCreateTemplate> {

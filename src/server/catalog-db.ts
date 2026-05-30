@@ -215,15 +215,22 @@ export function readCatalogFromDb(): Catalog {
   })
 }
 
-export function listCatalogItemsByTemplate(templateId: string, limit = 6): CatalogItem[] {
+export function listCatalogItemsByPrompts(prompts: Iterable<string>, limit = 6): CatalogItem[] {
+  const promptSet = new Set([...prompts].map(normalizePromptLink).filter(Boolean))
+  if (!promptSet.size) return []
+
   return getCatalogOrm()
     .select({ itemJson: mediaItems.itemJson })
     .from(mediaItems)
     .orderBy(desc(mediaItems.createdAt), mediaItems.id)
     .all()
     .map((row) => parseJson(row.itemJson, null))
-    .filter((item): item is CatalogItem => isCatalogItem(item) && item.templateId === templateId)
+    .filter((item): item is CatalogItem => isCatalogItem(item) && promptSet.has(normalizePromptLink(item.prompt)))
     .slice(0, limit)
+}
+
+function normalizePromptLink(prompt: unknown): string {
+  return String(prompt || "").trim()
 }
 
 export function writeCatalogToDb(catalog: Catalog): void {

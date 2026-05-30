@@ -8,7 +8,16 @@ import test from "node:test"
 import { parseCreateApiResponse } from "../src/server/create-schemas.ts"
 import { parseGeneratePornJob } from "../src/server/schemas.ts"
 import { ensureVideoThumbnail, getThumbnailRelativePath, setThumbnailProcessRunnerForTests } from "../src/thumbnails.ts"
-import { fakeBearerToken, importServer, jsonResponse, PNG_BYTES, readCatalog, writeCatalog } from "./helpers/server.js"
+import {
+  fakeBearerToken,
+  importServer,
+  jsonResponse,
+  listenOnRandomPort,
+  PNG_BYTES,
+  readCatalog,
+  requestRaw,
+  writeCatalog,
+} from "./helpers/server.js"
 
 test("job response parser normalizes upstream aliases at the boundary", () => {
   const job = parseGeneratePornJob({
@@ -39,6 +48,26 @@ test("create API response parser narrows nullable upstream fields", () => {
 
   assert.equal(parsed.jobId, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
   assert.equal(parsed.error, null)
+})
+
+test("server serves the app shell for client routes", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-static-routes-"))
+  const imported = await importServer(mediaDir)
+  const listener = await listenOnRandomPort(imported.server)
+
+  try {
+    for (const route of ["/create", "/templates", "/settings/account", "/items/item-1"]) {
+      const response = await requestRaw(listener.port, route)
+      assert.equal(response.statusCode, 200)
+      assert.match(response.headers["content-type"], /text\/html/)
+      assert.match(response.body.toString("utf8"), /<div id="root"><\/div>/)
+    }
+
+    const missingAsset = await requestRaw(listener.port, "/assets/missing.js")
+    assert.equal(missingAsset.statusCode, 404)
+  } finally {
+    await listener.close()
+  }
 })
 
 test("video thumbnail helper writes predictable poster path with a stubbed ffmpeg runner", async () => {

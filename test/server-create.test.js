@@ -357,9 +357,24 @@ test("creation templates save all reusable settings and apply submission overrid
   }
 })
 
-test("downloaded media keeps the template association for preview lookup", async () => {
+test("template previews use matching media prompts as the association", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-preview-"))
   const jobId = "22222222-2222-4222-8222-222222222222"
+  const promptLinkedId = "23232323-2323-4232-8232-232323232323"
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: promptLinkedId,
+        type: "video",
+        status: "done",
+        prompt: "template associated",
+        outputUrl: "https://assets.example/prompt-linked.mp4",
+        createdAt: 1779893500,
+      },
+    ],
+    downloadedJobIds: [],
+    lastSeenJobId: promptLinkedId,
+  })
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (url, options = {}) => {
     const href = String(url)
@@ -422,8 +437,10 @@ test("downloaded media keeps the template association for preview lookup", async
 
     assert.equal(item.templateId, template.id)
     assert.equal(item.templateLabel, template.label)
-    assert.equal(previewTemplate.previews.length, 1)
-    assert.equal(previewTemplate.previews[0].id, jobId)
+    assert.deepEqual(
+      previewTemplate.previews.map((preview) => preview.id),
+      [promptLinkedId, jobId],
+    )
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -617,11 +634,14 @@ test("failed creation submissions are recorded with reusable settings", async ()
     const history = await server.getCreations(new URLSearchParams())
     const failed = history.creations.find((creation) => creation.status === "error")
     const copied = await server.duplicateCreation(failed.id)
+    const copiedWithSource = await server.duplicateCreation(failed.id, { includeSource: true })
 
     assert.equal(failed.error, "submission_failed")
     assert.equal(failed.params.prompt, "failed prompt")
     assert.equal(copied.form.modeId, "custom-image")
     assert.equal(copied.form.params.prompt, "failed prompt")
+    assert.equal(copied.form.source, undefined)
+    assert.equal(copiedWithSource.form.source.url, "https://assets.example/source.png")
   } finally {
     globalThis.fetch = originalFetch
   }
