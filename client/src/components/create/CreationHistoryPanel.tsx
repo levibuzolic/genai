@@ -1,9 +1,10 @@
-import { Clock3, CopyPlus, ExternalLink, Loader2, RefreshCw, Save } from "lucide-react"
+import { Clapperboard, Clock3, CopyPlus, ExternalLink, ImageIcon, Loader2, RefreshCw, Save } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatDate, formatTime } from "@/lib/format"
+import { isImageUrl, isVideoUrl } from "@/lib/media"
 import type { Creation, CreationEvent } from "@/types/domain"
 
 function statusVariant(status: string) {
@@ -28,13 +29,35 @@ function sourceLabel(creation: Creation) {
 }
 
 function creationTitle(creation: Creation) {
-  return (
-    creation.params?.["prompt"] || (creation.job?.["prompt"] as string | undefined) || creation.modeLabel || creation.modeId || "Creation"
-  )
+  const prompt = creation.params?.["prompt"] || creation.job?.["prompt"]
+  if (typeof prompt === "string" && prompt) return prompt
+  return creation.modeLabel || creation.modeId || "Creation"
 }
 
 function creationTime(creation: Creation) {
   return creation.updatedAt || creation.submittedAt || creation.createdLocallyAt || creation.createdAtIso
+}
+
+function creationPreviewUrl(creation: Creation) {
+  const source = creation.source
+  const candidates = [
+    creation.outputUrl,
+    creation.inputUrl,
+    source && "dataUrl" in source ? source.dataUrl : null,
+    source && "url" in source ? source.url : null,
+  ]
+
+  return candidates.find((value): value is string => typeof value === "string" && isImageUrl(value)) || null
+}
+
+function isVideoCreation(creation: Creation) {
+  return (
+    creation.mediaType === "video" ||
+    isVideoUrl(creation.outputUrl || "") ||
+    String(creation.modeId || "")
+      .toLowerCase()
+      .includes("video")
+  )
 }
 
 export function CreationHistoryPanel({
@@ -72,16 +95,22 @@ export function CreationHistoryPanel({
           <h3>Creation history</h3>
           <p>{activeCount > 0 ? `${activeCount} generation${activeCount === 1 ? "" : "s"} still running` : "No active generations"}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void onRefresh()} disabled={loading}>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          onClick={() => void onRefresh()}
+          disabled={loading}
+          aria-label="Refresh history"
+          title="Refresh history"
+        >
           {loading ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-          Refresh
         </Button>
       </div>
 
       {statusMessage && <p className="creationHistoryStatus">{statusMessage}</p>}
 
       <div className="creationHistorySections">
-        <div className="creationHistoryGroup">
+        <div className="creationHistoryGroup is-active">
           <span className="creationHistoryEyebrow">Active</span>
           {active.length ? (
             active.map((creation) => (
@@ -99,7 +128,7 @@ export function CreationHistoryPanel({
           )}
         </div>
 
-        <div className="creationHistoryGroup">
+        <div className="creationHistoryGroup is-recent">
           <span className="creationHistoryEyebrow">Recent</span>
           {recent.length ? (
             recent.map((creation) => (
@@ -213,22 +242,36 @@ function CreationHistoryRow({
   onDuplicate: (creation: Creation) => Promise<void>
   onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
+  const previewUrl = creationPreviewUrl(creation)
+  const isVideo = isVideoCreation(creation)
+
   return (
     <article className={prominent ? "creationHistoryRow is-active" : "creationHistoryRow"}>
       <button type="button" className="creationHistoryMain" onClick={() => void onDetails(creation)}>
-        <span className="creationHistoryTitle">{creationTitle(creation)}</span>
-        <span className="creationHistoryMeta">
-          {creation.modeLabel || creation.modeId} · {sourceLabel(creation)} · {formatDate(creationTime(creation))}
+        <span className="creationHistoryThumb" data-media={isVideo ? "video" : previewUrl ? "image" : "missing"}>
+          {previewUrl ? (
+            <img src={previewUrl} alt={creationTitle(creation)} loading="lazy" decoding="async" />
+          ) : isVideo ? (
+            <Clapperboard />
+          ) : (
+            <ImageIcon />
+          )}
+        </span>
+        <span className="creationHistoryText">
+          <span className="creationHistoryTitle">{creationTitle(creation)}</span>
+          <span className="creationHistoryMeta">
+            {creation.modeLabel || creation.modeId} · {sourceLabel(creation)} · {formatDate(creationTime(creation))}
+          </span>
         </span>
       </button>
-      <Badge variant={statusVariant(creation.status)}>{statusLabel(creation.status)}</Badge>
-      <Button variant="outline" size="sm" onClick={() => void onDuplicate(creation)}>
+      <Badge className="creationHistoryStatusBadge" variant={statusVariant(creation.status)}>
+        {statusLabel(creation.status)}
+      </Badge>
+      <Button variant="outline" size="icon-xs" onClick={() => void onDuplicate(creation)} aria-label="Copy" title="Copy settings">
         <CopyPlus />
-        Copy
       </Button>
-      <Button variant="outline" size="sm" onClick={() => void onSaveTemplate(creation)}>
+      <Button variant="outline" size="icon-xs" onClick={() => void onSaveTemplate(creation)} aria-label="Save" title="Save template">
         <Save />
-        Save
       </Button>
     </article>
   )

@@ -31,7 +31,7 @@ const EMPTY_TEMPLATE: TemplateEditorState = {
   modeId: "custom-video",
   prompt: "",
   negativePrompt: "",
-  quality: "720p-4",
+  quality: "1080p-15",
   imagePrompt: "",
   videoPrompt: "",
 }
@@ -79,10 +79,10 @@ export function TemplateBrowser({
       label: template.label,
       description: template.description || "",
       type: template.type,
-      modeId: template.settings?.modeId || (template.type === "image" ? "custom-image" : "custom-video"),
+      modeId: template.settings?.modeId || modeIdForTemplateType(template.type),
       prompt: paramAsString(params["prompt"]) || "",
       negativePrompt: paramAsString(params["negativePrompt"]) || "",
-      quality: paramAsString(params["quality"]) || "720p-4",
+      quality: paramAsString(params["quality"]) || "1080p-15",
       imagePrompt: paramAsString(imageStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
       videoPrompt: paramAsString(videoStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
     })
@@ -184,16 +184,17 @@ export function TemplateBrowser({
                 setEditor({
                   ...editor,
                   type,
-                  modeId: type === "image" ? "custom-image" : "custom-video",
+                  modeId: modeIdForTemplateType(type),
                 })
               }}
             >
               <option value="image">Image edit</option>
               <option value="video">Video creation</option>
               <option value="combo">Image edit + video</option>
+              <option value="nudify-video">Nudify + video</option>
             </SelectControl>
           </Field>
-          {editor.type !== "combo" ? (
+          {editor.type !== "combo" && editor.type !== "nudify-video" ? (
             <>
               <Field label="Mode">
                 <SelectControl value={editor.modeId} onChange={(value) => setEditor({ ...editor, modeId: value })}>
@@ -210,7 +211,7 @@ export function TemplateBrowser({
                 <Textarea value={editor.prompt} onChange={(event) => setEditor({ ...editor, prompt: event.target.value })} />
               </Field>
             </>
-          ) : (
+          ) : editor.type === "combo" ? (
             <>
               <Field label="Image edit prompt">
                 <Textarea value={editor.imagePrompt} onChange={(event) => setEditor({ ...editor, imagePrompt: event.target.value })} />
@@ -219,6 +220,10 @@ export function TemplateBrowser({
                 <Textarea value={editor.videoPrompt} onChange={(event) => setEditor({ ...editor, videoPrompt: event.target.value })} />
               </Field>
             </>
+          ) : (
+            <Field label="Video prompt">
+              <Textarea value={editor.videoPrompt} onChange={(event) => setEditor({ ...editor, videoPrompt: event.target.value })} />
+            </Field>
           )}
           {editor.type !== "image" && (
             <Field label="Quality">
@@ -292,6 +297,36 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
     }
   }
 
+  if (editor.type === "nudify-video") {
+    return {
+      ...templateIdPatch(editor.id),
+      label: editor.label,
+      description: editor.description,
+      type: "nudify-video",
+      settings: {
+        modeId: "nudify-video",
+        source: null,
+        params: {
+          prompt: editor.videoPrompt,
+          quality: editor.quality,
+        },
+      },
+      workflow: [
+        {
+          modeId: "nudify",
+          params: {},
+        },
+        {
+          modeId: "custom-video",
+          params: {
+            prompt: editor.videoPrompt,
+            quality: editor.quality,
+          },
+        },
+      ],
+    }
+  }
+
   return {
     ...templateIdPatch(editor.id),
     label: editor.label,
@@ -326,4 +361,12 @@ function templateIdPatch(id: string) {
 function paramAsString(value: CreateParamValue): string | undefined {
   if (value === undefined || value === null) return undefined
   return String(value)
+}
+
+function modeIdForTemplateType(type: CreateTemplateType): string {
+  if (type === "image") return "custom-image"
+  if (type === "combo") return "custom-image-video"
+  if (type === "nudify-video") return "nudify-video"
+
+  return "custom-video"
 }

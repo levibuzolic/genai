@@ -3,7 +3,6 @@ import type * as React from "react"
 import type {
   CatalogItem,
   CreateField,
-  CreateJob,
   CreateMode,
   CreateTemplate,
   CreateTemplateType,
@@ -27,12 +26,13 @@ export type CreateStudioProps = {
   setModeId: (id: string) => void
   prompt: string
   setPrompt: (value: string) => void
+  negativePrompt: string
+  setNegativePrompt: (value: string) => void
   promptField: CreateField | undefined
   quality: string
   setQuality: (value: string) => void
   qualityField: CreateField | undefined
   createStatus: string
-  createResult: CreateJob | null
   createSubmitting: boolean
   isDraggingUpload: boolean
   setIsDraggingUpload: (value: boolean) => void
@@ -42,8 +42,6 @@ export type CreateStudioProps = {
   onSubmit: () => Promise<void>
   onReset: () => void
   onClose: () => void
-  onDownload: () => Promise<void>
-  onAnimate: () => void
   templates: CreateTemplate[]
   templateSearch: string
   setTemplateSearch: (value: string) => void

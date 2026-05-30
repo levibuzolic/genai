@@ -74,6 +74,7 @@ export function TemplateTools(props: CreateStudioProps) {
           <option value="image">Image edit</option>
           <option value="video">Video</option>
           <option value="combo">Edit + video</option>
+          <option value="nudify-video">Nudify + video</option>
         </SelectControl>
         <Button
           type="button"

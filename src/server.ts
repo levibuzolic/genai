@@ -17,6 +17,8 @@ import {
   applyDuplicateMetadata,
   buildFacets,
   createCatalogBackup,
+  deleteCatalogItemRemote,
+  getCatalogItem,
   getItems,
   isDownloadableCatalogItem,
   jobFromCatalogItem,
@@ -27,6 +29,7 @@ import {
   restoreCatalogBackup,
   saveCatalog,
   sendCatalogExport,
+  setCatalogItemFavoriteRemote,
 } from "./server/catalog.ts"
 import {
   CREATE_HISTORY_PAGE_LIMIT,
@@ -90,6 +93,7 @@ const AuthTokenBodySchema = z
 const CatalogBackupBodySchema = z.object({ reason: z.string().catch("manual") }).passthrough()
 const CatalogRestoreBodySchema = z.object({ file: z.string().catch("") }).passthrough()
 const DisconnectBrowserBodySchema = z.object({ deleteProfile: z.boolean().catch(false) }).passthrough()
+const DeleteCatalogItemBodySchema = z.object({ keepLocalFiles: z.boolean().catch(true) }).passthrough()
 const RefreshCreationsBodySchema = z.object({ pageLimit: z.coerce.number().catch(CREATE_HISTORY_PAGE_LIMIT) }).passthrough()
 const SyncStartBodySchema = z.object({ incremental: z.boolean().catch(true) }).passthrough()
 
@@ -240,6 +244,24 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, await getItems(url.searchParams))
     }
 
+    const catalogItemMatch = url.pathname.match(/^\/api\/items\/([^/]+)$/)
+    if (request.method === "GET" && catalogItemMatch) {
+      return sendJson(response, await getCatalogItem(decodeURIComponent(catalogItemMatch[1] || "")))
+    }
+
+    if (request.method === "DELETE" && catalogItemMatch) {
+      const body = DeleteCatalogItemBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, await deleteCatalogItemRemote(decodeURIComponent(catalogItemMatch[1] || ""), body))
+    }
+
+    const favoriteItemMatch = url.pathname.match(/^\/api\/items\/([^/]+)\/favorite$/)
+    if ((request.method === "POST" || request.method === "DELETE") && favoriteItemMatch) {
+      return sendJson(
+        response,
+        await setCatalogItemFavoriteRemote(decodeURIComponent(favoriteItemMatch[1] || ""), request.method === "POST"),
+      )
+    }
+
     if (request.method === "GET" && url.pathname === "/api/catalog/export") {
       return sendCatalogExport(response)
     }
@@ -381,6 +403,7 @@ export {
   buildFacets,
   buildCreateApiRequest,
   createCatalogBackup,
+  deleteCatalogItemRemote,
   createMediaJob,
   deleteCreateTemplate,
   downloadCreateJob,
@@ -411,6 +434,7 @@ export {
   restoreCatalogBackup,
   resolveMediaDir,
   server,
+  setCatalogItemFavoriteRemote,
   startCatalogDownload,
   startAutoSyncLoop,
   startLibraryVerification,

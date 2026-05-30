@@ -1,10 +1,12 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
+import { replaceEqualJson } from "@/lib/render-state"
 import type { ViewMode } from "@/types/domain"
 import type { ItemsResponse } from "@/types/routes"
 
 const SEARCH_DEBOUNCE_MS = 260
+const VIRTUAL_PAGE_SIZE = "48"
 
 export const sortOptions = [
   ["newest", "Newest"],
@@ -22,48 +24,91 @@ export function useLibrary() {
   const [media, setMedia] = React.useState(initial.media)
   const [status, setStatus] = React.useState(initial.status)
   const [sort, setSort] = React.useState(initial.sort)
-  const [pageSize, setPageSize] = React.useState(initial.pageSize)
-  const [page, setPage] = React.useState(initial.page)
   const [view, setView] = React.useState<ViewMode>(initial.view)
+  const [loadingMore, setLoadingMore] = React.useState(false)
   const [pending, startTransition] = React.useTransition()
   const deferredItems = React.useDeferredValue(itemsData?.items || [])
+  const requestIdRef = React.useRef(0)
+  const loadingMoreRef = React.useRef(false)
+  const querySignature = React.useMemo(() => JSON.stringify([query, media, status, sort]), [media, query, sort, status])
+  const querySignatureRef = React.useRef(querySignature)
+
+  React.useEffect(() => {
+    querySignatureRef.current = querySignature
+  }, [querySignature])
 
   React.useEffect(() => {
     const timer = window.setTimeout(() => {
-      setPage(1)
       setQuery(searchDraft.trim())
     }, SEARCH_DEBOUNCE_MS)
 
     return () => window.clearTimeout(timer)
   }, [searchDraft])
 
-  const loadItems = React.useCallback(
-    async (options: { keepLoading?: boolean } = {}) => {
-      if (!options.keepLoading) setItemsLoading(true)
+  const loadItemsPage = React.useCallback(
+    async (pageToLoad: number, options: { replace: boolean; keepLoading?: boolean; more?: boolean }) => {
+      const requestId = ++requestIdRef.current
+      const requestSignature = querySignatureRef.current
+      if (options.more) {
+        loadingMoreRef.current = true
+        setLoadingMore(true)
+      } else if (!options.keepLoading) {
+        setItemsLoading(true)
+      }
 
       const params = new URLSearchParams({
         media,
         status,
         sort,
-        pageSize,
-        page: String(page),
+        pageSize: VIRTUAL_PAGE_SIZE,
+        page: String(pageToLoad),
       })
       if (query) params.set("q", query)
 
       try {
         const data = await fetchJson<ItemsResponse>(`/api/items?${params}`)
-        startTransition(() => setItemsData(data))
+        if (requestSignature !== querySignatureRef.current || (!options.more && requestId !== requestIdRef.current)) return
+        startTransition(() =>
+          setItemsData((current) => {
+            if (options.replace || !current || data.page <= 1) return replaceEqualJson(current, data)
+            return replaceEqualJson(current, mergeItemsData(current, data))
+          }),
+        )
       } finally {
-        setItemsLoading(false)
+        if (options.more) {
+          loadingMoreRef.current = false
+          setLoadingMore(false)
+        } else if (requestId === requestIdRef.current) {
+          setItemsLoading(false)
+        }
       }
     },
-    [media, page, pageSize, query, sort, status],
+    [media, query, sort, status],
+  )
+
+  const loadItems = React.useCallback(
+    async (options: { keepLoading?: boolean } = {}) => {
+      await loadItemsPage(1, {
+        replace: true,
+        ...(options.keepLoading === undefined ? {} : { keepLoading: options.keepLoading }),
+      })
+    },
+    [loadItemsPage],
+  )
+
+  const loadNextPage = React.useCallback(
+    async function loadNextPage() {
+      if (!itemsData || itemsLoading || loadingMoreRef.current) return
+      if (itemsData.page >= itemsData.pageCount || itemsData.items.length >= itemsData.total) return
+      await loadItemsPage(itemsData.page + 1, { replace: false, more: true, keepLoading: true })
+    },
+    [itemsData, itemsLoading, loadItemsPage],
   )
 
   React.useEffect(() => {
     void loadItems()
-    writeLibraryStateToUrl({ query, media, status, sort, pageSize, page, view })
-  }, [loadItems, query, media, status, sort, pageSize, page, view])
+    writeLibraryStateToUrl({ query, media, status, sort, view })
+  }, [loadItems, query, media, status, sort, view])
 
   function clearFilters() {
     setSearchDraft("")
@@ -71,13 +116,16 @@ export function useLibrary() {
     setMedia("all")
     setStatus("all")
     setSort("newest")
-    setPage(1)
   }
+
+  const hasMoreItems = Boolean(itemsData && itemsData.items.length < itemsData.total && itemsData.page < itemsData.pageCount)
 
   return {
     itemsData,
     itemsLoading,
     deferredItems,
+    hasMoreItems,
+    loadingMore,
     pending,
     searchDraft,
     setSearchDraft,
@@ -88,14 +136,27 @@ export function useLibrary() {
     setStatus,
     sort,
     setSort,
-    pageSize,
-    setPageSize,
-    page,
-    setPage,
     view,
     setView,
     loadItems,
+    loadNextPage,
     clearFilters,
+  }
+}
+
+function mergeItemsData(current: ItemsResponse, data: ItemsResponse): ItemsResponse {
+  const seen = new Set(current.items.map((item) => item.id))
+  const items = current.items.slice()
+  for (const item of data.items) {
+    if (seen.has(item.id)) continue
+    seen.add(item.id)
+    items.push(item)
+  }
+
+  return {
+    ...data,
+    items,
+    page: Math.max(current.page, data.page),
   }
 }
 
@@ -106,30 +167,22 @@ function readLibraryStateFromUrl() {
     media: params.get("media") || "all",
     status: params.get("status") || "all",
     sort: params.get("sort") || "newest",
-    pageSize: params.get("pageSize") || "48",
-    page: Math.max(1, Number(params.get("page") || 1)),
     view: (params.get("view") === "list" ? "list" : "grid") as ViewMode,
   }
 }
 
-function writeLibraryStateToUrl(state: {
-  query: string
-  media: string
-  status: string
-  sort: string
-  pageSize: string
-  page: number
-  view: ViewMode
-}) {
+function writeLibraryStateToUrl(state: { query: string; media: string; status: string; sort: string; view: ViewMode }) {
   const params = new URLSearchParams()
   if (state.query) params.set("q", state.query)
   if (state.media !== "all") params.set("media", state.media)
   if (state.status !== "all") params.set("status", state.status)
   if (state.sort !== "newest") params.set("sort", state.sort)
-  if (state.pageSize !== "48") params.set("pageSize", state.pageSize)
-  if (state.page > 1) params.set("page", String(state.page))
   if (state.view !== "grid") params.set("view", state.view)
 
-  const next = params.toString() ? `?${params}` : window.location.pathname
-  window.history.replaceState(null, "", next)
+  const search = params.toString()
+  const next = `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (next !== current) {
+    window.history.replaceState(null, "", next)
+  }
 }

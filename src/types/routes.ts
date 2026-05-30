@@ -50,6 +50,8 @@ export type PublicCatalogItem = {
   sourceItemId?: string | null
   sourceUrl?: string | null
   createdLocallyAt?: string | null
+  remoteDeletedAt?: string | null
+  remoteDeleteStatus?: string | null
   posterUrl: string | null
 }
 
@@ -63,7 +65,7 @@ export type PublicCreateTemplate = {
   id: string
   label: string
   description: string
-  type: "image" | "video" | "combo"
+  type: "image" | "video" | "combo" | "nudify-video"
   settings: PublicTemplateSettings
   workflow: PublicTemplateSettings[]
   prompt: string
@@ -86,11 +88,33 @@ export type ItemsResponse = {
   facets: {
     media?: Partial<Record<"all" | "image" | "video", number>>
     orphanFiles?: number
-    status?: Partial<Record<"all" | "downloaded" | "missing" | "error" | "duplicate" | "unverified" | "favorited", number>>
+    status?: Partial<Record<"all" | "downloaded" | "missing" | "error" | "duplicate" | "unverified" | "favorited" | "deleted", number>>
   }
   catalogUpdatedAt: string | null
   lastSeenJobId: string | null
   lastRun: Record<string, unknown> | null
+}
+
+export type CatalogItemResponse = {
+  item: PublicCatalogItem
+}
+
+export type DeleteCatalogItemRequest = {
+  keepLocalFiles?: boolean
+}
+
+export type DeleteCatalogItemResponse = OkResponse & {
+  id: string
+  item: PublicCatalogItem | null
+  keepLocalFiles: boolean
+  deletedLocalFiles: string[]
+  remoteStatus: "deleted" | "already-deleted" | "previously-deleted"
+}
+
+export type FavoriteCatalogItemResponse = OkResponse & {
+  id: string
+  item: PublicCatalogItem
+  favorited: boolean
 }
 
 export type CreateModesResponse = {

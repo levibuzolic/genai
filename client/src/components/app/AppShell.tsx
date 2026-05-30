@@ -15,6 +15,7 @@ import {
 import * as React from "react"
 
 import { SettingsDialog } from "@/components/app/SettingsDialog"
+import type { SettingsSection } from "@/components/app/SettingsDialog"
 import { RailButton } from "@/components/common/RailButton"
 import { Button } from "@/components/ui/button"
 import {
@@ -53,6 +54,11 @@ export function AppShell({
   onToggleMediaBlur,
   mediaFitMode,
   onToggleMediaFitMode,
+  settingsOpen,
+  settingsSection,
+  onOpenSettings,
+  onCloseSettings,
+  onSettingsSectionChange,
   backups,
   selectedBackup,
   setSelectedBackup,
@@ -80,6 +86,11 @@ export function AppShell({
   onToggleMediaBlur: () => void
   mediaFitMode: MediaFitMode
   onToggleMediaFitMode: () => void
+  settingsOpen: boolean
+  settingsSection: SettingsSection
+  onOpenSettings: () => void
+  onCloseSettings: () => void
+  onSettingsSectionChange: (section: SettingsSection) => void
   backups: Backup[]
   selectedBackup: string
   setSelectedBackup: (value: string) => void
@@ -89,7 +100,6 @@ export function AppShell({
 }) {
   const autoSync = config?.autoSync
   const currentTitle = createOpen ? "Create" : activeView === "templates" ? "Templates" : "Media"
-  const [settingsOpen, setSettingsOpen] = React.useState(false)
   const isDesktop = useMediaQuery("(min-width: 1024px)")
 
   return (
@@ -205,12 +215,12 @@ export function AppShell({
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
                   <DropdownMenuCheckboxItem id="mediaBlurButton" checked={mediaBlurred} onCheckedChange={onToggleMediaBlur}>
-                    Blur media
+                    Blur media (Option+B)
                   </DropdownMenuCheckboxItem>
                 </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button id="settingsButton" variant="outline" size="icon" onClick={() => setSettingsOpen(true)} aria-label="Settings">
+            <Button id="settingsButton" variant="outline" size="icon" onClick={onOpenSettings} aria-label="Settings">
               <Settings />
               <span className="sr-only">Settings</span>
             </Button>
@@ -247,7 +257,11 @@ export function AppShell({
 
       <SettingsDialog
         open={settingsOpen}
-        onOpenChange={setSettingsOpen}
+        onOpenChange={(open) => {
+          if (!open) onCloseSettings()
+        }}
+        section={settingsSection}
+        onSectionChange={onSettingsSectionChange}
         config={config}
         syncStatus={syncStatus}
         authActionPending={authActionPending}

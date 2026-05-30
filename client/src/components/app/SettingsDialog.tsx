@@ -12,11 +12,13 @@ import { formatDate, formatTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Backup, Config, SyncStatus } from "@/types/domain"
 
-type SettingsSection = "library" | "account" | "backups"
+export type SettingsSection = "library" | "account" | "backups"
 
 export function SettingsDialog({
   open,
   onOpenChange,
+  section,
+  onSectionChange,
   config,
   syncStatus,
   authActionPending,
@@ -35,6 +37,8 @@ export function SettingsDialog({
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  section: SettingsSection
+  onSectionChange: (section: SettingsSection) => void
   config: Config | null
   syncStatus: SyncStatus
   authActionPending: boolean
@@ -51,7 +55,6 @@ export function SettingsDialog({
   onCreateBackup: () => void
   onRestoreBackup: () => void
 }) {
-  const [section, setSection] = React.useState<SettingsSection>("library")
   const authBrowser = config?.authBrowser
   const hasAuthorization = Boolean(config?.hasAuthorization)
   const authStatus = authBrowser?.status || (hasAuthorization ? "connected" : "missing")
@@ -69,9 +72,9 @@ export function SettingsDialog({
             <Settings className="size-4" />
             <span>Settings</span>
           </div>
-          <SettingsNavButton icon={Database} label="Library" active={section === "library"} onClick={() => setSection("library")} />
-          <SettingsNavButton icon={KeyRound} label="Account" active={section === "account"} onClick={() => setSection("account")} />
-          <SettingsNavButton icon={Archive} label="Backups" active={section === "backups"} onClick={() => setSection("backups")} />
+          <SettingsNavButton icon={Database} label="Library" active={section === "library"} onClick={() => onSectionChange("library")} />
+          <SettingsNavButton icon={KeyRound} label="Account" active={section === "account"} onClick={() => onSectionChange("account")} />
+          <SettingsNavButton icon={Archive} label="Backups" active={section === "backups"} onClick={() => onSectionChange("backups")} />
         </aside>
 
         <div className="settingsContent">

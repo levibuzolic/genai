@@ -126,6 +126,8 @@ export const CatalogItemSchema = z
     sourceItemId: nullableStringSchema,
     sourceUrl: nullableStringSchema,
     createdLocallyAt: nullableStringSchema,
+    remoteDeletedAt: nullableStringSchema,
+    remoteDeleteStatus: nullableStringSchema,
   })
   .passthrough()
 

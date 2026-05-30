@@ -3,6 +3,7 @@ import * as React from "react"
 import { fetchJson } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { isImageItem } from "@/lib/media"
+import { replaceEqualJson } from "@/lib/render-state"
 import {
   extensionForImageType,
   fileToDataUrl,
@@ -15,7 +16,6 @@ import type {
   CatalogItem,
   CreateParams,
   CreateField,
-  CreateJob,
   CreateMode,
   CreateTemplate,
   CreateTemplateType,
@@ -25,7 +25,7 @@ import type {
 } from "@/types/domain"
 import type { CreateJobPollResponse, CreateJobSubmitRequest, CreateJobSubmitResponse, ImportCreateTemplateResponse } from "@/types/routes"
 
-export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
+export function useCreateStudio(onOpen?: () => void) {
   const [open, setOpen] = React.useState(false)
   const [modes, setModes] = React.useState<CreateMode[]>([])
   const [sourceKind, setSourceKind] = React.useState<SourceKind>("catalog")
@@ -37,9 +37,9 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   const [sourceUrl, setSourceUrl] = React.useState("")
   const [modeId, setModeId] = React.useState("")
   const [prompt, setPrompt] = React.useState("")
+  const [negativePrompt, setNegativePrompt] = React.useState("")
   const [quality, setQuality] = React.useState("")
   const [status, setStatus] = React.useState("Choose a source and mode.")
-  const [result, setResult] = React.useState<CreateJob | null>(null)
   const [submitting, setSubmitting] = React.useState(false)
   const [templateJobId, setTemplateJobId] = React.useState("")
   const [templateLabel, setTemplateLabel] = React.useState("")
@@ -60,7 +60,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
 
   const loadModes = React.useCallback(async () => {
     const data = await fetchJson<{ modes: CreateMode[] }>("/api/create/modes")
-    setModes(data.modes || [])
+    setModes((current) => replaceEqualJson(current, data.modes || []))
     const firstEnabled = data.modes?.find((modeOption) => !modeOption.disabled)
     setModeId((current) => {
       if (current && data.modes?.some((entry) => entry.id === current && !entry.disabled)) return current
@@ -89,6 +89,75 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
       setQuality("")
     }
   }, [modeId, qualityField, selectedMode])
+
+  const openCreator = React.useCallback(
+    async function openCreator(
+      options: {
+        sourceKind?: SourceKind | undefined
+        sourceItem?: CatalogItem | null | undefined
+        source?: CreationSource | null | undefined
+        prompt?: string | undefined
+        modeId?: string | undefined
+        params?: CreateParams | undefined
+        templateId?: string | undefined
+      } = {},
+    ) {
+      onOpen?.()
+      setOpen(true)
+      if (options.templateId) setSelectedTemplateId(options.templateId)
+      if (options.sourceKind) setSourceKind(options.sourceKind)
+      if (options.prompt !== undefined) setPrompt(options.prompt)
+      if (options.modeId) setModeId(options.modeId)
+      const promptParam = paramAsString(options.params?.["prompt"])
+      const negativePromptParam = paramAsString(options.params?.["negativePrompt"] ?? options.params?.["negative_prompt"])
+      const qualityParam = paramAsString(options.params?.["quality"])
+      if (promptParam !== undefined) setPrompt(promptParam)
+      if (negativePromptParam !== undefined) setNegativePrompt(negativePromptParam)
+      if (qualityParam) setQuality(qualityParam)
+      if (options.source?.kind === "url" && typeof options.source.url === "string") {
+        setSourceKind("url")
+        setSourceUrl(options.source.url)
+      } else if (options.source?.kind === "catalog" && typeof options.source.itemId === "string") {
+        setSourceKind("catalog")
+        setSelectedSourceId(options.source.itemId)
+      } else if (options.source?.kind === "upload") {
+        setSourceKind("upload")
+        setUploadMeta("Choose, drop, or paste the source image again.")
+      }
+      const sourceItem = options.sourceItem
+      if (sourceItem && isImageItem(sourceItem)) {
+        setSourceKind("catalog")
+        setSourceItems((current) => {
+          if (current.some((item) => item.id === sourceItem.id)) return current
+          return [sourceItem, ...current]
+        })
+        setSelectedSourceId(sourceItem.id)
+      }
+      window.requestAnimationFrame(() => {
+        panelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+      })
+    },
+    [onOpen],
+  )
+
+  const acceptUploadFile = React.useCallback(async function acceptUploadFile(file: File | null, source: UploadSource) {
+    setUploadedDataUrl(null)
+    setUploadedName("")
+    if (!file) {
+      setUploadMeta(source === "picker" ? "No file selected." : "No supported image found.")
+      return
+    }
+    if (!UPLOAD_IMAGE_TYPES.has(file.type)) {
+      setUploadMeta("Unsupported image type.")
+      return
+    }
+    const dataUrl = await fileToDataUrl(file)
+    const name = file.name || `Pasted image.${extensionForImageType(file.type)}`
+    setSourceKind("upload")
+    setUploadedDataUrl(dataUrl)
+    setUploadedName(name)
+    setUploadMeta(`${sourceLabel(source)} ${name} · ${formatBytes(file.size)}`)
+  }, [])
 
   React.useEffect(() => {
     const onPaste = async (event: ClipboardEvent) => {
@@ -127,75 +196,11 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
       window.removeEventListener("drop", onDrop)
       window.removeEventListener("paste", onPaste)
     }
-  }, [])
-
-  async function openCreator(
-    options: {
-      sourceKind?: SourceKind | undefined
-      sourceItem?: CatalogItem | null | undefined
-      source?: CreationSource | null | undefined
-      prompt?: string | undefined
-      modeId?: string | undefined
-      params?: CreateParams | undefined
-      templateId?: string | undefined
-    } = {},
-  ) {
-    setOpen(true)
-    if (options.templateId) setSelectedTemplateId(options.templateId)
-    if (options.sourceKind) setSourceKind(options.sourceKind)
-    if (options.prompt) setPrompt(options.prompt)
-    if (options.modeId) setModeId(options.modeId)
-    const promptParam = paramAsString(options.params?.["prompt"])
-    const qualityParam = paramAsString(options.params?.["quality"])
-    if (promptParam) setPrompt(promptParam)
-    if (qualityParam) setQuality(qualityParam)
-    if (options.source?.kind === "url" && typeof options.source.url === "string") {
-      setSourceKind("url")
-      setSourceUrl(options.source.url)
-    } else if (options.source?.kind === "catalog" && typeof options.source.itemId === "string") {
-      setSourceKind("catalog")
-      setSelectedSourceId(options.source.itemId)
-    } else if (options.source?.kind === "upload") {
-      setSourceKind("upload")
-      setUploadMeta("Choose, drop, or paste the source image again.")
-    }
-    const sourceItem = options.sourceItem
-    if (sourceItem && isImageItem(sourceItem)) {
-      setSourceKind("catalog")
-      setSourceItems((current) => {
-        if (current.some((item) => item.id === sourceItem.id)) return current
-        return [sourceItem, ...current]
-      })
-      setSelectedSourceId(sourceItem.id)
-    }
-    window.requestAnimationFrame(() => {
-      panelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
-    })
-  }
-
-  async function acceptUploadFile(file: File | null, source: UploadSource) {
-    setUploadedDataUrl(null)
-    setUploadedName("")
-    if (!file) {
-      setUploadMeta(source === "picker" ? "No file selected." : "No supported image found.")
-      return
-    }
-    if (!UPLOAD_IMAGE_TYPES.has(file.type)) {
-      setUploadMeta("Unsupported image type.")
-      return
-    }
-    const dataUrl = await fileToDataUrl(file)
-    const name = file.name || `Pasted image.${extensionForImageType(file.type)}`
-    setSourceKind("upload")
-    setUploadedDataUrl(dataUrl)
-    setUploadedName(name)
-    setUploadMeta(`${sourceLabel(source)} ${name} · ${formatBytes(file.size)}`)
-  }
+  }, [acceptUploadFile, openCreator])
 
   async function submitCreateJob() {
     setSubmitting(true)
     setStatus("Submitting creation job...")
-    setResult(null)
     try {
       const request: CreateJobSubmitRequest = {
         modeId,
@@ -219,20 +224,11 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
 
   async function pollCreateJob(jobId: string, pollMs: number) {
     const data = await fetchJson<CreateJobPollResponse>(`/api/create/jobs/${encodeURIComponent(jobId)}`)
-    setResult(data.job)
     setStatus(`Job ${data.job.status || "pending"}.`)
     if (["done", "failed", "error"].includes(data.job.status || "")) return
     window.setTimeout(() => {
       void pollCreateJob(jobId, data.pollMs || pollMs)
     }, data.pollMs || pollMs)
-  }
-
-  async function downloadCreateJob() {
-    if (!result?.id) return
-    setStatus("Downloading to library...")
-    await fetchJson(`/api/create/jobs/${encodeURIComponent(result.id)}/download`, { method: "POST" })
-    setStatus("Downloaded to library.")
-    await onLibraryChanged()
   }
 
   async function importTemplate() {
@@ -243,7 +239,8 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
       body: JSON.stringify({ jobId: templateJobId.trim(), label: templateLabel.trim() }),
     })
     await loadModes()
-    setModeId(response.template.id)
+    setModeId(modeIdForTemplate(response.template))
+    setSelectedTemplateId(response.template.id)
     setStatus(`Imported ${response.template.label}.`)
   }
 
@@ -251,12 +248,14 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     const settings = template.settings
     setSelectedTemplateId(template.id)
     setTemplateType(template.type)
-    if (settings.modeId) setModeId(settings.modeId)
+    setModeId(modeIdForTemplate(template))
     const promptParam = paramAsString(settings.params?.["prompt"])
+    const negativePromptParam =
+      paramAsString(settings.params?.["negativePrompt"] ?? settings.params?.["negative_prompt"]) ?? template.negativePrompt
     const qualityParam = paramAsString(settings.params?.["quality"])
     if (promptParam !== undefined) setPrompt(promptParam)
+    if (negativePromptParam !== undefined) setNegativePrompt(negativePromptParam)
     if (qualityParam !== undefined) setQuality(qualityParam)
-    applyCreationSource(settings.source)
     setStatus(`Using template ${template.label}. Overrides apply only to this run.`)
   }
 
@@ -271,6 +270,16 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
       source: buildReusableTemplateSource(),
       params: buildCreateParamsPayload(),
     }
+    const promptParam = paramAsString(settings.params["prompt"]) || ""
+    const negativePromptParam = paramAsString(settings.params["negativePrompt"]) || ""
+    const qualityParam = paramAsString(settings.params["quality"]) || "1080p-15"
+    const imageParams: CreateParams = { prompt: promptParam }
+    const videoParams: CreateParams = { prompt: promptParam, quality: qualityParam }
+
+    if (negativePromptParam) {
+      imageParams["negativePrompt"] = negativePromptParam
+      videoParams["negativePrompt"] = negativePromptParam
+    }
 
     return {
       label,
@@ -281,23 +290,33 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
           ? [
               {
                 modeId: "custom-image",
-                params: {
-                  prompt: paramAsString(settings.params["prompt"]) || "",
-                },
+                params: imageParams,
               },
               {
                 modeId: "custom-video",
-                params: {
-                  prompt: paramAsString(settings.params["prompt"]) || "",
-                  quality: paramAsString(settings.params["quality"]) || "720p-4",
-                },
+                params: videoParams,
               },
             ]
-          : [settings],
+          : type === "nudify-video"
+            ? [
+                {
+                  modeId: "nudify",
+                  params: {},
+                },
+                {
+                  modeId: "custom-video",
+                  params: videoParams,
+                },
+              ]
+            : [settings],
     }
   }
 
-  function buildCreateSourcePayload(): CreationSource {
+  function buildCreateSourcePayload(): CreationSource | null {
+    if (selectedMode?.source?.required === false) {
+      return null
+    }
+
     if (sourceKind === "catalog") {
       if (!selectedSourceId) throw new Error("Attach a collection image.")
       return { kind: "catalog", itemId: selectedSourceId }
@@ -313,6 +332,7 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
   function buildCreateParamsPayload(): CreateParams {
     const params: CreateParams = {}
     if (promptField) params["prompt"] = prompt.trim()
+    if (promptField && negativePrompt.trim()) params["negativePrompt"] = negativePrompt.trim()
     if (qualityField) params["quality"] = quality
     return params
   }
@@ -333,23 +353,10 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     return null
   }
 
-  function applyCreationSource(source: CreationSource | null | undefined) {
-    if (source?.kind === "url" && typeof source.url === "string") {
-      setSourceKind("url")
-      setSourceUrl(source.url)
-    } else if (source?.kind === "catalog" && typeof source.itemId === "string") {
-      setSourceKind("catalog")
-      setSelectedSourceId(source.itemId)
-    } else if (source?.kind === "upload") {
-      setSourceKind("upload")
-      setUploadMeta("Choose, drop, or paste the source image again.")
-    }
-  }
-
   function resetCreateForm() {
     clearSource()
     setPrompt("")
-    setResult(null)
+    setNegativePrompt("")
     setStatus("Choose a source and mode.")
   }
 
@@ -359,15 +366,6 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     setUploadedName("")
     setUploadMeta("No file selected.")
     setSourceUrl("")
-  }
-
-  function animateCreateResult() {
-    if (!result?.outputUrl) return
-    setSourceKind("url")
-    setSourceUrl(result.outputUrl)
-    setModeId("custom-video")
-    setResult(null)
-    setStatus("Ready to animate this output.")
   }
 
   return {
@@ -389,12 +387,13 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     selectedMode,
     prompt,
     setPrompt,
+    negativePrompt,
+    setNegativePrompt,
     promptField,
     quality,
     setQuality,
     qualityField,
     status,
-    result,
     submitting,
     templateJobId,
     setTemplateJobId,
@@ -412,17 +411,23 @@ export function useCreateStudio(onLibraryChanged: () => Promise<void>) {
     acceptUploadFile,
     clearSource,
     submitCreateJob,
-    downloadCreateJob,
     importTemplate,
     applyTemplate,
     clearTemplate,
     buildTemplateDraft,
     resetCreateForm,
-    animateCreateResult,
   }
 }
 
 function paramAsString(value: CreateParams[string]): string | undefined {
   if (value === undefined || value === null) return undefined
   return String(value)
+}
+
+function modeIdForTemplate(template: CreateTemplate): string {
+  if (template.type === "image") return "custom-image"
+  if (template.type === "combo") return "custom-image-video"
+  if (template.type === "nudify-video") return "nudify-video"
+
+  return "custom-video"
 }

@@ -51,6 +51,7 @@ export type CatalogItem = {
   duration?: number | null
   createdAt?: string | number | null
   createdAtIso?: string | null
+  updatedAt?: string | null
   downloadedAt?: string | null
   downloadError?: string | null
   favorited?: boolean | null
@@ -67,11 +68,13 @@ export type CatalogItem = {
   sourceItemId?: string | null
   sourceUrl?: string | null
   createdLocallyAt?: string | null
+  remoteDeletedAt?: string | null
+  remoteDeleteStatus?: string | null
 }
 
 export type MediaFacetCounts = Partial<Record<"all" | "image" | "video", number>>
 export type StatusFacetCounts = Partial<
-  Record<"all" | "downloaded" | "missing" | "error" | "duplicate" | "unverified" | "favorited", number>
+  Record<"all" | "downloaded" | "missing" | "error" | "duplicate" | "unverified" | "favorited" | "deleted", number>
 >
 
 export type Facets = {
@@ -90,6 +93,22 @@ export type ItemsResponse = {
   catalogUpdatedAt?: string | null
   lastSeenJobId?: string | null
   lastRun?: Record<string, unknown> | null
+}
+
+export type DeleteCatalogItemResponse = {
+  ok: true
+  id: string
+  item: CatalogItem | null
+  keepLocalFiles: boolean
+  deletedLocalFiles: string[]
+  remoteStatus: "deleted" | "already-deleted" | "previously-deleted"
+}
+
+export type FavoriteCatalogItemResponse = {
+  ok: true
+  id: string
+  item: CatalogItem
+  favorited: boolean
 }
 
 export type SyncStatus = {
@@ -124,11 +143,15 @@ export type CreateMode = {
   endpoint?: string
   disabled?: boolean
   disabledReason?: string
+  source?: {
+    required?: boolean
+    acceptedKinds?: string[]
+  }
   fields?: CreateField[]
   acceptedKinds?: string[]
 }
 
-export type CreateTemplateType = "image" | "video" | "combo"
+export type CreateTemplateType = "image" | "video" | "combo" | "nudify-video"
 export type CreateParamValue = string | number | boolean | null | undefined
 export type CreateParams = Record<string, CreateParamValue>
 

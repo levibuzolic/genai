@@ -18,21 +18,43 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
   await writeFixtureCatalog(mediaDir)
   const imported = await importServer(mediaDir)
   const listener = await listenOnRandomPort(imported.server)
+  const baseUrl = `http://127.0.0.1:${listener.port}`
   const page = await browser.newPage({
     viewport: {
       width: 1512,
       height: 828,
     },
   })
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: baseUrl })
 
   try {
-    await page.goto(`http://127.0.0.1:${listener.port}`)
-    await page.waitForSelector(".card", { timeout: 10000 })
+    await page.goto(baseUrl)
+    await page.waitForFunction(
+      () =>
+        document.querySelector("#libraryStatus")?.textContent === "48 of 51 loaded" &&
+        document.querySelectorAll('.card:not([aria-hidden="true"])').length > 0,
+      { timeout: 10000 },
+    )
 
-    assert.equal(await page.locator(".card").count(), 48)
+    const initiallyMountedCards = await page.locator('.card:not([aria-hidden="true"])').count()
+    assert.ok(initiallyMountedCards > 0)
+    assert.ok(initiallyMountedCards < 48, `expected virtualized card count below first page size, got ${initiallyMountedCards}`)
+    assert.equal(await page.locator("#libraryStatus").textContent(), "48 of 51 loaded")
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
+    await page.waitForFunction(() => document.querySelector("#libraryStatus")?.textContent?.includes("51 of 51 loaded"), {
+      timeout: 5000,
+    })
+    await page.evaluate(() => window.scrollTo(0, 0))
+    await page.waitForFunction(() => document.querySelector(".card")?.textContent?.includes("Fixture prompt 0"), { timeout: 5000 })
     assert.equal(await page.locator("#emptyState").count(), 0)
     assert.deepEqual(await visibleTopActions(page), ["Sync", "View", "Settings"])
-    assert.deepEqual(await page.locator(".summaryCard span").allTextContents(), ["Missing", "Unverified", "Favorited", "Orphans"])
+    assert.deepEqual(await page.locator(".summaryCard span").allTextContents(), [
+      "Missing",
+      "Unverified",
+      "Favorited",
+      "Deleted",
+      "Orphans",
+    ])
 
     await page.locator("#templateViewButton").click()
     await page.waitForSelector(".templateBrowser", { timeout: 5000 })
@@ -72,9 +94,22 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
         .first()
         .locator(".cardActions [aria-label]")
         .evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label"))),
-      ["Create", "Details", "Prompt", "Open"],
+      ["Create", "Favorite", "Prompt", "Delete remote"],
     )
-    assert.match(await page.locator('.card[data-media="video"] .cardMeta').first().textContent(), /0:12/)
+    await page.locator(".copyPromptButton").first().click()
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "Fixture prompt 0")
+    const videoCardMeta = await page.locator('.card[data-media="video"] .cardMeta').first().textContent()
+    assert.match(videoCardMeta, /^.+ · unverified$/)
+    assert.doesNotMatch(videoCardMeta, /\bvideo\b/)
+    assert.doesNotMatch(videoCardMeta, /\d+:\d{2}/)
+    assert.equal(await page.locator('.card[data-media="video"] .mediaTypeBadge').first().getAttribute("aria-label"), "Video")
+    assert.equal(
+      await page.locator('.card[data-media="video"][data-media-state="loading"] .pending-preview').first().textContent(),
+      "Rendering video",
+    )
+    assert.equal(await page.locator('.card[data-media="video"][data-media-state="loading"] .mediaPreviewButton').first().isVisible(), true)
+    assert.equal(await page.locator('.card[data-media-state="loading"] .missing-preview').count(), 0)
+    assert.equal(await page.locator('.card[data-media="image"] .mediaTypeBadge').first().getAttribute("aria-label"), "Edit")
 
     const initialMediaFit = await page.evaluate(() => ({
       rootFill: document.querySelector(".media-fit-fill") !== null,
@@ -93,6 +128,86 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.equal(await page.locator("#mediaFitContainItem").getAttribute("aria-checked"), "true")
     await page.keyboard.press("Escape")
 
+    await page.locator('.card[data-media="video"][data-media-state="ready"] .mediaPreviewButton').first().click()
+    await page.waitForSelector("#itemDialog", { timeout: 5000 })
+    const videoDetailFit = await page.evaluate(() => {
+      const preview = document.querySelector("#detailPreview")
+      const media = document.querySelector("#detailPreview video")
+      const panel = document.querySelector(".detailPanel")
+      const nav = document.querySelector(".detailNav")
+      const previewRect = preview?.getBoundingClientRect()
+      const mediaRect = media?.getBoundingClientRect()
+      const panelRect = panel?.getBoundingClientRect()
+      const navRect = nav?.getBoundingClientRect()
+
+      return {
+        dataMedia: preview?.getAttribute("data-media"),
+        mediaAutoPlay: media?.autoplay || false,
+        mediaLoop: media?.loop || false,
+        mediaMuted: media?.muted ?? null,
+        mediaObjectFit: media ? getComputedStyle(media).objectFit : "",
+        mediaPosition: media ? getComputedStyle(media).position : "",
+        mediaWidth: mediaRect?.width || 0,
+        mediaHeight: mediaRect?.height || 0,
+        navInPanel: Boolean(document.querySelector("#detailNextButton")?.closest(".detailPanel")),
+        navTop: navRect?.top || 0,
+        panelWidth: panelRect?.width || 0,
+        panelMiddle: panelRect ? panelRect.top + panelRect.height / 2 : 0,
+        previewWidth: previewRect?.width || 0,
+        previewHeight: previewRect?.height || 0,
+      }
+    })
+    assert.equal(videoDetailFit.dataMedia, "video")
+    assert.equal(videoDetailFit.mediaAutoPlay, true)
+    assert.equal(videoDetailFit.mediaLoop, true)
+    assert.equal(videoDetailFit.mediaMuted, true)
+    assert.equal(videoDetailFit.mediaObjectFit, "contain")
+    assert.equal(videoDetailFit.mediaPosition, "absolute")
+    assert.ok(videoDetailFit.previewWidth > videoDetailFit.panelWidth)
+    assert.ok(Math.abs(videoDetailFit.mediaWidth - videoDetailFit.previewWidth) < 2)
+    assert.ok(Math.abs(videoDetailFit.mediaHeight - videoDetailFit.previewHeight) < 2)
+    assert.equal(videoDetailFit.navInPanel, true)
+    assert.ok(videoDetailFit.navTop > videoDetailFit.panelMiddle)
+    assert.equal(await page.locator("#detailFacts").count(), 0)
+    assert.equal(await page.locator("#detailPreviousButton").isVisible(), true)
+    assert.equal(await page.locator("#detailNextButton").isVisible(), true)
+    const videoDetailPrompt = await page.locator("#detailPrompt").textContent()
+    const videoDetailUrl = page.url()
+    await page.locator("#detailNextButton").click()
+    await page.waitForFunction((prompt) => document.querySelector("#detailPrompt")?.textContent !== prompt, videoDetailPrompt)
+    assert.notEqual(await page.locator("#detailPrompt").textContent(), videoDetailPrompt)
+    assert.notEqual(page.url(), videoDetailUrl)
+    assert.equal(await page.locator("#detailPreviousButton").isEnabled(), true)
+    await page.locator("#detailPreviousButton").click()
+    await page.waitForFunction((prompt) => document.querySelector("#detailPrompt")?.textContent === prompt, videoDetailPrompt)
+    await page.evaluate(() => {
+      const video = document.querySelector("#detailPreview video")
+      if (!(video instanceof HTMLVideoElement)) throw new Error("Expected detail video")
+      video.muted = false
+      video.dispatchEvent(new Event("volumechange", { bubbles: true }))
+    })
+    await page.waitForFunction(() => window.localStorage.getItem("detailVideoMuted") === "false")
+    await page.keyboard.press("Escape")
+    await page.waitForSelector("#itemDialog", { state: "detached", timeout: 5000 })
+    await page.locator('.card[data-media="video"][data-media-state="ready"] .mediaPreviewButton').nth(1).click()
+    await page.waitForSelector("#itemDialog", { timeout: 5000 })
+    assert.equal(
+      await page.evaluate(() => {
+        const video = document.querySelector("#detailPreview video")
+        return video instanceof HTMLVideoElement ? video.muted : null
+      }),
+      false,
+    )
+    await page.evaluate(() => {
+      const video = document.querySelector("#detailPreview video")
+      if (!(video instanceof HTMLVideoElement)) throw new Error("Expected detail video")
+      video.muted = true
+      video.dispatchEvent(new Event("volumechange", { bubbles: true }))
+    })
+    await page.waitForFunction(() => window.localStorage.getItem("detailVideoMuted") === "true")
+    await page.keyboard.press("Escape")
+    await page.waitForSelector("#itemDialog", { state: "detached", timeout: 5000 })
+
     const lazyState = await page.evaluate(() => {
       const media = [...document.querySelectorAll(".preview img, .preview video")]
       return {
@@ -100,7 +215,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
         deferred: media.filter((node) => node.dataset.src).length,
         nativeLazy: media.filter((node) => node.getAttribute("loading") === "lazy").length,
         mountedVideos: document.querySelectorAll(".card video").length,
-        videoPosters: document.querySelectorAll('.card[data-media="video"] .videoPosterButton').length,
+        videoPreviewButtons: document.querySelectorAll('.card[data-media="video"] .mediaPreviewButton').length,
         visibleLoaded: [...document.querySelectorAll(".card")]
           .filter((card) => {
             const rect = card.getBoundingClientRect()
@@ -113,11 +228,19 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.equal(lazyState.deferred, 0)
     assert.ok(lazyState.nativeLazy > 0)
     assert.equal(lazyState.mountedVideos, 0)
-    assert.ok(lazyState.videoPosters > 0)
+    assert.ok(lazyState.videoPreviewButtons > 0)
     assert.equal(lazyState.visibleLoaded, true)
 
-    await page.locator('.card[data-media="video"] .videoPosterButton').first().click()
-    await page.waitForSelector('.card[data-media="video"] video[src]', { timeout: 5000 })
+    await page.locator('.card[data-media="video"] .mediaPreviewButton').first().click()
+    await page.waitForSelector("#detailPreview video[src]", { timeout: 5000 })
+    await page.keyboard.press("Escape")
+    await page.waitForSelector("#itemDialog", { state: "detached", timeout: 5000 })
+
+    await page.locator('.card[data-media="video"][data-media-state="loading"] .mediaPreviewButton').first().click()
+    await page.waitForSelector('#detailPreview[data-media="missing"]', { timeout: 5000 })
+    assert.equal(await page.locator("#detailPrompt").textContent(), "Fixture prompt 4")
+    await page.keyboard.press("Escape")
+    await page.waitForSelector("#itemDialog", { state: "detached", timeout: 5000 })
 
     await page.locator("#createViewButton").click()
     await page.waitForSelector(".createOverlay #createArea:not([hidden])", { timeout: 5000 })
@@ -125,12 +248,20 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
       const overlay = document.querySelector(".createOverlay")
       const backdrop = document.querySelector(".createOverlayBackdrop")
       const panel = document.querySelector("#createArea")
+      const controlPanel = document.querySelector(".createPanel")
+      const historyPanel = document.querySelector(".creationHistory")
       const panelRect = panel?.getBoundingClientRect()
+      const controlRect = controlPanel?.getBoundingClientRect()
+      const historyRect = historyPanel?.getBoundingClientRect()
       return {
         overlayPosition: overlay ? getComputedStyle(overlay).position : "",
         backdropFilter: backdrop ? getComputedStyle(backdrop).backdropFilter || getComputedStyle(backdrop).webkitBackdropFilter : "",
         panelWidth: panelRect?.width || 0,
         panelHeight: panelRect?.height || 0,
+        controlWidth: controlRect?.width || 0,
+        historyWidth: historyRect?.width || 0,
+        resultPanelCount: document.querySelectorAll(".createResult").length,
+        negativePromptVisible: document.querySelector("#createNegativePromptInput") !== null,
         viewportWidth: innerWidth,
         viewportHeight: innerHeight,
       }
@@ -139,14 +270,17 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.match(createOverlay.backdropFilter, /blur/)
     assert.ok(createOverlay.panelWidth > createOverlay.viewportWidth * 0.9)
     assert.ok(createOverlay.panelHeight > createOverlay.viewportHeight * 0.9)
+    assert.ok(createOverlay.historyWidth > createOverlay.controlWidth)
+    assert.equal(createOverlay.resultPanelCount, 0)
+    assert.equal(createOverlay.negativePromptVisible, true)
     assert.equal(await page.locator("#libraryArea").isHidden(), false)
     assert.equal(await page.locator("#createModeSelect").isVisible(), true)
     assert.equal(await page.locator("#createCatalogSelect").count(), 0)
     await page.locator('[data-source-kind="url"]').click()
     await page.locator("#createUrlInput").fill("https://assets.example/source.png")
-    assert.equal(await page.locator('#createSourcePreview img[src="https://assets.example/source.png"]').count(), 1)
-    await page.locator("#createClearSourceButton").click()
-    assert.equal(await page.locator("#createSourcePreview img").count(), 0)
+    assert.equal(await page.locator('#createSelectedUrlPreview img[src="https://assets.example/source.png"]').count(), 1)
+    await page.getByRole("button", { name: "Clear selected source" }).click()
+    assert.equal(await page.locator("#createSelectedUrlPreview").count(), 0)
     await page.locator('[data-source-kind="upload"]').click()
     await page.evaluate(() => {
       const file = new File([new Uint8Array([137, 80, 78, 71])], "drop.png", { type: "image/png" })
@@ -161,7 +295,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
       )
     })
     await page.waitForFunction(() => document.querySelector("#createUploadMeta")?.textContent.includes("Dropped drop.png"))
-    assert.equal(await page.locator("#createSourcePreview img").count(), 1)
+    assert.equal(await page.locator("#createSelectedUploadPreview img").count(), 1)
     await page.evaluate(() => {
       const file = new File([new Uint8Array([137, 80, 78, 71])], "paste.png", { type: "image/png" })
       const data = new DataTransfer()
@@ -199,44 +333,65 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
 
     await page.locator('.card[data-media="image"] .cardCreateButton').first().click()
     await page.waitForSelector(".createOverlay #createArea", { timeout: 5000 })
-    assert.equal(await page.locator("#createSourcePreview img").count(), 1)
-    assert.equal(await page.locator("#createClearSourceButton").isVisible(), true)
-    await page.locator("#createClearSourceButton").click()
-    assert.equal(await page.locator("#createSourcePreview img").count(), 0)
+    assert.match(await page.locator("#createModeSelect").textContent(), /Custom Video/)
+    assert.equal(await page.locator("#createPromptInput").inputValue(), "")
+    assert.equal(await page.locator("#createNudifyToggleLabel").isVisible(), true)
+    await page.locator("#createNudifyToggleLabel").click()
+    assert.equal(await page.locator("#createNudifyToggle").isChecked(), true)
+    assert.equal(await page.locator("#createSelectedCatalogPreview img").count(), 1)
+    assert.equal(await page.getByRole("button", { name: "Clear selected source" }).isVisible(), true)
+    await page.getByRole("button", { name: "Clear selected source" }).click()
+    assert.equal(await page.locator("#createSelectedCatalogPreview").count(), 0)
     await page.locator("#hideCreateButton").click()
     await page.waitForSelector(".createOverlay", { state: "detached", timeout: 5000 })
+
+    await page.locator("#statusSelect").click()
+    await page.getByRole("option", { name: /Deleted/ }).click()
+    await page.waitForURL(/status=deleted/, { timeout: 5000 })
+    assert.equal(new URL(page.url()).searchParams.get("status"), "deleted")
+    assert.equal(await page.locator(".card").count(), 1)
+    assert.equal(await page.locator('.card[data-remote-deleted="true"].is-deleted').count(), 1)
+    assert.equal(await page.locator(".deletedMediaBadge").isVisible(), true)
 
     await page.locator("#statusSelect").click()
     await page.getByRole("option", { name: /Missing/ }).click()
     await page.waitForURL(/status=missing/, { timeout: 5000 })
     assert.equal(new URL(page.url()).searchParams.get("status"), "missing")
     await page.reload()
-    await page.waitForSelector(".card", { timeout: 10000 })
+    await page.waitForFunction(() => document.querySelectorAll(".card").length === 1, { timeout: 10000 })
     assert.match(await page.locator("#statusSelect").textContent(), /Missing/)
     assert.equal(await page.locator(".card").count(), 1)
 
-    await page.locator(".detailsButton").first().click()
+    await page.locator(".mediaPreviewButton").first().click()
     await page.waitForSelector("#itemDialog", { timeout: 5000 })
     assert.equal(await page.locator("#detailCopyPromptButton").isVisible(), true)
     assert.equal(await page.locator("#detailCopyIdButton").isVisible(), true)
+    await page.locator("#detailCopyPromptButton").click()
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "Fixture prompt 1")
+    assert.equal(await page.locator("#detailPreviousButton").isEnabled(), false)
+    assert.equal(await page.locator("#detailNextButton").isEnabled(), false)
     const detailLayout = await page.evaluate(() => {
       const title = document.querySelector("#detailTitle")
       const body = document.querySelector(".dialogBody")
       const preview = document.querySelector("#detailPreview")
       const panel = document.querySelector(".detailPanel")
+      const panelContent = document.querySelector(".detailPanelContent")
       const previewRect = preview?.getBoundingClientRect()
 
       return {
         bodyOverflow: body ? getComputedStyle(body).overflow : "",
         panelOverflowY: panel ? getComputedStyle(panel).overflowY : "",
+        panelContentOverflowY: panelContent ? getComputedStyle(panelContent).overflowY : "",
         previewWidth: previewRect?.width || 0,
         previewHeight: previewRect?.height || 0,
         titleVisible: title ? getComputedStyle(title).position !== "absolute" : true,
       }
     })
     assert.equal(detailLayout.bodyOverflow, "hidden")
-    assert.equal(detailLayout.panelOverflowY, "auto")
-    assert.ok(Math.abs(detailLayout.previewWidth - detailLayout.previewHeight) < 2)
+    assert.equal(detailLayout.panelOverflowY, "hidden")
+    assert.equal(detailLayout.panelContentOverflowY, "auto")
+    assert.ok(detailLayout.previewWidth > 0)
+    assert.ok(detailLayout.previewHeight > 0)
     assert.equal(detailLayout.titleVisible, false)
 
     const mobilePage = await browser.newPage({
@@ -250,8 +405,10 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     })
 
     try {
-      await mobilePage.goto(`http://127.0.0.1:${listener.port}`)
-      await mobilePage.waitForSelector(".card", { timeout: 10000 })
+      await mobilePage.goto(baseUrl)
+      await mobilePage.waitForFunction(() => document.querySelectorAll('.media-card:not([aria-hidden="true"])').length > 0, {
+        timeout: 10000,
+      })
 
       const mobileLayout = await mobilePage.evaluate(() => {
         const firstCard = document.querySelector(".card")
@@ -273,11 +430,29 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
       assert.equal(mobileLayout.pageSizeRendered, false)
       assert.equal(mobileLayout.viewToggleRendered, false)
 
-      await mobilePage.locator(".detailsButton").first().click()
+      await mobilePage.locator('.card[data-media="video"][data-media-state="ready"] .mediaPreviewButton').first().click()
       await mobilePage.waitForSelector("#itemDialog", { timeout: 5000 })
       const mobileDialog = await mobilePage.locator("#itemDialog").boundingBox()
       assert.ok(mobileDialog)
       assert.ok(mobileDialog.width >= 370, `expected mobile dialog to fill viewport, got ${mobileDialog.width}px`)
+      const mobileDetailControls = await mobilePage.evaluate(() => {
+        const preview = document.querySelector("#detailPreview")
+        const close = document.querySelector("#detailCloseButton")
+        const panel = document.querySelector(".detailPanel")
+        const previewRect = preview?.getBoundingClientRect()
+        const closeRect = close?.getBoundingClientRect()
+        const panelRect = panel?.getBoundingClientRect()
+
+        return {
+          closeInPanel: Boolean(close?.closest(".detailPanel")),
+          closeTop: closeRect?.top || 0,
+          panelTop: panelRect?.top || 0,
+          previewBottom: previewRect?.bottom || 0,
+        }
+      })
+      assert.equal(mobileDetailControls.closeInPanel, true)
+      assert.ok(mobileDetailControls.closeTop >= mobileDetailControls.panelTop)
+      assert.ok(mobileDetailControls.closeTop >= mobileDetailControls.previewBottom)
     } finally {
       await mobilePage.close().catch(() => {})
     }
@@ -302,18 +477,21 @@ async function launchChromeOrSkip(t) {
 
 async function writeFixtureCatalog(mediaDir) {
   const items = []
+  const createdAtBase = Math.floor(Date.now() / 1000)
 
   for (let index = 0; index < 52; index += 1) {
     const id = uuidForIndex(index)
     const isMissing = index === 1
-    const isVideo = index > 1 && index % 3 === 0
+    const isPending = index === 4
+    const isDeleted = index === 8
+    const isVideo = isPending || (index > 1 && index % 3 === 0)
     const extension = isVideo ? "mp4" : "png"
     const type = isVideo ? "video" : "edit"
     const date = "2026-05-27"
     const localFile = `${date}/${date}_${type}_${id}.${extension}`
-    const thumbnailFile = isVideo && !isMissing ? `_thumbnails/${date}/${date}_${type}_${id}.jpg` : null
+    const thumbnailFile = isVideo && !isMissing && !isPending ? `_thumbnails/${date}/${date}_${type}_${id}.jpg` : null
 
-    if (!isMissing) {
+    if (!isMissing && !isPending) {
       await mkdir(path.join(mediaDir, date), { recursive: true })
       await writeFile(path.join(mediaDir, localFile), isVideo ? new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112]) : PNG_BYTES)
       if (thumbnailFile) {
@@ -325,17 +503,19 @@ async function writeFixtureCatalog(mediaDir) {
     items.push({
       id,
       type,
-      status: "done",
-      outputUrl: `https://assets.example/${id}.${extension}`,
-      localFile: isMissing ? null : localFile,
-      size: isMissing ? null : isVideo ? 8 : PNG_BYTES.byteLength,
+      status: isPending ? "processing" : "done",
+      outputUrl: isMissing || isPending ? null : `https://assets.example/${id}.${extension}`,
+      localFile: isMissing || isPending ? null : localFile,
+      size: isMissing || isPending ? null : isVideo ? 8 : PNG_BYTES.byteLength,
       duration: isVideo ? 12 : null,
       thumbnailFile,
       thumbnailError: null,
-      createdAt: 1779769900 - index,
-      createdAtIso: new Date((1779769900 - index) * 1000).toISOString(),
+      createdAt: createdAtBase - index,
+      createdAtIso: new Date((createdAtBase - index) * 1000).toISOString(),
       prompt: `Fixture prompt ${index}`,
       favorited: index === 5,
+      remoteDeletedAt: isDeleted ? new Date((createdAtBase - index) * 1000).toISOString() : null,
+      remoteDeleteStatus: isDeleted ? "deleted" : null,
       sha256: null,
       verifiedAt: null,
     })

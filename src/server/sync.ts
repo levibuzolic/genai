@@ -2,6 +2,7 @@ import path from "node:path"
 
 import { fetchJobsPage } from "./api-client.ts"
 import { hasApiAuth } from "./auth-state.ts"
+import { listCreationJobs } from "./catalog-db.ts"
 import {
   applyCatalogThumbnail,
   applyDuplicateMetadata,
@@ -20,6 +21,7 @@ import {
   toCatalogItem,
 } from "./catalog.ts"
 import { AUTO_SYNC_ENABLED, AUTO_SYNC_INTERVAL_MS, AUTO_SYNC_STARTUP_DELAY_MS, MEDIA_DIR, PAGE_LIMIT, SYNC_DELAY_MS } from "./config.ts"
+import { isActiveCreationStatus } from "./create-shared.ts"
 import type { Catalog, CatalogItem, GeneratePornJob, OrphanFile, SyncError } from "./types.ts"
 import { fileExists, hashFile, sleep } from "./utils.ts"
 
@@ -54,6 +56,9 @@ type AutoSyncState = {
 }
 
 type CatalogDownloadMode = "download-missing" | "retry-errors"
+
+const FULL_COVERAGE_SYNC_INTERVAL_MS = 60 * 60 * 1000
+const EXPIRED_NO_MEDIA_ITEM_MS = 60 * 60 * 1000
 
 export const syncState: SyncState = {
   running: false,
@@ -117,7 +122,13 @@ export function resetSyncRuntimeState(): void {
   })
 }
 
-export async function startSync({ incremental }: { incremental: boolean }): Promise<void> {
+export async function startSync({
+  incremental,
+  forceFullCoverageIfMissing = true,
+}: {
+  incremental: boolean
+  forceFullCoverageIfMissing?: boolean
+}): Promise<void> {
   resetSyncState({
     mode: incremental ? "incremental" : "full",
     message: incremental ? "Starting incremental sync..." : "Starting full sync...",
@@ -125,13 +136,21 @@ export async function startSync({ incremental }: { incremental: boolean }): Prom
   await createCatalogBackup(incremental ? "before-incremental-sync" : "before-full-sync")
 
   const catalog = await loadCatalog()
+  const startedAtMs = Date.now()
+  const previousFullCoverageAt = lastFullCoverageAt(catalog)
+  const fullCoverageScan =
+    !incremental || shouldRunFullCoverageScan(previousFullCoverageAt, startedAtMs, { forceIfMissing: forceFullCoverageIfMissing })
+  const prunedExpired = pruneExpiredNoMediaItems(catalog, startedAtMs)
   const itemById = new Map(catalog.items.map((item) => [item.id, item]))
   const downloadedJobIds = new Set(catalog.downloadedJobIds || [])
   const downloadQueue: GeneratePornJob[] = []
   const queuedJobIds = new Set<string>()
-  const previousLastSeenJobId = incremental ? catalog.lastSeenJobId : null
+  const previousLastSeenJobId = incremental && !fullCoverageScan ? catalog.lastSeenJobId : null
+  const pendingKnownJobIds = incremental && !fullCoverageScan ? getPendingKnownJobIds(catalog) : new Set<string>()
+  const seenApiJobIds = new Set<string>()
   let newestBoundaryJobId: string | null = null
   let stoppedAtPrevious = false
+  let reachedApiEnd = false
 
   for (const job of getCatalogDownloadQueue(catalog.items, { includeErrors: true })) {
     enqueueDownload(downloadQueue, queuedJobIds, job)
@@ -150,17 +169,28 @@ export async function startSync({ incremental }: { incremental: boolean }): Prom
 
       if (jobs.length === 0) {
         syncState.message = "Reached the end of the API."
+        reachedApiEnd = true
         break
       }
 
       for (const job of jobs) {
         syncState.scanned += 1
+        seenApiJobIds.add(job.id)
+        pendingKnownJobIds.delete(job.id)
 
         const existing = itemById.get(job.id)
         const merged = toCatalogItem(job, existing)
+        if (isExpiredNoMediaItem(merged, startedAtMs)) {
+          itemById.delete(job.id)
+          downloadedJobIds.delete(job.id)
+          syncState.skipped += 1
+          continue
+        }
         itemById.set(job.id, merged)
         const isBoundaryJob = isIncrementalBoundaryJob(job)
-        const reachedPreviousBoundary = Boolean(previousLastSeenJobId && job.id === previousLastSeenJobId && isBoundaryJob)
+        const reachedPreviousBoundary = Boolean(
+          previousLastSeenJobId && job.id === previousLastSeenJobId && isBoundaryJob && pendingKnownJobIds.size === 0,
+        )
 
         if (!newestBoundaryJobId && isBoundaryJob) {
           newestBoundaryJobId = job.id
@@ -222,8 +252,15 @@ export async function startSync({ incremental }: { incremental: boolean }): Prom
   })
 
   const cancelled = Boolean(syncState.cancelRequested)
+  const completedFullCoverage = !cancelled && hasApiAuth() && reachedApiEnd
+  const finishedAt = new Date().toISOString()
 
-  if (!cancelled && syncState.currentPage >= PAGE_LIMIT && !stoppedAtPrevious) {
+  let remoteDeleted = 0
+  if (completedFullCoverage) {
+    remoteDeleted = markMissingApiItemsDeleted(itemById, seenApiJobIds, finishedAt)
+  }
+
+  if (!cancelled && syncState.currentPage >= PAGE_LIMIT && !stoppedAtPrevious && !reachedApiEnd) {
     syncState.errors.push({
       message: `Stopped after page limit ${PAGE_LIMIT}; increase GENERATEPORN_PAGE_LIMIT if needed.`,
     })
@@ -233,9 +270,13 @@ export async function startSync({ incremental }: { incremental: boolean }): Prom
   catalog.downloadedJobIds = Array.from(downloadedJobIds).slice(-10000)
   catalog.lastSeenJobId = newestBoundaryJobId || catalog.lastSeenJobId
   catalog.updatedAt = new Date().toISOString()
-  const finishedAt = new Date().toISOString()
   catalog.lastRun = {
     mode: syncState.mode,
+    fullCoverageScan,
+    fullCoverageCompleted: completedFullCoverage,
+    fullCoverageCompletedAt: completedFullCoverage ? finishedAt : previousFullCoverageAt,
+    prunedExpiredNoMediaItems: prunedExpired,
+    remoteDeleted,
     scanned: syncState.scanned,
     downloaded: syncState.downloaded,
     skipped: syncState.skipped,
@@ -253,6 +294,115 @@ export async function startSync({ incremental }: { incremental: boolean }): Prom
       ? `Finished with ${syncState.errors.length} error${syncState.errors.length === 1 ? "" : "s"}.`
       : `Finished. Downloaded ${syncState.downloaded} new file${syncState.downloaded === 1 ? "" : "s"}.`,
   })
+}
+
+function getPendingKnownJobIds(catalog: Catalog): Set<string> {
+  const ids = new Set<string>()
+
+  for (const item of catalog.items) {
+    if (item.id && !isIncrementalBoundaryJob(jobFromCatalogItem(item))) {
+      ids.add(item.id)
+    }
+  }
+
+  for (const creation of listCreationJobs({ status: "all", limit: 500 })) {
+    if (!creation.jobId || creation.downloadedItemId) continue
+
+    if (isActiveCreationStatus(creation.status) || (creation.status === "done" && creation.outputUrl)) {
+      ids.add(creation.jobId)
+    }
+  }
+
+  return ids
+}
+
+function shouldRunFullCoverageScan(
+  previousFullCoverageAt: string | null,
+  now: number,
+  { forceIfMissing }: { forceIfMissing: boolean },
+): boolean {
+  if (!previousFullCoverageAt) return forceIfMissing
+
+  const previous = timestampMs(previousFullCoverageAt)
+  return previous === null || now - previous >= FULL_COVERAGE_SYNC_INTERVAL_MS
+}
+
+function lastFullCoverageAt(catalog: Catalog): string | null {
+  const value = catalog.lastRun?.["fullCoverageCompletedAt"] ?? catalog.lastRun?.["fullScanCompletedAt"]
+  if (typeof value === "string" && timestampMs(value) !== null) return value
+
+  if (catalog.lastRun?.["mode"] === "full" && typeof catalog.lastRun["finishedAt"] === "string") {
+    return catalog.lastRun["finishedAt"]
+  }
+
+  return null
+}
+
+function pruneExpiredNoMediaItems(catalog: Catalog, now: number): number {
+  const before = catalog.items.length
+  const removedIds = new Set<string>()
+  catalog.items = catalog.items.filter((item) => {
+    const expired = isExpiredNoMediaItem(item, now)
+    if (expired) removedIds.add(item.id)
+    return !expired
+  })
+
+  if (removedIds.size > 0) {
+    catalog.downloadedJobIds = (catalog.downloadedJobIds || []).filter((id) => !removedIds.has(id))
+  }
+
+  return before - catalog.items.length
+}
+
+function isExpiredNoMediaItem(item: CatalogItem, now: number): boolean {
+  if (item.localFile || item.outputUrl) return false
+
+  const createdAt = itemStartedAtMs(item)
+  return createdAt !== null && now - createdAt >= EXPIRED_NO_MEDIA_ITEM_MS
+}
+
+function markMissingApiItemsDeleted(itemById: Map<string, CatalogItem>, seenApiJobIds: Set<string>, deletedAt: string): number {
+  let deleted = 0
+
+  for (const item of itemById.values()) {
+    if (!item.id || seenApiJobIds.has(item.id) || item.remoteDeletedAt || !hasMediaResult(item)) continue
+
+    item.remoteDeletedAt = deletedAt
+    item.remoteDeleteStatus = "deleted"
+    deleted += 1
+  }
+
+  return deleted
+}
+
+function hasMediaResult(item: CatalogItem): boolean {
+  return Boolean(item.localFile || item.outputUrl)
+}
+
+function itemStartedAtMs(item: CatalogItem): number | null {
+  for (const value of [item.createdAtIso, item.createdLocallyAt, item.createdAt, item.updatedAt]) {
+    const timestamp = timestampMs(value)
+    if (timestamp !== null) return timestamp
+  }
+
+  return null
+}
+
+function timestampMs(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return null
+    return value > 1_000_000_000_000 ? value : value * 1000
+  }
+
+  if (typeof value !== "string") return null
+
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) return numeric > 1_000_000_000_000 ? numeric : numeric * 1000
+
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 export async function startCatalogDownload({ mode }: { mode: CatalogDownloadMode }): Promise<void> {

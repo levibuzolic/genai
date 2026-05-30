@@ -3,7 +3,14 @@ import path from "node:path"
 
 import { isImageItem, loadCatalog } from "./catalog.ts"
 import { MEDIA_DIR } from "./config.ts"
-import { CREATE_IMAGE_ACCEPT, CREATE_VIDEO_QUALITY_OPTIONS } from "./create-constants.ts"
+import {
+  CREATE_IMAGE_ACCEPT,
+  CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
+  CREATE_IMAGE_DEFAULT_MODEL_ID,
+  CREATE_VIDEO_QUALITY_OPTIONS,
+  CREATE_VIDEO_DEFAULT_DURATION,
+  CREATE_VIDEO_DEFAULT_RESOLUTION,
+} from "./create-constants.ts"
 import { assertCreateTextAllowed } from "./create-shared.ts"
 import { redactDataUrlFields } from "./redaction.ts"
 import type { CatalogItem, CreateMode, CreateParams, CreateSource, GeneratePornJob, ResolvedCreateSource } from "./types.ts"
@@ -28,7 +35,7 @@ export type PublicCreateJob = {
 
 export function buildCreateApiRequest(
   mode: CreateMode,
-  source: ResolvedCreateSource,
+  source: ResolvedCreateSource | null,
   params: CreateParams = {},
 ): { body: Record<string, unknown>; publicRequest: Record<string, unknown> } {
   const body: Record<string, unknown> = {}
@@ -39,13 +46,29 @@ export function buildCreateApiRequest(
   }
   assertCreateTextAllowed(prompt, "Prompt")
 
+  body["prompt"] = prompt.trim()
+
+  if (mode.endpoint === "text2image") {
+    body["modelId"] = params["modelId"] || mode.defaults?.["modelId"] || CREATE_IMAGE_DEFAULT_MODEL_ID
+    body["aspectRatio"] = getImageAspectRatio(params, mode)
+    if (params["seed"] !== undefined && params["seed"] !== "") {
+      body["seed"] = params["seed"]
+    }
+    return {
+      body,
+      publicRequest: redactDataUrlFields(body),
+    }
+  }
+
+  if (!source) {
+    throw new Error("Source is required.")
+  }
+
   if (source.isDataUrl) {
     body["image_base64"] = source.value
   } else {
     body["input_url"] = source.value
   }
-
-  body["prompt"] = prompt.trim()
 
   if (mode.endpoint === "video") {
     const quality = getVideoQuality(params, mode)
@@ -69,11 +92,22 @@ export function buildCreateApiRequest(
   }
 }
 
+function getImageAspectRatio(params: CreateParams, mode: CreateMode): string {
+  const aspectRatio = String(params["aspectRatio"] || params["quality"] || mode.defaults?.["aspectRatio"] || "3:4")
+  const allowed = CREATE_IMAGE_ASPECT_RATIO_OPTIONS.some((entry) => entry.value === aspectRatio)
+
+  if (!allowed) {
+    throw new Error("Unsupported image aspect ratio.")
+  }
+
+  return aspectRatio
+}
+
 function getVideoQuality(params: CreateParams, mode: CreateMode): { resolution: string; duration: number } {
   if (mode.kind === "template") {
     return {
-      resolution: mode.fixed?.resolution || "720p",
-      duration: Number(mode.fixed?.duration || 4),
+      resolution: mode.fixed?.resolution || CREATE_VIDEO_DEFAULT_RESOLUTION,
+      duration: Number(mode.fixed?.duration || CREATE_VIDEO_DEFAULT_DURATION),
     }
   }
 
@@ -87,8 +121,8 @@ function getVideoQuality(params: CreateParams, mode: CreateMode): { resolution: 
     }
   }
 
-  const resolution = String(params["resolution"] || mode.defaults?.["resolution"] || "720p")
-  const duration = Number(params["duration"] || mode.defaults?.["duration"] || 4)
+  const resolution = String(params["resolution"] || mode.defaults?.["resolution"] || CREATE_VIDEO_DEFAULT_RESOLUTION)
+  const duration = Number(params["duration"] || mode.defaults?.["duration"] || CREATE_VIDEO_DEFAULT_DURATION)
   const allowed = CREATE_VIDEO_QUALITY_OPTIONS.some((entry) => entry.resolution === resolution && entry.duration === duration)
 
   if (!allowed) {

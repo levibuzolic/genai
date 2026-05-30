@@ -4,3 +4,5 @@ node_modules/
 .pnpm-store/
 /media/
 /output/
+/public/
+/dist/

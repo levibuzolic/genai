@@ -11,9 +11,11 @@ import {
   importServer,
   jsonResponse,
   listenOnRandomPort,
+  PNG_BYTES,
   postJson,
   readCatalog,
   readCatalogFromDbFile,
+  requestJson,
   requestRaw,
   writeCatalog,
 } from "./helpers/server.js"
@@ -158,7 +160,7 @@ test("download cancel endpoint stops between media downloads", async () => {
 
     if (href === "https://assets.example/second.png") {
       secondRequests += 1
-      return new Response(new Uint8Array([2]), {
+      return new Response(PNG_BYTES, {
         status: 200,
         headers: {
           "content-type": "image/png",
@@ -182,7 +184,7 @@ test("download cancel endpoint stops between media downloads", async () => {
     assert.equal(cancelResponse.body.ok, true)
 
     firstDownload.resolve(
-      new Response(new Uint8Array([7, 8, 9]), {
+      new Response(PNG_BYTES, {
         status: 200,
         headers: {
           "content-type": "image/png",
@@ -200,7 +202,7 @@ test("download cancel endpoint stops between media downloads", async () => {
     assert.equal(imported.syncState.downloaded, 1)
     assert.equal(secondRequests, 0)
     assert.equal(catalog.lastRun.cancelled, true)
-    assert.equal(firstItem.localFile, `2026-05-26/2026-05-26_edit_${firstId}.png`)
+    assert.equal(firstItem.localFile, `2026-05-26/2026-05-26_edit_${firstId}.jpg`)
     assert.equal(secondItem.localFile, undefined)
     assert.equal(existsSync(path.join(mediaDir, firstItem.localFile)), true)
   } finally {
@@ -239,6 +241,195 @@ test("catalog item helpers are exported at module scope", async () => {
     favorited: undefined,
     error: undefined,
   })
+})
+
+test("item delete endpoint deletes upstream job and keeps local files by default", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-remote-delete-keep-"))
+  const id = "12121212-1212-4121-8121-121212121212"
+  const localFile = `2026-05-26/2026-05-26_edit_${id}.jpg`
+  const thumbnailFile = `_thumbnails/2026-05-26/2026-05-26_video_${id}.jpg`
+  await mkdir(path.dirname(path.join(mediaDir, localFile)), { recursive: true })
+  await mkdir(path.dirname(path.join(mediaDir, thumbnailFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, localFile), PNG_BYTES)
+  await writeFile(path.join(mediaDir, thumbnailFile), PNG_BYTES)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/delete-keep.png",
+        localFile,
+        thumbnailFile,
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+
+  const originalFetch = globalThis.fetch
+  let deleteRequests = 0
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), `https://api.generateporn.ai/api/jobs/${id}`)
+    assert.equal(options.method, "DELETE")
+    deleteRequests += 1
+    return new Response(null, { status: 204 })
+  }
+
+  let listener = null
+
+  try {
+    const imported = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    listener = await listenOnRandomPort(imported.server)
+    const response = await requestJson(listener.port, `/api/items/${id}`, "DELETE")
+    const catalog = await readCatalog(mediaDir)
+    const item = catalog.items.find((entry) => entry.id === id)
+    const defaultView = await imported.getItems(new URLSearchParams())
+    const deletedView = await imported.getItems(new URLSearchParams("status=deleted"))
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.body.ok, true)
+    assert.equal(response.body.keepLocalFiles, true)
+    assert.equal(response.body.remoteStatus, "deleted")
+    assert.equal(deleteRequests, 1)
+    assert.equal(item.remoteDeleteStatus, "deleted")
+    assert.equal(typeof item.remoteDeletedAt, "string")
+    assert.equal(existsSync(path.join(mediaDir, localFile)), true)
+    assert.equal(existsSync(path.join(mediaDir, thumbnailFile)), true)
+    assert.deepEqual(catalog.downloadedJobIds, [id])
+    assert.equal(defaultView.total, 0)
+    assert.equal(defaultView.facets.status?.all, 0)
+    assert.equal(defaultView.facets.status?.deleted, 1)
+    assert.deepEqual(
+      deletedView.items.map((entry) => entry.id),
+      [id],
+    )
+    assert.equal(deletedView.total, 1)
+  } finally {
+    if (listener) {
+      await listener.close()
+    }
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("item delete endpoint can remove local files and catalog entry", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-remote-delete-local-"))
+  const id = "34343434-3434-4343-8343-343434343434"
+  const localFile = `2026-05-26/2026-05-26_video_${id}.mp4`
+  const thumbnailFile = `_thumbnails/2026-05-26/2026-05-26_video_${id}.jpg`
+  await mkdir(path.dirname(path.join(mediaDir, localFile)), { recursive: true })
+  await mkdir(path.dirname(path.join(mediaDir, thumbnailFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, localFile), new Uint8Array([0, 0, 0, 24]))
+  await writeFile(path.join(mediaDir, thumbnailFile), PNG_BYTES)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/delete-local.mp4",
+        localFile,
+        thumbnailFile,
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), `https://api.generateporn.ai/api/jobs/${id}`)
+    assert.equal(options.method, "DELETE")
+    return jsonResponse({ ok: true })
+  }
+
+  let listener = null
+
+  try {
+    const imported = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    listener = await listenOnRandomPort(imported.server)
+    const response = await requestJson(listener.port, `/api/items/${id}`, "DELETE", { keepLocalFiles: false })
+    const catalog = await readCatalog(mediaDir)
+
+    assert.equal(response.statusCode, 200)
+    assert.equal(response.body.ok, true)
+    assert.equal(response.body.item, null)
+    assert.equal(response.body.keepLocalFiles, false)
+    assert.deepEqual(response.body.deletedLocalFiles.toSorted(), [localFile, thumbnailFile].toSorted())
+    assert.equal(
+      catalog.items.some((entry) => entry.id === id),
+      false,
+    )
+    assert.deepEqual(catalog.downloadedJobIds, [])
+    assert.equal(existsSync(path.join(mediaDir, localFile)), false)
+    assert.equal(existsSync(path.join(mediaDir, thumbnailFile)), false)
+  } finally {
+    if (listener) {
+      await listener.close()
+    }
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("item favorite endpoint toggles upstream favorite state and updates catalog", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-favorite-"))
+  const id = "56565656-5656-4565-8565-565656565656"
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/favorite.png",
+        favorited: false,
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [],
+    lastSeenJobId: id,
+  })
+
+  const originalFetch = globalThis.fetch
+  const methods = []
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), `https://api.generateporn.ai/api/jobs/${id}/favorite`)
+    methods.push(options.method)
+    return jsonResponse({ ok: true })
+  }
+
+  let listener = null
+
+  try {
+    const imported = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    listener = await listenOnRandomPort(imported.server)
+
+    const favoriteResponse = await requestJson(listener.port, `/api/items/${id}/favorite`, "POST")
+    assert.equal(favoriteResponse.statusCode, 200)
+    assert.equal(favoriteResponse.body.favorited, true)
+    assert.equal(favoriteResponse.body.item.favorited, true)
+    assert.equal((await readCatalog(mediaDir)).items[0].favorited, true)
+
+    const unfavoriteResponse = await requestJson(listener.port, `/api/items/${id}/favorite`, "DELETE")
+    assert.equal(unfavoriteResponse.statusCode, 200)
+    assert.equal(unfavoriteResponse.body.favorited, false)
+    assert.equal(unfavoriteResponse.body.item.favorited, false)
+    assert.equal((await readCatalog(mediaDir)).items[0].favorited, false)
+    assert.deepEqual(methods, ["POST", "DELETE"])
+  } finally {
+    if (listener) {
+      await listener.close()
+    }
+    globalThis.fetch = originalFetch
+  }
 })
 
 test("catalog download retries failed media and clears old error", async () => {
@@ -482,6 +673,69 @@ test("library verification hashes files, marks duplicate catalog items, and reco
   assert.equal(duplicateView.total, 2)
   assert.equal(duplicateView.facets.orphanFiles, 1)
   assert.equal(unverifiedView.total, 0)
+})
+
+test("item index hides rendering media after one hour without removing catalog details", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-stale-rendering-"))
+  const staleId = "15151515-1515-4151-8151-151515151515"
+  const recentId = "16161616-1616-4161-8161-161616161616"
+  const doneId = "17171717-1717-4171-8171-171717171717"
+  const now = Date.now()
+
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: staleId,
+        type: "video",
+        status: "processing",
+        prompt: "stale rendering",
+        createdAtIso: new Date(now - 61 * 60 * 1000).toISOString(),
+      },
+      {
+        id: recentId,
+        type: "video",
+        status: "processing",
+        prompt: "recent rendering",
+        createdAtIso: new Date(now - 5 * 60 * 1000).toISOString(),
+      },
+      {
+        id: doneId,
+        type: "edit",
+        status: "done",
+        prompt: "finished media",
+        outputUrl: "https://assets.example/done.png",
+        localFile: "2026-05-27/2026-05-27_edit_17171717-1717-4171-8171-171717171717.png",
+        createdAt: Math.floor(now / 1000),
+      },
+    ],
+    downloadedJobIds: [doneId],
+    lastSeenJobId: staleId,
+  })
+
+  const server = await importServer(mediaDir)
+  let listener = null
+
+  try {
+    listener = await listenOnRandomPort(server.server)
+
+    const data = await server.getItems(new URLSearchParams())
+    const staleDetail = await requestJson(listener.port, `/api/items/${staleId}`, "GET")
+
+    assert.deepEqual(
+      data.items.map((item) => item.id),
+      [doneId, recentId],
+    )
+    assert.equal(data.total, 2)
+    assert.equal(data.facets.media?.all, 2)
+    assert.equal(data.facets.media?.video, 1)
+    assert.equal(staleDetail.statusCode, 200)
+    assert.equal(staleDetail.body.item.id, staleId)
+    assert.equal(staleDetail.body.item.status, "processing")
+  } finally {
+    if (listener) {
+      await listener.close()
+    }
+  }
 })
 
 test("catalog backups can be created, listed, and restored safely", async () => {

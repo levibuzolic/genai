@@ -1,5 +1,4 @@
 import { Search, X } from "lucide-react"
-import type * as React from "react"
 
 import { SelectControl } from "@/components/common/NativeSelect"
 import { Button } from "@/components/ui/button"
@@ -19,9 +18,6 @@ export function LibraryToolbar({
   setStatus,
   sort,
   setSort,
-  pageSize,
-  setPageSize,
-  setPage,
 }: {
   searchDraft: string
   setSearchDraft: (value: string) => void
@@ -32,9 +28,6 @@ export function LibraryToolbar({
   setStatus: (value: string) => void
   sort: string
   setSort: (value: string) => void
-  pageSize: string
-  setPageSize: (value: string) => void
-  setPage: React.Dispatch<React.SetStateAction<number>>
 }) {
   const showAdvancedControls = useMediaQuery("(min-width: 861px)")
 
@@ -42,7 +35,7 @@ export function LibraryToolbar({
     <section
       className={cn(
         "toolbar grid grid-cols-2 gap-2 border-b bg-background p-3",
-        showAdvancedControls && "sticky top-14 z-20 grid-cols-[minmax(240px,1fr)_148px_176px_132px_112px]",
+        showAdvancedControls && "sticky top-14 z-20 grid-cols-[minmax(240px,1fr)_148px_176px_132px]",
       )}
       aria-label="Library filters"
     >
@@ -74,7 +67,6 @@ export function LibraryToolbar({
         aria-label="Media filter"
         value={media}
         onChange={(value) => {
-          setPage(1)
           setMedia(value)
         }}
       >
@@ -88,7 +80,6 @@ export function LibraryToolbar({
         aria-label="Status filter"
         value={status}
         onChange={(value) => {
-          setPage(1)
           setStatus(value)
         }}
       >
@@ -99,6 +90,7 @@ export function LibraryToolbar({
         <option value="duplicate">Duplicates ({facets.status?.duplicate || 0})</option>
         <option value="unverified">Unverified ({facets.status?.unverified || 0})</option>
         <option value="favorited">Favorited ({facets.status?.favorited || 0})</option>
+        <option value="deleted">Deleted ({facets.status?.deleted || 0})</option>
       </SelectControl>
       {showAdvancedControls && (
         <>
@@ -108,7 +100,6 @@ export function LibraryToolbar({
             aria-label="Sort order"
             value={sort}
             onChange={(value) => {
-              setPage(1)
               setSort(value)
             }}
           >
@@ -117,20 +108,6 @@ export function LibraryToolbar({
                 {label}
               </option>
             ))}
-          </SelectControl>
-          <SelectControl
-            id="pageSizeSelect"
-            className="pageSizeFilter h-9"
-            aria-label="Items per page"
-            value={pageSize}
-            onChange={(value) => {
-              setPage(1)
-              setPageSize(value)
-            }}
-          >
-            <option value="48">48 / page</option>
-            <option value="96">96 / page</option>
-            <option value="180">180 / page</option>
           </SelectControl>
         </>
       )}

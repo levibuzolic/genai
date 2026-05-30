@@ -1,11 +1,17 @@
-import { Copy, ExternalLink, FileDown, Info, Play, Sparkles } from "lucide-react"
-import * as React from "react"
+import { Clapperboard, Copy, FileDown, FileQuestion, Heart, ImageIcon, Info, Loader2, Sparkles, Trash2, WandSparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { formatBytes, formatDate, formatDuration } from "@/lib/format"
-import { isImageItem, isVideoItem, mediaUrlForItem } from "@/lib/media"
+import { formatDuration, formatShortMonthDay } from "@/lib/format"
+import { isImageItem, isPendingMediaItem, isVideoItem, mediaUrlForItem } from "@/lib/media"
 import { cn } from "@/lib/utils"
 import type { CatalogItem, ViewMode } from "@/types/domain"
+
+function mediaTypeBadge(item: CatalogItem, isVideo: boolean, isImage: boolean) {
+  if (isVideo) return { Icon: Clapperboard, label: "Video" }
+  if (item.type === "edit") return { Icon: WandSparkles, label: "Edit" }
+  if (isImage) return { Icon: ImageIcon, label: item.type || "Image" }
+  return { Icon: FileQuestion, label: item.type || "Unknown media" }
+}
 
 export function MediaCard({
   item,
@@ -13,71 +19,110 @@ export function MediaCard({
   onDetails,
   onCopyPrompt,
   onCreate,
+  onDeleteRemote,
+  onToggleFavorite,
 }: {
   item: CatalogItem
   view: ViewMode
   onDetails: () => void
   onCopyPrompt: () => void
   onCreate: () => void
+  onDeleteRemote: () => void
+  onToggleFavorite: () => void
 }) {
   const mediaUrl = mediaUrlForItem(item)
   const isVideo = isVideoItem(item)
   const isImage = isImageItem(item)
-  const [videoActive, setVideoActive] = React.useState(false)
+  const isPendingMedia = isPendingMediaItem(item)
+  const isDeleted = Boolean(item.remoteDeletedAt)
+  const badge = mediaTypeBadge(item, isVideo, isImage)
+  const previewLabel = isVideo ? "Open video details" : isImage ? "Open image details" : "Open media details"
+  const deletedBadge = isDeleted ? (
+    <span className="deletedMediaBadge" title="Deleted remotely">
+      <Trash2 aria-hidden="true" />
+      <span className="sr-only">Deleted remotely</span>
+    </span>
+  ) : null
 
   return (
     <article
-      className={cn("card media-card group", view === "list" && "is-list")}
+      className={cn("card media-card group", view === "list" && "is-list", isDeleted && "is-deleted")}
       data-media={isVideo ? "video" : isImage ? "image" : "missing"}
+      data-media-state={isPendingMedia ? "loading" : mediaUrl ? "ready" : "missing"}
+      data-remote-deleted={isDeleted ? "true" : undefined}
       data-media-loaded="true"
     >
-      {isVideo && mediaUrl ? (
+      {isPendingMedia ? (
+        <div className="preview pendingPreview">
+          <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
+            <output className="pending-preview" aria-live="polite">
+              <Loader2 className="size-6 animate-spin" />
+              <span>{isVideo ? "Rendering video" : "Rendering media"}</span>
+            </output>
+          </button>
+          <span className="previewOpenBadge" aria-hidden="true">
+            <Info className="size-4" />
+          </span>
+          <span className="mediaTypeBadge" title={badge.label} aria-label={badge.label}>
+            <badge.Icon />
+          </span>
+          {deletedBadge}
+        </div>
+      ) : isVideo && mediaUrl ? (
         <div className="preview videoPreview">
-          {videoActive ? (
-            <video
-              src={mediaUrl}
-              poster={item.posterUrl || undefined}
-              muted
-              playsInline
-              preload="metadata"
-              controls
-              autoPlay
-              aria-label={item.prompt || item.id}
-            />
-          ) : (
-            <button className="videoPosterButton" type="button" onClick={() => setVideoActive(true)} aria-label="Play video">
-              {item.posterUrl ? (
-                <img src={item.posterUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
-              ) : (
-                <span className="videoPosterFallback">Poster pending</span>
-              )}
-              <span className="videoPlayBadge">
-                <Play className="size-4 fill-current" />
-              </span>
-            </button>
-          )}
+          <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
+            {item.posterUrl ? (
+              <img src={item.posterUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
+            ) : (
+              <span className="thumbnailFallback">Thumbnail pending</span>
+            )}
+          </button>
+          <span className="previewOpenBadge" aria-hidden="true">
+            <Info className="size-4" />
+          </span>
+          <span className="mediaTypeBadge" title={badge.label} aria-label={badge.label}>
+            <badge.Icon />
+          </span>
           <span className="durationBadge">{formatDuration(item.duration)}</span>
+          {deletedBadge}
+        </div>
+      ) : isImage && mediaUrl ? (
+        <div className="preview imagePreview">
+          <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
+            <img src={mediaUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
+          </button>
+          <span className="previewOpenBadge" aria-hidden="true">
+            <Info className="size-4" />
+          </span>
+          <span className="mediaTypeBadge" title={badge.label} aria-label={badge.label}>
+            <badge.Icon />
+          </span>
+          {deletedBadge}
         </div>
       ) : (
-        <a className="previewLink preview" href={mediaUrl || "#"} target="_blank" rel="noreferrer">
-          {isImage && mediaUrl ? (
-            <img src={mediaUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
-          ) : (
+        <div className="preview missingPreview">
+          <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
             <div className="missing-preview">
               <FileDown className="size-6" />
               <span>{item.downloadError || "No local file"}</span>
             </div>
-          )}
-        </a>
+          </button>
+          <span className="previewOpenBadge" aria-hidden="true">
+            <Info className="size-4" />
+          </span>
+          <span className="mediaTypeBadge" title={badge.label} aria-label={badge.label}>
+            <badge.Icon />
+          </span>
+          {deletedBadge}
+        </div>
       )}
       <div className="cardBody">
         <div className="cardMeta">
           {[
-            item.type || "media",
-            formatDate(item.createdAtIso),
-            formatDuration(item.duration),
-            item.size ? formatBytes(item.size) : "",
+            formatShortMonthDay(item.createdAtIso),
+            isPendingMedia ? "rendering" : "",
             item.createModeId ? "created here" : "",
+            item.remoteDeletedAt ? "remote deleted" : "",
             item.localFile && !item.sha256 ? "unverified" : "",
           ]
             .filter(Boolean)
@@ -91,8 +136,15 @@ export function MediaCard({
                 <Sparkles />
               </Button>
             )}
-            <Button className="detailsButton" size="icon-sm" variant="outline" onClick={onDetails} title="Details" aria-label="Details">
-              <Info />
+            <Button
+              className={cn("favoriteButton", item.favorited && "is-favorited")}
+              size="icon-sm"
+              variant="outline"
+              onClick={onToggleFavorite}
+              title={item.favorited ? "Unfavorite" : "Favorite"}
+              aria-label={item.favorited ? "Unfavorite" : "Favorite"}
+            >
+              <Heart className={item.favorited ? "fill-current" : undefined} />
             </Button>
             <Button
               className="copyPromptButton"
@@ -105,10 +157,15 @@ export function MediaCard({
             >
               <Copy />
             </Button>
-            <Button className="openLink" size="icon-sm" variant="outline" asChild>
-              <a href={mediaUrl || "#"} target="_blank" rel="noreferrer" title="Open" aria-label="Open">
-                <ExternalLink />
-              </a>
+            <Button
+              className="deleteRemoteButton"
+              size="icon-sm"
+              variant="outline"
+              onClick={onDeleteRemote}
+              title="Delete remote"
+              aria-label="Delete remote"
+            >
+              <Trash2 />
             </Button>
           </div>
         </div>

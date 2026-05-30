@@ -30,47 +30,54 @@ import { getCreateModeDefinitions, loadCreateTemplateRegistry, prepareCreateSubm
 import { httpError } from "./errors.ts"
 import { readJsonObject, requireCreateSource, stringOrNull } from "./refinements.ts"
 import { parseGeneratePornJob } from "./schemas.ts"
-import type { CreateParams, CreationJob, CreationWorkflow, GeneratePornJob } from "./types.ts"
+import type { CreateMode, CreateParams, CreationJob, CreationWorkflow, GeneratePornJob, TemplateSettings } from "./types.ts"
 
 export { buildCreateApiRequest, resolveCreateSource }
 
-async function createTemplateWorkflowJob(
-  submission: Awaited<ReturnType<typeof prepareCreateSubmission>> & {
-    template: NonNullable<Awaited<ReturnType<typeof prepareCreateSubmission>>["template"]>
+async function createWorkflowJob(
+  {
+    modes,
+    mode,
+    template,
+    sourceRequest,
+    params,
+    steps,
+  }: Awaited<ReturnType<typeof prepareCreateSubmission>> & {
+    mode: CreateMode
+    steps: TemplateSettings[]
   },
   { attemptId, requestStartedAt }: { attemptId: string; requestStartedAt: string },
 ): Promise<CreateJobSubmitResponse> {
-  const { modes, template, sourceRequest } = submission
   const source = await resolveCreateSource(requireCreateSource(sourceRequest))
-  const firstStep = template.workflow[0]
+  const firstStep = steps[0]
   if (!firstStep) {
-    throw new Error("Template has no workflow steps.")
+    throw new Error("Workflow has no steps.")
   }
   const firstMode = modes.find((entry) => entry.id === firstStep.modeId)
 
   if (!firstMode || firstMode.disabled) {
-    throw new Error("Template first step is not available.")
+    throw new Error("Workflow first step is not available.")
   }
 
   const liveRequest = buildCreateApiRequest(firstMode, source, firstStep.params || {})
   const workflow = {
-    templateId: template.id,
+    templateId: template?.id || null,
     currentStep: 0,
     activeJobId: null,
-    steps: template.workflow,
+    steps,
     jobs: [],
-    overrides: submission.params || {},
+    overrides: {},
   }
   const baseRecord = {
     id: attemptId,
     status: "submitted",
-    modeId: `template:${template.id}`,
-    modeLabel: template.label,
+    modeId: mode.id,
+    modeLabel: mode.label,
     mediaType: "video",
-    templateId: template.id,
-    templateLabel: template.label,
+    templateId: template?.id || mode.templateId || null,
+    templateLabel: template?.label || null,
     source: source.publicSource,
-    params: submission.params || {},
+    params: params || {},
     request: liveRequest.publicRequest,
     requestBody: liveRequest.body,
     workflow,
@@ -81,7 +88,7 @@ async function createTemplateWorkflowJob(
 
   saveCreationJob(baseRecord, {
     eventStatus: "submitted",
-    eventMessage: "Submitted template workflow.",
+    eventMessage: "Submitted creation workflow.",
   })
 
   let response: Response
@@ -156,10 +163,10 @@ async function createTemplateWorkflowJob(
     ok: true,
     jobId,
     modeId: workflowCreation.modeId,
-    modeLabel: template.label,
+    modeLabel: mode.label,
     source: source.publicSource,
     request: liveRequest.publicRequest,
-    templateId: template.id,
+    ...(template ? { templateId: template.id } : {}),
     pollMs: CREATE_POLL_MS,
   }
 }
@@ -173,17 +180,6 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   }
 
   const submission = await prepareCreateSubmission(requestBody)
-  const comboTemplate = submission.template?.type === "combo" && submission.template.workflow.length > 1 ? submission.template : null
-  if (comboTemplate) {
-    return createTemplateWorkflowJob(
-      { ...submission, template: comboTemplate },
-      {
-        attemptId,
-        requestStartedAt,
-      },
-    )
-  }
-
   const { mode, sourceRequest, params, template } = submission
 
   if (!mode) {
@@ -194,7 +190,22 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
     throw new Error(mode.disabledReason || "Creation mode is disabled.")
   }
 
-  const source = await resolveCreateSource(requireCreateSource(sourceRequest))
+  const workflowSteps = createWorkflowSteps(mode.id, params, template?.workflow || null)
+  if (workflowSteps) {
+    return createWorkflowJob(
+      {
+        ...submission,
+        mode,
+        steps: workflowSteps,
+      },
+      {
+        attemptId,
+        requestStartedAt,
+      },
+    )
+  }
+
+  const source = mode.source?.required === false ? null : await resolveCreateSource(requireCreateSource(sourceRequest))
   const liveRequest = buildCreateApiRequest(mode, source, params)
   const url = `${getJobsApiBaseUrl()}/${mode.endpoint}`
   const baseRecord = {
@@ -205,7 +216,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
     mediaType: mode.mediaType || null,
     templateId: template?.id || mode.templateId || null,
     templateLabel: template?.label || null,
-    source: source.publicSource,
+    source: source?.publicSource || null,
     params,
     request: liveRequest.publicRequest,
     requestBody: liveRequest.body,
@@ -292,7 +303,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
     jobId,
     modeId: mode.id,
     modeLabel: mode.label,
-    source: source.publicSource,
+    source: source?.publicSource || null,
     params,
     templateId: template?.id || mode.templateId || null,
     templateLabel: template?.label || null,
@@ -313,10 +324,66 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
     jobId,
     modeId: mode.id,
     modeLabel: mode.label,
-    source: source.publicSource,
+    source: source?.publicSource || {},
     request: liveRequest.publicRequest,
     pollMs: CREATE_POLL_MS,
   }
+}
+
+function createWorkflowSteps(modeId: string, params: CreateParams, templateWorkflow: TemplateSettings[] | null): TemplateSettings[] | null {
+  if (modeId === "custom-image-video") {
+    const imageStep = templateWorkflow?.find((step) => step.modeId === "custom-image")
+    const videoStep = templateWorkflow?.find((step) => step.modeId === "custom-video")
+
+    return [
+      {
+        modeId: "custom-image",
+        params: {
+          ...imageStep?.params,
+          prompt: String(imageStep?.params["prompt"] || params["prompt"] || ""),
+        },
+      },
+      {
+        modeId: "custom-video",
+        params: {
+          ...videoStep?.params,
+          prompt: String(params["prompt"] || videoStep?.params["prompt"] || ""),
+          quality: String(params["quality"] || videoStep?.params["quality"] || ""),
+        },
+      },
+    ]
+  }
+
+  if (modeId === "nudify-video") {
+    const videoStep = templateWorkflow?.find((step) => step.modeId === "custom-video")
+
+    return [
+      {
+        modeId: "nudify",
+        params: {},
+      },
+      {
+        modeId: "custom-video",
+        params: {
+          ...videoStep?.params,
+          prompt: String(params["prompt"] || videoStep?.params["prompt"] || ""),
+          quality: String(params["quality"] || videoStep?.params["quality"] || ""),
+        },
+      },
+    ]
+  }
+
+  if (modeId.startsWith("template:") && templateWorkflow?.length) {
+    return templateWorkflow.map((step) => ({
+      modeId: step.modeId,
+      params: {
+        ...step.params,
+        ...params,
+      },
+    }))
+  }
+
+  return null
 }
 
 export async function pollCreateJob(jobId: string): Promise<CreateJobPollResponse> {

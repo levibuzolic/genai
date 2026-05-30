@@ -1,6 +1,5 @@
-import { Copy, ExternalLink, ImageIcon, Play, WandSparkles } from "lucide-react"
+import { ChevronLeft, ChevronRight, Copy, ExternalLink, Heart, ImageIcon, Play, Trash2, WandSparkles, X } from "lucide-react"
 
-import { Fact } from "@/components/common/Fact"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
@@ -18,6 +17,14 @@ export function MediaDialog({
   onCreate,
   onAnimate,
   onUsePrompt,
+  onDeleteRemote,
+  onToggleFavorite,
+  previousItem,
+  nextItem,
+  onPrevious,
+  onNext,
+  videoMuted,
+  onVideoMutedChange,
 }: {
   item: CatalogItem | null
   open: boolean
@@ -26,6 +33,14 @@ export function MediaDialog({
   onCreate: (item: CatalogItem) => void
   onAnimate: (item: CatalogItem) => void
   onUsePrompt: (item: CatalogItem) => void
+  onDeleteRemote: (item: CatalogItem) => void
+  onToggleFavorite: (item: CatalogItem) => void
+  previousItem: CatalogItem | null
+  nextItem: CatalogItem | null
+  onPrevious: () => void
+  onNext: () => void
+  videoMuted: boolean
+  onVideoMutedChange: (muted: boolean) => void
 }) {
   const mediaUrl = mediaUrlForItem(item)
   const canUsePrompt = Boolean(item?.prompt)
@@ -34,7 +49,13 @@ export function MediaDialog({
 
   return (
     <Dialog open={dialogOpen} onOpenChange={onOpenChange}>
-      <DialogContent id="itemDialog" className="detailDialog" aria-describedby="detailMeta" aria-labelledby="detailTitle" showCloseButton>
+      <DialogContent
+        id="itemDialog"
+        className="detailDialog"
+        aria-describedby="detailMeta"
+        aria-labelledby="detailTitle"
+        showCloseButton={false}
+      >
         {item && (
           <>
             <DialogTitle id="detailTitle" className="sr-only">
@@ -58,88 +79,129 @@ export function MediaDialog({
                 url={mediaUrl}
                 label={item.prompt || item.id}
                 fallback={item.downloadError || "No local media file"}
+                videoAutoPlay
+                videoLoop
+                videoMuted={videoMuted}
+                onVideoMutedChange={onVideoMutedChange}
               />
               <div className="detailPanel">
-                <section>
-                  <h3>Prompt</h3>
-                  <p id="detailPrompt" className="detailText">
-                    {item.prompt || "No prompt text"}
-                  </p>
-                </section>
-                {item.negativePrompt && (
-                  <section id="negativePromptSection">
-                    <h3>Negative prompt</h3>
-                    <p id="detailNegativePrompt" className="detailText">
-                      {item.negativePrompt}
+                <div className="detailPanelHeader">
+                  <Button
+                    id="detailCloseButton"
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => onOpenChange(false)}
+                    aria-label="Close details"
+                    title="Close details"
+                  >
+                    <X />
+                  </Button>
+                </div>
+                <div className="detailPanelContent">
+                  <section>
+                    <div className="detailSectionHeader">
+                      <h3>Prompt</h3>
+                      <Button
+                        id="detailCopyPromptButton"
+                        size="icon-xs"
+                        variant="ghost"
+                        onClick={() => onCopy(item.prompt, "Prompt copied")}
+                        disabled={!item.prompt}
+                        title="Copy prompt"
+                        aria-label="Copy prompt"
+                      >
+                        <Copy />
+                      </Button>
+                    </div>
+                    <p id="detailPrompt" className="detailText">
+                      {item.prompt || "No prompt text"}
                     </p>
                   </section>
-                )}
-                <dl id="detailFacts" className="detailFacts">
-                  <Fact label="Job ID" value={item.id} />
-                  <Fact label="Type" value={item.type} />
-                  <Fact label="Status" value={item.status} />
-                  <Fact label="Local file" value={item.localFile} />
-                  <Fact label="Poster" value={item.thumbnailFile} />
-                  <Fact label="Create mode" value={item.createModeId} />
-                  <Fact label="Source kind" value={item.sourceKind} />
-                  <Fact label="Source item" value={item.sourceItemId} />
-                  <Fact label="Source URL" value={item.sourceUrl} />
-                  <Fact label="Created locally" value={formatDate(item.createdLocallyAt)} />
-                  <Fact label="SHA-256" value={item.sha256} />
-                  <Fact label="Verified" value={formatDate(item.verifiedAt)} />
-                  <Fact label="Duplicate of" value={item.duplicateOf} />
-                  <Fact label="Output URL" value={item.outputUrl} />
-                </dl>
-                <div className="dialogActions" aria-label="Media actions">
-                  <ButtonGroup className="detailActionGroup" aria-label="Create actions">
-                    {canUsePrompt && (
-                      <Button id="detailUsePromptButton" size="sm" onClick={() => onUsePrompt(item)}>
-                        <WandSparkles />
-                        Use prompt
-                      </Button>
-                    )}
-                    {canUseImage && (
-                      <>
-                        <Button id="detailCreateButton" size="sm" variant="outline" onClick={() => onCreate(item)}>
-                          <ImageIcon />
-                          Create
+                  {item.negativePrompt && (
+                    <section id="negativePromptSection">
+                      <h3>Negative prompt</h3>
+                      <p id="detailNegativePrompt" className="detailText">
+                        {item.negativePrompt}
+                      </p>
+                    </section>
+                  )}
+                  <div className="dialogActions" aria-label="Media actions">
+                    <ButtonGroup className="detailActionGroup" aria-label="Create actions">
+                      {canUsePrompt && (
+                        <Button id="detailUsePromptButton" size="sm" onClick={() => onUsePrompt(item)}>
+                          <WandSparkles />
+                          Use prompt
                         </Button>
-                        <Button id="detailAnimateButton" size="sm" variant="outline" onClick={() => onAnimate(item)}>
-                          <Play />
-                          Animate
+                      )}
+                      {canUseImage && (
+                        <>
+                          <Button id="detailCreateButton" size="sm" variant="outline" onClick={() => onCreate(item)}>
+                            <ImageIcon />
+                            Create
+                          </Button>
+                          <Button id="detailAnimateButton" size="sm" variant="outline" onClick={() => onAnimate(item)}>
+                            <Play />
+                            Animate
+                          </Button>
+                        </>
+                      )}
+                      {mediaUrl && (
+                        <Button id="detailOpenLink" className="openLink" size="sm" variant="outline" asChild>
+                          <a href={mediaUrl} target="_blank" rel="noreferrer">
+                            <ExternalLink />
+                            Open
+                          </a>
                         </Button>
-                      </>
-                    )}
-                    {mediaUrl && (
-                      <Button id="detailOpenLink" className="openLink" size="sm" variant="outline" asChild>
-                        <a href={mediaUrl} target="_blank" rel="noreferrer">
-                          <ExternalLink />
-                          Open
-                        </a>
-                      </Button>
-                    )}
-                  </ButtonGroup>
+                      )}
+                    </ButtonGroup>
 
-                  <ButtonGroup className="detailActionGroup detailActionSecondary" aria-label="Copy actions">
-                    <Button
-                      id="detailCopyPromptButton"
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => onCopy(item.prompt, "Prompt copied")}
-                      disabled={!item.prompt}
-                    >
-                      <Copy />
-                      Prompt
-                    </Button>
-                    <Button id="detailCopyIdButton" size="sm" variant="ghost" onClick={() => onCopy(item.id, "ID copied")}>
-                      ID
-                    </Button>
-                    {item.outputUrl && (
-                      <Button id="detailCopyUrlButton" size="sm" variant="ghost" onClick={() => onCopy(item.outputUrl, "URL copied")}>
-                        URL
+                    <ButtonGroup className="detailActionGroup detailActionSecondary" aria-label="Copy actions">
+                      <Button id="detailCopyIdButton" size="sm" variant="ghost" onClick={() => onCopy(item.id, "ID copied")}>
+                        ID
                       </Button>
-                    )}
-                  </ButtonGroup>
+                      {item.outputUrl && (
+                        <Button id="detailCopyUrlButton" size="sm" variant="ghost" onClick={() => onCopy(item.outputUrl, "URL copied")}>
+                          URL
+                        </Button>
+                      )}
+                      <Button id="detailFavoriteButton" size="sm" variant="ghost" onClick={() => onToggleFavorite(item)}>
+                        <Heart className={item.favorited ? "fill-current" : undefined} />
+                        {item.favorited ? "Unfavorite" : "Favorite"}
+                      </Button>
+                      <Button id="detailDeleteRemoteButton" size="sm" variant="ghost" onClick={() => onDeleteRemote(item)}>
+                        <Trash2 />
+                        Delete
+                      </Button>
+                    </ButtonGroup>
+                  </div>
+                </div>
+                <div className="detailNav" aria-label="Gallery navigation">
+                  <Button
+                    id="detailPreviousButton"
+                    className="detailNavButton"
+                    size="sm"
+                    variant="secondary"
+                    onClick={onPrevious}
+                    disabled={!previousItem}
+                    aria-label={previousItem ? "Previous media" : "No previous media"}
+                    title={previousItem ? "Previous media" : "No previous media"}
+                  >
+                    <ChevronLeft />
+                    Previous
+                  </Button>
+                  <Button
+                    id="detailNextButton"
+                    className="detailNavButton"
+                    size="sm"
+                    variant="secondary"
+                    onClick={onNext}
+                    disabled={!nextItem}
+                    aria-label={nextItem ? "Next media" : "No next media"}
+                    title={nextItem ? "Next media" : "No next media"}
+                  >
+                    Next
+                    <ChevronRight />
+                  </Button>
                 </div>
               </div>
             </div>

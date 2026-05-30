@@ -14,7 +14,7 @@ trustLockfile: false
 
 strictDepBuilds: true
 dangerouslyAllowAllBuilds: false
-allowBuilds: { esbuild: true }
+allowBuilds: { esbuild: true, sharp: true }
 overrides:
   tinyexec: 1.1.2
 

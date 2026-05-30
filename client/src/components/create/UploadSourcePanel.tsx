@@ -2,6 +2,7 @@ import { Upload } from "lucide-react"
 
 import { getImageFileFromTransfer } from "@/lib/upload"
 
+import { SelectedSourcePreview } from "./SelectedSourcePreview"
 import type { CreateStudioProps } from "./types"
 
 export function UploadSourcePanel(props: CreateStudioProps) {
@@ -50,6 +51,12 @@ export function UploadSourcePanel(props: CreateStudioProps) {
       <p id="createUploadMeta" className="createHint">
         {props.uploadMeta}
       </p>
+      <SelectedSourcePreview
+        id="createSelectedUploadPreview"
+        url={props.uploadedDataUrl}
+        label={props.uploadedName || "Selected upload"}
+        onClear={props.onClearSource}
+      />
     </div>
   )
 }

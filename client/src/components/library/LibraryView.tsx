@@ -1,19 +1,18 @@
 import { Sparkles } from "lucide-react"
 
-import { MediaSkeleton } from "@/components/common/MediaSkeleton"
-import { MediaCard } from "@/components/media/MediaCard"
-import { cn } from "@/lib/utils"
-
 import { ActiveFilters } from "./ActiveFilters"
+import { LibraryIndexControls } from "./LibraryIndexControls"
 import { LibraryToolbar } from "./LibraryToolbar"
-import { PagerControls } from "./PagerControls"
 import { SummaryStrip } from "./SummaryStrip"
 import type { LibraryViewProps } from "./types"
+import { VirtualMediaGrid } from "./VirtualMediaGrid"
 
 export function LibraryView({
   itemsData,
   itemsLoading,
   deferredItems,
+  hasMoreItems,
+  loadingMore,
   pending,
   searchDraft,
   setSearchDraft,
@@ -24,16 +23,15 @@ export function LibraryView({
   setStatus,
   sort,
   setSort,
-  pageSize,
-  setPageSize,
-  page,
-  setPage,
   view,
   setView,
   clearFilters,
+  onLoadMore,
   onOpenCreate,
   onDetails,
   onCopyPrompt,
+  onDeleteRemote,
+  onToggleFavorite,
 }: LibraryViewProps) {
   const facets = itemsData?.facets || {}
   const showEmptyState = !itemsLoading && Boolean(itemsData) && (itemsData?.items.length || 0) === 0
@@ -51,12 +49,9 @@ export function LibraryView({
           setStatus={setStatus}
           sort={sort}
           setSort={setSort}
-          pageSize={pageSize}
-          setPageSize={setPageSize}
-          setPage={setPage}
         />
 
-        <SummaryStrip facets={facets} status={status} setStatus={setStatus} setPage={setPage} />
+        <SummaryStrip facets={facets} status={status} setStatus={setStatus} />
         <ActiveFilters
           query={query}
           media={media}
@@ -69,34 +64,22 @@ export function LibraryView({
           clearFilters={clearFilters}
         />
 
-        <PagerControls
-          page={page}
-          setPage={setPage}
-          pageCount={itemsData?.pageCount || 1}
-          itemsData={itemsData}
-          view={view}
-          setView={setView}
-        />
+        <LibraryIndexControls itemsData={itemsData} loading={itemsLoading} loadingMore={loadingMore} view={view} setView={setView} />
 
-        <section
-          id="grid"
-          className={cn("media-grid", view === "list" && "is-list", pending && "opacity-75")}
-          aria-label="Downloaded media"
-          data-view={view}
-        >
-          {itemsLoading && !itemsData
-            ? Array.from({ length: 12 }, (_, index) => <MediaSkeleton key={index} view={view} />)
-            : deferredItems.map((item) => (
-                <MediaCard
-                  key={item.id}
-                  item={item}
-                  view={view}
-                  onDetails={() => onDetails(item)}
-                  onCopyPrompt={() => onCopyPrompt(item)}
-                  onCreate={() => onOpenCreate({ sourceItem: item, prompt: item.prompt || undefined })}
-                />
-              ))}
-        </section>
+        <VirtualMediaGrid
+          items={deferredItems}
+          itemsLoading={itemsLoading}
+          pending={pending}
+          view={view}
+          hasMore={hasMoreItems}
+          loadingMore={loadingMore}
+          onLoadMore={onLoadMore}
+          onDetails={onDetails}
+          onCopyPrompt={onCopyPrompt}
+          onOpenCreate={(item) => onOpenCreate({ sourceItem: item, prompt: "", modeId: "custom-video" })}
+          onDeleteRemote={onDeleteRemote}
+          onToggleFavorite={onToggleFavorite}
+        />
 
         {showEmptyState && (
           <section id="emptyState" className="empty-state">

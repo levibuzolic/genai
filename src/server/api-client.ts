@@ -3,6 +3,14 @@ import { API_BASE_URL, AUTH_SETUP_MESSAGE } from "./config.ts"
 import { parseApiHeaders, parseJobsPageResponse } from "./schemas.ts"
 import type { ApiHeaders, GeneratePornJob } from "./types.ts"
 
+export type DeleteRemoteJobResult = {
+  status: "deleted" | "already-deleted"
+}
+
+export type FavoriteRemoteJobResult = {
+  favorited: boolean
+}
+
 export async function fetchJobsPage(page: number): Promise<GeneratePornJob[]> {
   const url = new URL(API_BASE_URL)
   url.searchParams.set("type", "all")
@@ -28,6 +36,44 @@ export async function fetchJobsPage(page: number): Promise<GeneratePornJob[]> {
   }
 
   return jobs
+}
+
+export async function deleteRemoteJob(jobId: string): Promise<DeleteRemoteJobResult> {
+  const response = await fetch(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}`, {
+    method: "DELETE",
+    headers: buildApiHeaders(),
+  })
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`API returned ${response.status}. ${AUTH_SETUP_MESSAGE}`)
+  }
+
+  if (response.status === 404) {
+    return { status: "already-deleted" }
+  }
+
+  if (!response.ok) {
+    throw new Error((await readApiError(response)) || `Delete request failed: ${response.status} ${response.statusText}`)
+  }
+
+  return { status: "deleted" }
+}
+
+export async function setRemoteJobFavorite(jobId: string, favorited: boolean): Promise<FavoriteRemoteJobResult> {
+  const response = await fetch(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}/favorite`, {
+    method: favorited ? "POST" : "DELETE",
+    headers: buildApiHeaders(),
+  })
+
+  if (response.status === 401 || response.status === 403) {
+    throw new Error(`API returned ${response.status}. ${AUTH_SETUP_MESSAGE}`)
+  }
+
+  if (!response.ok) {
+    throw new Error((await readApiError(response)) || `Favorite request failed: ${response.status} ${response.statusText}`)
+  }
+
+  return { favorited }
 }
 
 export function buildApiHeaders(): ApiHeaders {
@@ -58,4 +104,22 @@ export function buildApiHeaders(): ApiHeaders {
 
 export function getJobsApiBaseUrl(): string {
   return String(API_BASE_URL).replace(/\/+$/, "")
+}
+
+async function readApiError(response: Response): Promise<string | null> {
+  const text = await response.text().catch(() => "")
+  if (!text) {
+    return null
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(text)
+    if (parsed && typeof parsed === "object" && "error" in parsed) {
+      return String(parsed.error || "")
+    }
+  } catch {
+    return text
+  }
+
+  return text
 }

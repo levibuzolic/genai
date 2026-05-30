@@ -13,6 +13,9 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
   const modes = (await server.getCreateModes()).modes
   const customVideo = modes.find((mode) => mode.id === "custom-video")
   const customImage = modes.find((mode) => mode.id === "custom-image")
+  const textToImage = modes.find((mode) => mode.id === "text-to-image")
+  const imageVideo = modes.find((mode) => mode.id === "custom-image-video")
+  const nudifyVideo = modes.find((mode) => mode.id === "nudify-video")
   const template = {
     id: "test-template",
     label: "Test Template",
@@ -43,11 +46,18 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
   }).body
   const templateUpload = server.buildCreateApiRequest(template, dataSource).body
   const templateUrl = server.buildCreateApiRequest(template, urlSource).body
+  const generatedImage = server.buildCreateApiRequest(textToImage, null, {
+    prompt: "make a poster",
+    quality: "1:1",
+  }).body
 
   assert.equal(videoUpload.image_base64, imageDataUrl())
   assert.equal(videoUpload.input_url, undefined)
   assert.equal(videoUpload.resolution, "1080p")
   assert.equal(videoUpload.duration, 10)
+  assert.equal(customVideo.fields.find((field) => field.name === "quality").default, "1080p-15")
+  assert.equal(imageVideo.label, "Image Edit + Video")
+  assert.equal(nudifyVideo.label, "Nudify + Video")
   assert.equal(videoUpload.seed, null)
   assert.equal(imageUrl.input_url, "https://assets.example/source.png")
   assert.equal(imageUrl.image_base64, undefined)
@@ -56,6 +66,80 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
   assert.equal(templateUpload.negative_prompt, "template negative")
   assert.equal(templateUrl.input_url, "https://assets.example/source.png")
   assert.equal(templateUrl.image_base64, undefined)
+  assert.equal(generatedImage.input_url, undefined)
+  assert.equal(generatedImage.image_base64, undefined)
+  assert.equal(generatedImage.prompt, "make a poster")
+  assert.equal(generatedImage.modelId, "qwen-image-2.0-pro")
+  assert.equal(generatedImage.aspectRatio, "1:1")
+})
+
+test("template selection does not force a combo workflow when mode is video only", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-mode-override-"))
+  const jobId = "62626262-6262-4626-8626-626262626262"
+  const submitted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    submitted.push({ url: String(url), body: options.body ? JSON.parse(String(options.body)) : null })
+
+    if (String(url) === "https://api.generateporn.ai/api/jobs/video" && options.method === "POST") {
+      return jsonResponse({ job_id: jobId })
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const template = await server.saveCreateTemplateFromRequest({
+      label: "Edit then animate",
+      type: "combo",
+      settings: {
+        modeId: "custom-image-video",
+        source: {
+          kind: "url",
+          url: "https://assets.example/source.png",
+        },
+        params: {
+          prompt: "video prompt",
+          quality: "720p-4",
+        },
+      },
+      workflow: [
+        {
+          modeId: "custom-image",
+          params: {
+            prompt: "image edit prompt",
+          },
+        },
+        {
+          modeId: "custom-video",
+          params: {
+            prompt: "video prompt",
+            quality: "720p-4",
+          },
+        },
+      ],
+    })
+
+    const response = await server.createMediaJob({
+      templateId: template.id,
+      modeId: "custom-video",
+    })
+    const details = await server.getCreationDetails(jobId)
+
+    assert.equal(response.modeId, "custom-video")
+    assert.equal(submitted.length, 1)
+    assert.equal(submitted[0].url, "https://api.generateporn.ai/api/jobs/video")
+    assert.equal(submitted[0].body.prompt, "video prompt")
+    assert.equal(submitted[0].body.input_url, "https://assets.example/source.png")
+    assert.equal(details.creation.templateId, template.id)
+    assert.equal(details.creation.modeId, "custom-video")
+    assert.equal(details.creation.workflow, null)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test("creation source resolver prefers catalog output URL and falls back to local image data", async () => {
@@ -100,6 +184,42 @@ test("creation source resolver prefers catalog output URL and falls back to loca
   assert.equal(remote.value, "https://assets.example/remote.png")
   assert.equal(local.isDataUrl, true)
   assert.equal(local.value, "data:image/png;base64,AQID")
+})
+
+test("text-to-image creation submits without a source image", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-text-to-image-"))
+  const jobId = "57575757-5757-4575-8575-575757575757"
+  const originalFetch = globalThis.fetch
+  let submittedBody = null
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), "https://api.generateporn.ai/api/jobs/text2image")
+    submittedBody = JSON.parse(String(options.body))
+    return jsonResponse({ job_id: jobId })
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const response = await server.createMediaJob({
+      modeId: "text-to-image",
+      params: {
+        prompt: "make a portrait",
+        quality: "4:3",
+      },
+      source: null,
+    })
+
+    assert.equal(response.jobId, jobId)
+    assert.equal(response.modeId, "text-to-image")
+    assert.deepEqual(submittedBody, {
+      prompt: "make a portrait",
+      modelId: "qwen-image-2.0-pro",
+      aspectRatio: "4:3",
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test("template import reads prompt fields from mocked API history", async () => {
@@ -156,6 +276,7 @@ test("template import reads prompt fields from mocked API history", async () => 
 test("creation templates save all reusable settings and apply submission overrides without mutation", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-template-save-"))
   const sourceId = "20202020-2020-4202-8202-202020202020"
+  const overrideSourceId = "30303030-3030-4303-8303-303030303030"
   const jobId = "21212121-2121-4212-8212-212121212121"
   await writeCatalog(mediaDir, {
     items: [
@@ -166,9 +287,16 @@ test("creation templates save all reusable settings and apply submission overrid
         outputUrl: "https://assets.example/source.png",
         createdAt: 1779893300,
       },
+      {
+        id: overrideSourceId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/override-source.png",
+        createdAt: 1779893301,
+      },
     ],
     downloadedJobIds: [],
-    lastSeenJobId: sourceId,
+    lastSeenJobId: overrideSourceId,
   })
 
   let submitBody = null
@@ -206,6 +334,10 @@ test("creation templates save all reusable settings and apply submission overrid
 
     await server.createMediaJob({
       templateId: template.id,
+      source: {
+        kind: "catalog",
+        itemId: overrideSourceId,
+      },
       params: {
         prompt: "override prompt",
       },
@@ -214,10 +346,11 @@ test("creation templates save all reusable settings and apply submission overrid
     const details = await server.getCreationDetails(jobId)
 
     assert.equal(template.settings.source.itemId, sourceId)
-    assert.equal(submitBody.input_url, "https://assets.example/source.png")
+    assert.equal(submitBody.input_url, "https://assets.example/override-source.png")
     assert.equal(submitBody.prompt, "override prompt")
     assert.equal(registry.templates[0].settings.params.prompt, "template prompt")
     assert.equal(details.creation.templateId, template.id)
+    assert.equal(details.creation.source.itemId, overrideSourceId)
     assert.equal(details.creation.params.prompt, "override prompt")
   } finally {
     globalThis.fetch = originalFetch

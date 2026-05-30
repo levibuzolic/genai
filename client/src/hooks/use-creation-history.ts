@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
+import { replaceEqualJson } from "@/lib/render-state"
 import type { CreateParams, Creation, CreationEvent, CreationSource, CreationsResponse } from "@/types/domain"
 import type { CreationDetailsResponse, DuplicateCreationResponse, RefreshCreationsResponse } from "@/types/routes"
 
@@ -8,6 +9,7 @@ const IDLE_CREATION_POLL_MS = 10000
 
 export function useCreationHistory(
   onApplyDraft: (form: { modeId?: string | null; source?: CreationSource | null; params?: CreateParams }) => Promise<void>,
+  onActiveCompletion?: () => void | Promise<void>,
 ) {
   const [creations, setCreations] = React.useState<Creation[]>([])
   const [activeCount, setActiveCount] = React.useState(0)
@@ -17,23 +19,40 @@ export function useCreationHistory(
   const [selectedEvents, setSelectedEvents] = React.useState<CreationEvent[]>([])
   const [statusMessage, setStatusMessage] = React.useState("")
   const pollTimerRef = React.useRef<number | null>(null)
+  const activeCountRef = React.useRef(0)
+  const onActiveCompletionRef = React.useRef(onActiveCompletion)
 
-  const loadCreations = React.useCallback(async ({ refresh = false }: { refresh?: boolean } = {}) => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({ status: "all" })
-      if (refresh) params.set("refresh", "true")
-      const data = await fetchJson<CreationsResponse>(`/api/creations?${params}`)
-      setCreations(data.creations || [])
-      setActiveCount(data.activeCount || 0)
-      setPollMs(data.pollMs || IDLE_CREATION_POLL_MS)
-      setStatusMessage("")
-    } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : String(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  React.useEffect(() => {
+    onActiveCompletionRef.current = onActiveCompletion
+  }, [onActiveCompletion])
+
+  const loadCreations = React.useCallback(
+    async ({ refresh = false, showLoading = true }: { refresh?: boolean; showLoading?: boolean } = {}) => {
+      if (showLoading) setLoading(true)
+      try {
+        const params = new URLSearchParams({ status: "all" })
+        if (refresh) params.set("refresh", "true")
+        const data = await fetchJson<CreationsResponse>(`/api/creations?${params}`)
+        const nextActiveCount = data.activeCount || 0
+        const shouldSyncCompletedCreations =
+          refresh &&
+          activeCountRef.current > 0 &&
+          nextActiveCount < activeCountRef.current &&
+          (data.creations || []).some((creation) => creation.status === "done" && creation.outputUrl && !creation.downloadedItemId)
+        setCreations((current) => replaceEqualJson(current, data.creations || []))
+        setActiveCount(nextActiveCount)
+        activeCountRef.current = nextActiveCount
+        setPollMs(data.pollMs || IDLE_CREATION_POLL_MS)
+        setStatusMessage((current) => (current ? "" : current))
+        if (shouldSyncCompletedCreations) await onActiveCompletionRef.current?.()
+      } catch (error) {
+        setStatusMessage(error instanceof Error ? error.message : String(error))
+      } finally {
+        if (showLoading) setLoading(false)
+      }
+    },
+    [],
+  )
 
   React.useEffect(() => {
     void loadCreations()
@@ -46,7 +65,7 @@ export function useCreationHistory(
 
     pollTimerRef.current = window.setTimeout(
       () => {
-        void loadCreations({ refresh: activeCount > 0 })
+        void loadCreations({ refresh: activeCount > 0, showLoading: false })
       },
       activeCount > 0 ? pollMs : IDLE_CREATION_POLL_MS,
     )
@@ -66,10 +85,17 @@ export function useCreationHistory(
         headers: { "content-type": "application/json" },
         body: JSON.stringify({}),
       })
-      setCreations(data.creations || [])
-      setActiveCount(data.activeCount || 0)
+      const nextActiveCount = data.activeCount || 0
+      const shouldSyncCompletedCreations =
+        activeCountRef.current > 0 &&
+        nextActiveCount < activeCountRef.current &&
+        (data.creations || []).some((creation) => creation.status === "done" && creation.outputUrl && !creation.downloadedItemId)
+      setCreations((current) => replaceEqualJson(current, data.creations || []))
+      setActiveCount(nextActiveCount)
+      activeCountRef.current = nextActiveCount
       setPollMs(data.pollMs || IDLE_CREATION_POLL_MS)
       setStatusMessage("Creation history refreshed.")
+      if (shouldSyncCompletedCreations) await onActiveCompletionRef.current?.()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : String(error))
     }
@@ -77,8 +103,8 @@ export function useCreationHistory(
 
   async function openDetails(creation: Creation) {
     const data = await fetchJson<CreationDetailsResponse>(`/api/creations/${encodeURIComponent(creation.id)}`)
-    setSelectedCreation(data.creation)
-    setSelectedEvents(data.events || [])
+    setSelectedCreation((current) => replaceEqualJson(current, data.creation))
+    setSelectedEvents((current) => replaceEqualJson(current, data.events || []))
   }
 
   async function duplicateSettings(creation: Creation) {

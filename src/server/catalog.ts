@@ -8,10 +8,13 @@ import { count, eq } from "drizzle-orm"
 import { drizzle } from "drizzle-orm/node-sqlite"
 
 import { ensureVideoThumbnail } from "../thumbnails.ts"
-import type { BackupSummary, ItemsResponse, PublicCatalogItem } from "../types/routes.ts"
+import type { BackupSummary, CatalogItemResponse, DeleteCatalogItemResponse, ItemsResponse, PublicCatalogItem } from "../types/routes.ts"
+import { deleteRemoteJob, setRemoteJobFavorite } from "./api-client.ts"
 import { closeCatalogDb, getCatalogDb, parseJson, readCatalogFromDb, saveCatalog } from "./catalog-db.ts"
 import { BACKUP_DIR, CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
 import { catalogMeta, catalogSchema, mediaItems } from "./db-schema.ts"
+import { httpError } from "./errors.ts"
+import { pngBufferToHighQualityJpeg } from "./media-conversion.ts"
 import { sendJson } from "./static.ts"
 import type { Catalog, CatalogItem, GeneratePornJob, HttpResponse, LocalMediaFile, NormalizedJob, ThumbnailPatch } from "./types.ts"
 import { clamp, contentTypeFor, fileExists, hashBuffer, sanitizePathPart } from "./utils.ts"
@@ -32,17 +35,17 @@ type CatalogFacets = {
     favorited: number
     duplicate: number
     unverified: number
+    deleted: number
   }
 }
 
 type CatalogBackupSummary = BackupSummary
 
+const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
+const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
+
 export async function downloadJob(job: GeneratePornJob): Promise<Partial<CatalogItem>> {
   const normalizedJob = normalizeJob(job)
-  const filename = buildFilename(normalizedJob)
-  const localPath = path.join(MEDIA_DIR, filename)
-  await mkdir(path.dirname(localPath), { recursive: true })
-
   const response = await fetch(normalizedJob.output_url, {
     headers: {
       accept: "*/*",
@@ -54,19 +57,24 @@ export async function downloadJob(job: GeneratePornJob): Promise<Partial<Catalog
     throw new Error(`Media download failed: ${response.status} ${response.statusText}`)
   }
 
-  const bytes = new Uint8Array(await response.arrayBuffer())
+  const downloadedBytes = Buffer.from(await response.arrayBuffer())
+  const media = await prepareDownloadedMedia(normalizedJob.output_url, downloadedBytes)
+  const filename = buildFilename(normalizedJob, media.extension)
+  const localPath = path.join(MEDIA_DIR, filename)
+  await mkdir(path.dirname(localPath), { recursive: true })
+
   const tempPath = `${localPath}.tmp`
-  await writeFile(tempPath, bytes)
+  await writeFile(tempPath, media.bytes)
   await rename(tempPath, localPath)
   const thumbnail = await ensureCatalogThumbnail(filename)
 
   return {
     localFile: filename,
-    size: bytes.byteLength,
-    fileSize: bytes.byteLength,
-    sha256: hashBuffer(bytes),
+    size: media.bytes.byteLength,
+    fileSize: media.bytes.byteLength,
+    sha256: hashBuffer(media.bytes),
     verifiedAt: new Date().toISOString(),
-    contentType: response.headers.get("content-type") || null,
+    contentType: media.contentType || response.headers.get("content-type") || null,
     ...thumbnail,
     downloadedAt: new Date().toISOString(),
   }
@@ -120,9 +128,9 @@ function isTerminalErrorJob(job: GeneratePornJob | null | undefined): boolean {
   )
 }
 
-export function buildFilename(job: GeneratePornJob): string {
+export function buildFilename(job: GeneratePornJob, extensionOverride?: string): string {
   const normalizedJob = normalizeJob(job)
-  const extension = getExtension(normalizedJob.output_url)
+  const extension = extensionOverride || getStorageExtension(normalizedJob.output_url)
   const date = normalizedJob.created_at ? new Date(Number(normalizedJob.created_at) * 1000).toISOString().slice(0, 10) : "undated"
   const type = sanitizePathPart(normalizedJob.type || "media")
   const id = sanitizePathPart(normalizedJob.id)
@@ -140,6 +148,32 @@ function getExtension(url: string): string {
   }
 }
 
+function getStorageExtension(url: string): string {
+  const extension = getExtension(url)
+  return extension === "png" ? "jpg" : extension
+}
+
+async function prepareDownloadedMedia(
+  outputUrl: string,
+  bytes: Buffer,
+): Promise<{ bytes: Buffer; extension: string; contentType: string | null }> {
+  const extension = getExtension(outputUrl)
+
+  if (extension !== "png") {
+    return {
+      bytes,
+      extension,
+      contentType: null,
+    }
+  }
+
+  return {
+    bytes: await pngBufferToHighQualityJpeg(bytes),
+    extension: "jpg",
+    contentType: "image/jpeg",
+  }
+}
+
 export async function getItems(searchParams: URLSearchParams): Promise<ItemsResponse> {
   const catalog = await loadCatalog()
   const query = (searchParams.get("q") || "").trim().toLowerCase()
@@ -149,8 +183,11 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
   const page = Math.max(1, Number(searchParams.get("page") || 1))
   const pageSize = clamp(Number(searchParams.get("pageSize") || 60), 12, 240)
 
-  let items = catalog.items || []
-  const facets = buildFacets(items)
+  const catalogItems = (catalog.items || []).filter((item) => !isStaleRenderingMediaItem(item))
+  const visibleItems = catalogItems.filter((item) => !isDeletedCatalogItem(item))
+  const deletedItems = catalogItems.filter(isDeletedCatalogItem)
+  let items = status === "deleted" ? deletedItems : visibleItems
+  const facets = buildFacets(visibleItems, deletedItems.length)
 
   if (media !== "all") {
     items = items.filter((item) => {
@@ -163,11 +200,12 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
   if (status !== "all") {
     items = items.filter((item) => {
       if (status === "downloaded") return Boolean(item.localFile)
-      if (status === "missing") return !item.localFile && !item.downloadError
+      if (status === "missing") return isMissingMediaItem(item)
       if (status === "error") return Boolean(item.downloadError)
       if (status === "favorited") return Boolean(item.favorited)
       if (status === "duplicate") return Number(item.duplicateGroupSize || 0) > 1
       if (status === "unverified") return Boolean(item.localFile) && !item.sha256
+      if (status === "deleted") return isDeletedCatalogItem(item)
       return true
     })
   }
@@ -205,7 +243,23 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
   }
 }
 
-export function buildFacets(items: CatalogItem[]): CatalogFacets {
+export async function getCatalogItem(id: string): Promise<CatalogItemResponse> {
+  if (!id) {
+    throw httpError("Item id is required.", 400)
+  }
+
+  const catalog = await loadCatalog()
+  const item = catalog.items.find((entry) => entry.id === id)
+  if (!item) {
+    throw httpError("Catalog item was not found.", 404)
+  }
+
+  return {
+    item: toPublicCatalogItem(item),
+  }
+}
+
+export function buildFacets(items: CatalogItem[], deletedCount = 0): CatalogFacets {
   const media = {
     all: items.length,
     image: 0,
@@ -219,13 +273,14 @@ export function buildFacets(items: CatalogItem[]): CatalogFacets {
     favorited: 0,
     duplicate: 0,
     unverified: 0,
+    deleted: deletedCount,
   }
 
   for (const item of items) {
     if (isImageItem(item)) media.image += 1
     if (isVideoItem(item)) media.video += 1
     if (item.localFile) status.downloaded += 1
-    if (!item.localFile && !item.downloadError) status.missing += 1
+    if (isMissingMediaItem(item)) status.missing += 1
     if (item.downloadError) status.error += 1
     if (item.favorited) status.favorited += 1
     if (Number(item.duplicateGroupSize || 0) > 1) status.duplicate += 1
@@ -276,12 +331,119 @@ export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
     sourceItemId: item.sourceItemId ?? null,
     sourceUrl: item.sourceUrl ?? null,
     createdLocallyAt: item.createdLocallyAt ?? null,
+    remoteDeletedAt: typeof item.remoteDeletedAt === "string" ? item.remoteDeletedAt : null,
+    remoteDeleteStatus: typeof item.remoteDeleteStatus === "string" ? item.remoteDeleteStatus : null,
     posterUrl: item.thumbnailFile ? mediaUrlForLocalFile(item.thumbnailFile) : null,
+  }
+}
+
+export async function deleteCatalogItemRemote(
+  id: string,
+  { keepLocalFiles = true }: { keepLocalFiles?: boolean } = {},
+): Promise<DeleteCatalogItemResponse> {
+  if (!id) {
+    throw httpError("Item id is required.", 400)
+  }
+
+  const catalog = await loadCatalog()
+  const item = catalog.items.find((entry) => entry.id === id)
+
+  if (!item) {
+    throw httpError("Catalog item was not found.", 404)
+  }
+
+  const remoteStatus = typeof item.remoteDeletedAt === "string" ? "previously-deleted" : (await deleteRemoteJob(id)).status
+  const now = new Date().toISOString()
+  let deletedLocalFiles: string[] = []
+  let responseItem: PublicCatalogItem | null = null
+
+  if (keepLocalFiles) {
+    item.remoteDeletedAt = typeof item.remoteDeletedAt === "string" ? item.remoteDeletedAt : now
+    item.remoteDeleteStatus = remoteStatus
+    item.updatedAt = now
+    responseItem = toPublicCatalogItem(item)
+  } else {
+    deletedLocalFiles = await deleteLocalCatalogFiles(item)
+    catalog.items = catalog.items.filter((entry) => entry.id !== id)
+    catalog.downloadedJobIds = (catalog.downloadedJobIds || []).filter((entry) => entry !== id)
+    catalog.orphanFiles = (catalog.orphanFiles || []).filter(
+      (file) => file.localFile !== item.localFile && file.localFile !== item.thumbnailFile,
+    )
+  }
+
+  catalog.updatedAt = now
+  await saveCatalog(catalog)
+
+  return {
+    ok: true,
+    id,
+    item: responseItem,
+    keepLocalFiles,
+    deletedLocalFiles,
+    remoteStatus,
+  }
+}
+
+export async function setCatalogItemFavoriteRemote(
+  id: string,
+  favorited: boolean,
+): Promise<{
+  ok: true
+  id: string
+  item: PublicCatalogItem
+  favorited: boolean
+}> {
+  if (!id) {
+    throw httpError("Item id is required.", 400)
+  }
+
+  const catalog = await loadCatalog()
+  const item = catalog.items.find((entry) => entry.id === id)
+
+  if (!item) {
+    throw httpError("Catalog item was not found.", 404)
+  }
+
+  await setRemoteJobFavorite(id, favorited)
+  item.favorited = favorited
+  item.updatedAt = new Date().toISOString()
+  catalog.updatedAt = item.updatedAt
+  await saveCatalog(catalog)
+
+  return {
+    ok: true,
+    id,
+    item: toPublicCatalogItem(item),
+    favorited,
   }
 }
 
 export function mediaUrlForLocalFile(localFile: string): string {
   return `/media/${String(localFile).split("/").map(encodeURIComponent).join("/")}`
+}
+
+async function deleteLocalCatalogFiles(item: CatalogItem): Promise<string[]> {
+  const deleted: string[] = []
+  const files = [item.localFile, item.thumbnailFile].filter((value): value is string => Boolean(value))
+
+  for (const localFile of files) {
+    const filePath = resolveMediaFilePath(localFile)
+    await rm(filePath, { force: true })
+    deleted.push(localFile)
+  }
+
+  return deleted
+}
+
+function resolveMediaFilePath(localFile: string): string {
+  const filePath = path.resolve(MEDIA_DIR, localFile)
+  const mediaRoot = path.resolve(MEDIA_DIR)
+
+  if (filePath !== mediaRoot && filePath.startsWith(`${mediaRoot}${path.sep}`)) {
+    return filePath
+  }
+
+  throw httpError("Local file path escapes the media directory.", 400)
 }
 
 export function sortItemsForView(items: CatalogItem[], sort: string): CatalogItem[] {
@@ -302,7 +464,63 @@ export function isImageItem(item: CatalogItem): boolean {
 }
 
 export function isVideoItem(item: CatalogItem): boolean {
-  return Boolean(item.localFile?.toLowerCase().endsWith(".mp4") || item.outputUrl?.toLowerCase().match(/\.mp4(?:[?#].*)?$/))
+  return Boolean(
+    item.type === "video" || item.localFile?.toLowerCase().endsWith(".mp4") || item.outputUrl?.toLowerCase().match(/\.mp4(?:[?#].*)?$/),
+  )
+}
+
+export function isPendingMediaItem(item: CatalogItem): boolean {
+  return isActiveNoMediaItem(item) && isRecentRenderingMediaItem(item)
+}
+
+export function isStaleRenderingMediaItem(item: CatalogItem, now = Date.now()): boolean {
+  if (!isActiveNoMediaItem(item)) return false
+
+  const startedAt = mediaItemRenderStartedAtMs(item)
+  return startedAt === null || now - startedAt >= RENDERING_MEDIA_MAX_AGE_MS
+}
+
+function isActiveNoMediaItem(item: CatalogItem): boolean {
+  return ACTIVE_MEDIA_STATUSES.has(String(item.status || "").toLowerCase()) && !item.localFile && !item.outputUrl
+}
+
+function isRecentRenderingMediaItem(item: CatalogItem, now = Date.now()): boolean {
+  const startedAt = mediaItemRenderStartedAtMs(item)
+  return startedAt !== null && now - startedAt < RENDERING_MEDIA_MAX_AGE_MS
+}
+
+function mediaItemRenderStartedAtMs(item: CatalogItem): number | null {
+  for (const value of [item.createdAtIso, item.createdLocallyAt, item.createdAt, item.updatedAt]) {
+    const timestamp = timestampMs(value)
+    if (timestamp !== null) return timestamp
+  }
+
+  return null
+}
+
+function timestampMs(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return null
+    return value > 1_000_000_000_000 ? value : value * 1000
+  }
+
+  if (typeof value !== "string") return null
+
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) return numeric > 1_000_000_000_000 ? numeric : numeric * 1000
+
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function isMissingMediaItem(item: CatalogItem): boolean {
+  return !item.localFile && !item.downloadError && !isPendingMediaItem(item)
+}
+
+function isDeletedCatalogItem(item: CatalogItem): boolean {
+  return typeof item.remoteDeletedAt === "string" && item.remoteDeletedAt.length > 0
 }
 
 export async function loadCatalog(): Promise<Catalog> {
@@ -473,7 +691,7 @@ export async function getLocalMediaFilesByJobId(): Promise<
 
   for (const file of entries) {
     const filename = path.basename(file.absolutePath)
-    const match = filename.match(/_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(png|mp4)$/i)
+    const match = filename.match(/_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.(png|jpe?g|mp4)$/i)
 
     if (!match) {
       continue
@@ -481,6 +699,11 @@ export async function getLocalMediaFilesByJobId(): Promise<
 
     const jobId = match[1]
     if (!jobId) {
+      continue
+    }
+
+    const current = files.get(jobId)
+    if (current && !isPreferredLocalMediaFile(file, current)) {
       continue
     }
 
@@ -515,6 +738,21 @@ export async function getLocalMediaFiles(): Promise<LocalMediaFile[]> {
   return files.toSorted((a, b) => a.localFile.localeCompare(b.localFile))
 }
 
+function isPreferredLocalMediaFile(
+  next: Pick<LocalMediaFile, "localFile" | "contentType">,
+  current: Pick<LocalMediaFile, "localFile" | "contentType">,
+): boolean {
+  if (current.contentType === "image/png" && next.contentType === "image/jpeg") {
+    return true
+  }
+
+  if (current.contentType === "image/jpeg" && next.contentType === "image/png") {
+    return false
+  }
+
+  return next.localFile.localeCompare(current.localFile) < 0
+}
+
 async function listMediaFiles(directory: string): Promise<string[]> {
   let entries: Dirent<string>[]
 
@@ -532,16 +770,24 @@ async function listMediaFiles(directory: string): Promise<string[]> {
     const entryPath = path.join(directory, entry.name)
 
     if (entry.isDirectory()) {
+      if (isInternalMediaDirectory(entry.name)) {
+        continue
+      }
+
       files.push(...(await listMediaFiles(entryPath)))
       continue
     }
 
-    if (entry.isFile() && /\.(png|mp4)$/i.test(entry.name)) {
+    if (entry.isFile() && /\.(png|jpe?g|mp4)$/i.test(entry.name)) {
       files.push(entryPath)
     }
   }
 
   return files
+}
+
+function isInternalMediaDirectory(name: string): boolean {
+  return name === "_thumbnails" || name === "_catalog_backups" || name === "_auth_browser_profile"
 }
 
 export function enqueueDownload(downloadQueue: GeneratePornJob[], queuedJobIds: Set<string>, job: GeneratePornJob): void {

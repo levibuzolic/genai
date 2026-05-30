@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
+import { replaceEqualJson } from "@/lib/render-state"
 import type { Config } from "@/types/domain"
 
 export function useConfig() {
@@ -9,9 +10,9 @@ export function useConfig() {
   const loadConfig = React.useCallback(async () => {
     try {
       const next = await fetchJson<Config>("/api/config")
-      setConfig(next)
+      setConfig((current) => replaceEqualJson(current, next))
     } catch {
-      setConfig(null)
+      setConfig((current) => (current === null ? current : null))
     }
   }, [])
 
@@ -21,9 +22,9 @@ export function useConfig() {
     async function loadInitialConfig() {
       try {
         const next = await fetchJson<Config>("/api/config")
-        if (!cancelled) setConfig(next)
+        if (!cancelled) setConfig((current) => replaceEqualJson(current, next))
       } catch {
-        if (!cancelled) setConfig(null)
+        if (!cancelled) setConfig((current) => (current === null ? current : null))
       }
     }
 

@@ -15,6 +15,14 @@ export function formatDate(value?: string | number | null) {
   }).format(new Date(value))
 }
 
+export function formatShortMonthDay(value?: string | number | null) {
+  if (!value) return ""
+  return new Intl.DateTimeFormat(undefined, {
+    day: "numeric",
+    month: "short",
+  }).format(new Date(value))
+}
+
 export function formatTime(value?: string | null) {
   if (!value) return ""
   return new Intl.DateTimeFormat(undefined, {

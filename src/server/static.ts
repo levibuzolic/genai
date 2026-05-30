@@ -11,14 +11,18 @@ type RangeResult = { ok: true; start: number; end: number } | { ok: false } | nu
 
 export async function serveStatic(response: HttpResponse, pathname: string): Promise<void> {
   const cleanPath = pathname === "/" ? "/index.html" : pathname
-  const filePath = path.resolve(PUBLIC_DIR, `.${cleanPath}`)
+  let filePath = path.resolve(PUBLIC_DIR, `.${cleanPath}`)
 
   if (!filePath.startsWith(PUBLIC_DIR)) {
     return sendJson(response, { error: "Not found" }, 404)
   }
 
   if (!(await fileExists(filePath))) {
-    return sendJson(response, { error: "Not found" }, 404)
+    const indexPath = path.resolve(PUBLIC_DIR, "./index.html")
+    if (path.extname(cleanPath) || !(await fileExists(indexPath))) {
+      return sendJson(response, { error: "Not found" }, 404)
+    }
+    filePath = indexPath
   }
 
   response.writeHead(200, {
@@ -153,7 +157,7 @@ export function sendJson(response: HttpResponse, body: unknown, statusCode = 200
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
-    "access-control-allow-methods": "GET, POST, OPTIONS",
+    "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type",
   })
   response.end(`${JSON.stringify(body, null, 2)}\n`)

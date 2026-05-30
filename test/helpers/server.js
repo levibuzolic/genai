@@ -3,6 +3,10 @@ import path from "node:path"
 import { DatabaseSync } from "node:sqlite"
 
 const SERVER_PATH = new URL("../../src/server.ts", import.meta.url)
+export const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+  "base64",
+)
 
 export async function importServer(mediaDir, env = {}) {
   const previousEnv = {
@@ -165,6 +169,10 @@ function closeServer(server) {
 }
 
 export function postJson(port, pathname, body = {}) {
+  return requestJson(port, pathname, "POST", body)
+}
+
+export function requestJson(port, pathname, method, body = {}) {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body)
     const request = http.request(
@@ -172,7 +180,7 @@ export function postJson(port, pathname, body = {}) {
         hostname: "127.0.0.1",
         port,
         path: pathname,
-        method: "POST",
+        method,
         headers: {
           "content-type": "application/json",
           "content-length": Buffer.byteLength(payload),

@@ -1,5 +1,4 @@
-import { Boxes, CircleAlert, ShieldCheck, Sparkles } from "lucide-react"
-import type * as React from "react"
+import { Boxes, CircleAlert, ShieldCheck, Sparkles, Trash2 } from "lucide-react"
 
 import type { ItemsResponse } from "@/types/domain"
 
@@ -9,12 +8,10 @@ export function SummaryStrip({
   facets,
   status,
   setStatus,
-  setPage,
 }: {
   facets: ItemsResponse["facets"]
   status: string
   setStatus: (value: string) => void
-  setPage: React.Dispatch<React.SetStateAction<number>>
 }) {
   return (
     <section id="summaryCards" className="summary-strip" aria-label="Collection summary">
@@ -24,10 +21,7 @@ export function SummaryStrip({
         icon={CircleAlert}
         tone="warning"
         active={status === "missing"}
-        onClick={() => {
-          setPage(1)
-          setStatus("missing")
-        }}
+        onClick={() => setStatus("missing")}
       />
       <SummaryPill
         label="Unverified"
@@ -35,10 +29,7 @@ export function SummaryStrip({
         icon={ShieldCheck}
         tone="info"
         active={status === "unverified"}
-        onClick={() => {
-          setPage(1)
-          setStatus("unverified")
-        }}
+        onClick={() => setStatus("unverified")}
       />
       <SummaryPill
         label="Favorited"
@@ -46,10 +37,15 @@ export function SummaryStrip({
         icon={Sparkles}
         tone="success"
         active={status === "favorited"}
-        onClick={() => {
-          setPage(1)
-          setStatus("favorited")
-        }}
+        onClick={() => setStatus("favorited")}
+      />
+      <SummaryPill
+        label="Deleted"
+        value={facets.status?.deleted || 0}
+        icon={Trash2}
+        tone="danger"
+        active={status === "deleted"}
+        onClick={() => setStatus("deleted")}
       />
       <SummaryPill label="Orphans" value={facets.orphanFiles || 0} icon={Boxes} tone="muted" />
     </section>

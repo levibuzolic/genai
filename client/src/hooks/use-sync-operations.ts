@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
+import { replaceEqualJson } from "@/lib/render-state"
 import type { SyncStatus } from "@/types/domain"
 
 const ACTIVE_POLL_MS = 1400
@@ -21,6 +22,7 @@ const defaultSyncStatus: SyncStatus = {
 export function useSyncOperations(onSettled: () => void) {
   const [syncStatus, setSyncStatus] = React.useState<SyncStatus>(defaultSyncStatus)
   const onSettledRef = React.useRef(onSettled)
+  const lastSettledFinishedAtRef = React.useRef<string | null>(defaultSyncStatus.finishedAt || null)
 
   React.useEffect(() => {
     onSettledRef.current = onSettled
@@ -34,9 +36,12 @@ export function useSyncOperations(onSettled: () => void) {
       try {
         const next = await fetchJson<SyncStatus>("/api/sync/status")
         if (cancelled) return
-        setSyncStatus(next)
+        setSyncStatus((current) => replaceEqualJson(current, next))
         timer = window.setTimeout(poll, next.running ? ACTIVE_POLL_MS : IDLE_POLL_MS)
-        if (!next.running && next.finishedAt) onSettledRef.current()
+        if (!next.running && next.finishedAt && next.finishedAt !== lastSettledFinishedAtRef.current) {
+          lastSettledFinishedAtRef.current = next.finishedAt
+          onSettledRef.current()
+        }
       } catch {
         timer = window.setTimeout(poll, IDLE_POLL_MS)
       }
@@ -49,35 +54,38 @@ export function useSyncOperations(onSettled: () => void) {
     }
   }, [])
 
-  async function startSync(incremental: boolean) {
+  const startSync = React.useCallback(async (incremental: boolean) => {
     const data = await fetchJson<{ ok: boolean }>("/api/sync/start", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ incremental }),
     })
     if (data.ok) {
-      setSyncStatus((current) => ({ ...current, running: true, status: "syncing", message: "Sync started." }))
+      setSyncStatus((current) => replaceEqualJson(current, { ...current, running: true, status: "syncing", message: "Sync started." }))
     }
-  }
+  }, [])
 
   async function startDownload(modeName: "missing" | "retry-errors") {
     const endpoint = modeName === "missing" ? "/api/download/missing" : "/api/download/retry-errors"
     await fetchJson(endpoint, { method: "POST" })
-    setSyncStatus((current) => ({ ...current, running: true, status: modeName, message: "Download queued." }))
+    setSyncStatus((current) => replaceEqualJson(current, { ...current, running: true, status: modeName, message: "Download queued." }))
   }
 
   async function startThumbnailGeneration() {
     await fetchJson("/api/thumbnails/generate", { method: "POST" })
-    setSyncStatus((current) => ({ ...current, running: true, status: "thumbnails", message: "Thumbnail generation queued." }))
+    setSyncStatus((current) =>
+      replaceEqualJson(current, { ...current, running: true, status: "thumbnails", message: "Thumbnail generation queued." }),
+    )
   }
 
   async function startLibraryVerification() {
     await fetchJson("/api/library/verify", { method: "POST" })
-    setSyncStatus((current) => ({ ...current, running: true, status: "verify", message: "Verification queued." }))
+    setSyncStatus((current) => replaceEqualJson(current, { ...current, running: true, status: "verify", message: "Verification queued." }))
   }
 
   async function cancelSync() {
-    setSyncStatus(await fetchJson<SyncStatus>("/api/sync/cancel", { method: "POST" }))
+    const next = await fetchJson<SyncStatus>("/api/sync/cancel", { method: "POST" })
+    setSyncStatus((current) => replaceEqualJson(current, next))
   }
 
   return {

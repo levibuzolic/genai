@@ -65,6 +65,13 @@ TypeScript is strict. Keep it that way.
 - Use Oxfmt for source/config formatting. Do not manually churn formatting that `pnpm format` will handle.
 - The config intentionally disables noisy rules for modern JSX runtime, intentional sequential async loops, CSS side-effect imports, and routine inline React event handlers.
 
+## Implementation Vs Concepts
+
+- Production code, maintained tests, and checked-in implementation files should stay modular and under 1000 lines where practical.
+- TypeScript, lint, formatting, and test expectations apply to actual app/server/client code and maintained tests.
+- Exploratory mockups, design concepts, sketches, throwaway prototypes, and notes under places like `output/` or `research/` may bend those rules when clarity or speed matters.
+- For concept artifacts, optimize for communicating the idea. Only harden, split, type, lint, or productionize them when they are being moved into the actual app.
+
 ## Frontend Structure
 
 - `client/src/App.tsx` should stay as orchestration only.

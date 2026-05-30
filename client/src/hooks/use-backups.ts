@@ -1,6 +1,7 @@
 import * as React from "react"
 
 import { fetchJson } from "@/lib/api"
+import { replaceEqualJson } from "@/lib/render-state"
 import type { Backup } from "@/types/domain"
 import type { CatalogBackupsResponse, CatalogBackupResponse, CatalogRestoreResponse } from "@/types/routes"
 
@@ -14,7 +15,7 @@ export function useBackups(onRestore: () => Promise<void>) {
 
   async function loadBackups() {
     const data = await fetchJson<CatalogBackupsResponse>("/api/catalog/backups")
-    setBackups(data.backups || [])
+    setBackups((current) => replaceEqualJson(current, data.backups || []))
     setSelectedBackup((current) => current || data.backups?.[0]?.file || "")
   }
 

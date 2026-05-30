@@ -85,9 +85,8 @@
 }
 
 .toolbar,
-.pager,
+.indexStatusBar,
 .createPanel,
-.createResult,
 .creationHistory,
 .templateTools,
 .settingsPane,
@@ -116,7 +115,7 @@
 }
 
 .summary-strip {
-  @apply grid grid-cols-2 border-b md:grid-cols-4;
+  @apply grid grid-cols-2 border-b md:grid-cols-5;
 }
 
 .summaryCard {
@@ -151,6 +150,10 @@
   @apply text-emerald-300;
 }
 
+.tone-danger svg {
+  @apply text-red-300;
+}
+
 .filter-chips {
   @apply flex flex-wrap items-center gap-2;
 }
@@ -159,12 +162,12 @@
   @apply rounded-full;
 }
 
-#pageStatus {
-  @apply text-xs text-muted-foreground;
-}
-
 #libraryStatus {
   @apply text-xs tabular-nums text-muted-foreground;
+}
+
+.indexStatusBar {
+  @apply grid items-center gap-2 border-b bg-background px-3 py-2 md:grid-cols-[minmax(0,1fr)_auto];
 }
 
 .media-grid {
@@ -175,10 +178,41 @@
   @apply grid-cols-1;
 }
 
+.virtual-media-grid {
+  @apply items-start;
+}
+
+.virtualSpacer {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.loadMoreSentinel {
+  @apply h-px;
+}
+
+.loadMoreStatus {
+  @apply border-b bg-background px-3 py-3 text-center text-xs text-muted-foreground;
+}
+
 .media-card {
   @apply overflow-hidden rounded-md border bg-card transition-colors hover:border-border hover:bg-accent/40;
   content-visibility: auto;
   contain-intrinsic-size: 320px;
+}
+
+.media-card.is-deleted {
+  @apply border-red-900/70 bg-red-950/25 hover:border-red-700/70 hover:bg-red-950/35;
+}
+
+.media-card.is-deleted .preview,
+.media-card.is-deleted .mediaPreviewButton,
+.media-card.is-deleted .cardActions {
+  @apply bg-red-950/20;
+}
+
+.media-card.is-deleted .cardBody {
+  @apply bg-red-950/20;
 }
 
 .media-card.is-list {
@@ -195,49 +229,78 @@
 
 .preview img,
 .preview video,
-.createSourcePreview img,
-.createSourcePreview video,
-.createResultPreview img,
-.createResultPreview video,
 .detailPreview img,
 .detailPreview video {
   @apply h-full w-full object-contain;
 }
 
+.detailPreview img,
+.detailPreview video {
+  object-fit: contain;
+}
+
+.preview > img,
+.preview > video,
+.mediaPreviewButton > img {
+  @apply absolute inset-0;
+}
+
 .media-fit-fill .preview img,
 .media-fit-fill .preview video,
-.media-fit-fill .videoPosterButton img {
+.media-fit-fill .mediaPreviewButton img {
   @apply object-cover;
 }
 
 .media-fit-contain .preview img,
 .media-fit-contain .preview video,
-.media-fit-contain .videoPosterButton img {
+.media-fit-contain .mediaPreviewButton img {
   @apply object-contain;
 }
 
-.videoPosterButton {
-  @apply relative grid h-full w-full place-items-center border-0 bg-background p-0 text-muted-foreground;
+.mediaPreviewButton {
+  @apply relative grid h-full w-full place-items-center border-0 bg-background p-0 text-muted-foreground transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none;
 }
 
-.videoPosterButton img {
+.mediaPreviewButton img {
   @apply h-full w-full;
 }
 
-.videoPosterFallback {
+.thumbnailFallback {
   @apply text-xs text-muted-foreground;
 }
 
-.videoPlayBadge {
-  @apply absolute grid size-10 place-items-center rounded-full border bg-background/80 text-foreground shadow-sm;
+.previewOpenBadge {
+  @apply pointer-events-none absolute right-1.5 top-1.5 z-10 hidden size-8 place-items-center rounded-full border bg-background/80 text-foreground opacity-0 shadow-sm backdrop-blur-sm transition-opacity md:grid;
+}
+
+.media-card:hover .previewOpenBadge,
+.media-card:focus-within .previewOpenBadge {
+  @apply opacity-100;
+}
+
+.mediaTypeBadge {
+  @apply pointer-events-none absolute top-1.5 left-1.5 z-10 grid size-6 place-items-center rounded-md border bg-background/85 text-foreground shadow-sm backdrop-blur-sm;
+}
+
+.mediaTypeBadge svg {
+  @apply size-3.5;
+}
+
+.deletedMediaBadge {
+  @apply pointer-events-none absolute right-1.5 top-1.5 z-20 grid size-8 place-items-center rounded-full border border-red-500/60 bg-red-950/90 text-red-200 shadow-sm shadow-red-950/50 backdrop-blur-sm;
+}
+
+.deletedMediaBadge svg {
+  @apply size-4;
+}
+
+.media-card.is-deleted .previewOpenBadge {
+  @apply right-10;
 }
 
 .media-blurred .preview img,
 .media-blurred .preview video,
-.media-blurred .createSourcePreview img,
-.media-blurred .createSourcePreview video,
-.media-blurred .createResultPreview img,
-.media-blurred .createResultPreview video,
+.media-blurred .templatePreviewStrip img,
 .media-blurred .detailPreview img,
 .media-blurred .detailPreview video {
   filter: blur(22px) saturate(0.55) brightness(0.75);
@@ -248,15 +311,20 @@
 
 .media-blurred .preview img,
 .media-blurred .preview video,
-.media-blurred .createSourcePreview img,
-.media-blurred .createSourcePreview video,
-.media-blurred .createResultPreview img,
-.media-blurred .createResultPreview video {
+.media-blurred .templatePreviewStrip img {
   transform: scale(1.035);
 }
 
 .missing-preview {
   @apply grid place-items-center gap-2 p-4 text-center text-muted-foreground;
+}
+
+.pending-preview {
+  @apply grid place-items-center gap-2 p-4 text-center text-muted-foreground;
+}
+
+.pendingPreview {
+  @apply border-dashed bg-muted/20;
 }
 
 .durationBadge {
@@ -286,15 +354,39 @@
 
 .cardFooter,
 .cardActions {
-  @apply flex items-center justify-end gap-1;
+  @apply flex items-center justify-end;
 }
 
 .cardActions {
-  @apply w-full;
+  @apply grid w-full grid-flow-col auto-cols-fr overflow-hidden rounded-md border bg-background;
+}
+
+.cardActions [data-slot="button"] {
+  @apply h-8 w-full rounded-none border-0 border-r bg-transparent shadow-none last:border-r-0 hover:bg-accent;
 }
 
 .cardCreateButton {
-  @apply border-border bg-card text-foreground hover:bg-accent;
+  @apply text-foreground;
+}
+
+.favoriteButton.is-favorited {
+  @apply text-rose-300;
+}
+
+.deleteRemoteButton {
+  @apply text-muted-foreground hover:text-destructive;
+}
+
+.deleteDialog {
+  @apply max-w-sm;
+}
+
+.deleteKeepLocal {
+  @apply mx-5 flex items-center gap-2 rounded-md border bg-background px-3 py-2 text-sm;
+}
+
+.deleteKeepLocal input {
+  @apply size-4 accent-foreground;
 }
 
 .empty-state {
@@ -314,12 +406,12 @@
 }
 
 .create-studio {
-  @apply relative z-10 mb-0 flex h-[calc(100dvh-1rem)] w-full max-w-[1600px] flex-col overflow-auto rounded-lg border bg-background p-0 shadow-2xl md:h-[calc(100dvh-1.5rem)] xl:overflow-hidden;
+  @apply relative z-10 mb-0 flex h-[calc(100dvh-1rem)] w-full max-w-[1720px] flex-col overflow-auto rounded-lg border bg-background p-0 shadow-2xl md:h-[calc(100dvh-1.5rem)] xl:overflow-hidden;
   scroll-margin-top: 0;
 }
 
 .createHeader {
-  @apply z-10 flex shrink-0 items-center justify-between gap-3 bg-background px-4 py-3;
+  @apply z-10 flex shrink-0 items-center justify-between gap-3 bg-background px-4 py-2.5;
 }
 
 .createHeader h2 {
@@ -330,29 +422,73 @@
   @apply mt-0.5 text-xs text-muted-foreground;
 }
 
+.createHeaderActions {
+  @apply grid shrink-0 grid-cols-[minmax(6.5rem,auto)_auto_auto] gap-0 overflow-hidden rounded-md border bg-background;
+}
+
+.createHeaderActions [data-slot="button"] {
+  @apply h-9 min-w-0 rounded-none border-0 border-r shadow-none last:border-r-0;
+}
+
 .createLayout {
-  @apply grid gap-0 border-t xl:min-h-0 xl:flex-1 xl:grid-cols-[340px_minmax(0,1fr)_300px] xl:overflow-hidden;
+  @apply grid gap-0 border-t xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(360px,430px)_minmax(520px,1fr)] xl:overflow-hidden;
 }
 
 .createPanel {
-  @apply grid content-start gap-3 border-b bg-background p-3 xl:min-h-0 xl:overflow-y-auto xl:border-r xl:border-b-0;
-}
-
-.createResult {
-  @apply grid min-h-[560px] grid-rows-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-0 border-b bg-background xl:min-h-0 xl:overflow-hidden xl:border-r xl:border-b-0;
+  @apply grid content-start gap-2.5 border-b bg-background p-3 xl:min-h-0 xl:overflow-y-auto xl:border-r xl:border-b-0;
 }
 
 .sourcePanel,
 .templateImport {
-  @apply grid gap-3;
+  @apply grid gap-2;
+}
+
+.createModeGrid {
+  @apply grid gap-2 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2;
+}
+
+.createNudifyToggle {
+  @apply flex min-h-8 items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-sm;
+}
+
+.createNudifyToggle input {
+  @apply size-4 accent-foreground;
+}
+
+.selectedSourcePreview {
+  @apply grid min-h-[4.5rem] grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-2 overflow-hidden rounded-md border bg-card p-2;
+}
+
+.selectedSourcePreview img {
+  @apply h-14 w-16 rounded-sm object-cover;
+}
+
+.selectedSourcePreview div {
+  @apply grid min-w-0 gap-1;
+}
+
+.selectedSourcePreview span {
+  @apply text-[11px] text-muted-foreground;
+}
+
+.selectedSourcePreview strong {
+  @apply line-clamp-2 text-xs leading-4 font-medium;
 }
 
 .field {
   @apply grid gap-2;
 }
 
+.createPromptInput {
+  @apply min-h-28 resize-y;
+}
+
+.createNegativePromptInput {
+  @apply min-h-16 resize-y;
+}
+
 .uploadDropZone {
-  @apply grid min-h-20 cursor-pointer place-items-center gap-1 rounded-md border border-dashed bg-background p-3 text-center transition-colors hover:bg-accent;
+  @apply grid min-h-[4.5rem] cursor-pointer place-items-center gap-1 rounded-md border border-dashed bg-background p-2 text-center transition-colors hover:bg-accent;
 }
 
 .uploadDropZone span {
@@ -363,13 +499,8 @@
   @apply border-foreground/40 bg-accent;
 }
 
-.createActions {
-  @apply sticky bottom-0 z-10 grid grid-cols-[1fr_auto] gap-2 border-t bg-background pt-3;
-  width: 100%;
-}
-
 .templateTools {
-  @apply grid gap-3 overflow-visible border-t bg-transparent pt-3;
+  @apply grid gap-2 overflow-visible border-t bg-transparent pt-2.5;
 }
 
 .templateTools summary {
@@ -393,7 +524,7 @@
 
 .templatePicker,
 .templateSaveInline {
-  @apply grid gap-2;
+  @apply grid gap-1.5;
 }
 
 .selectedTemplateLine {
@@ -412,50 +543,12 @@
   @apply pt-1;
 }
 
-.createSourcePreviewSlot,
-.createResultPreview {
-  @apply grid min-h-0 place-items-center overflow-hidden border-b bg-background text-xs text-muted-foreground;
-}
-
-.createSourcePreviewSlot {
-  @apply relative;
-}
-
-.createSourcePreview {
-  @apply grid h-full w-full place-items-center overflow-hidden text-xs text-muted-foreground;
-}
-
-.createClearSourceButton {
-  @apply absolute top-2 right-2;
-}
-
-.createResultMeta {
-  @apply min-w-0 bg-background;
-}
-
-.createResultFacts {
-  @apply grid grid-cols-[108px_minmax(0,1fr)] gap-x-3 gap-y-2 border-b p-3 text-xs;
-}
-
-.createResultFacts dt {
-  @apply text-muted-foreground;
-}
-
-.createResultFacts dd {
-  @apply min-w-0 break-words text-foreground;
-}
-
-.createResultActions {
-  @apply flex flex-wrap items-center gap-2 p-3;
-  width: 100%;
-}
-
 .creationHistory {
-  @apply min-h-0 overflow-y-auto bg-background p-3;
+  @apply min-h-0 overflow-y-auto bg-background p-3 xl:grid xl:grid-rows-[auto_auto_minmax(0,1fr)] xl:overflow-hidden;
 }
 
 .creationHistoryHeader {
-  @apply flex flex-col gap-3 md:flex-row md:items-center md:justify-between;
+  @apply flex items-start justify-between gap-3;
 }
 
 .creationHistoryHeader h3 {
@@ -468,11 +561,20 @@
 }
 
 .creationHistorySections {
-  @apply mt-3 grid gap-3;
+  @apply mt-3 grid gap-4 xl:min-h-0 xl:items-start xl:overflow-y-auto xl:pr-1;
 }
 
 .creationHistoryGroup {
   @apply grid content-start gap-2;
+}
+
+.creationHistoryGroup.is-recent {
+  @apply xl:grid-cols-2 xl:gap-x-3;
+}
+
+.creationHistoryGroup.is-recent .creationHistoryEyebrow,
+.creationHistoryGroup.is-recent .creationHistoryEmpty {
+  @apply xl:col-span-2;
 }
 
 .creationHistoryEyebrow {
@@ -480,7 +582,7 @@
 }
 
 .creationHistoryRow {
-  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 border-b bg-transparent p-2;
+  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-1.5 border-b bg-transparent py-1.5 xl:min-h-11;
 }
 
 .creationHistoryRow.is-active {
@@ -488,7 +590,23 @@
 }
 
 .creationHistoryMain {
-  @apply grid min-w-0 gap-0.5 rounded-md bg-transparent p-1 text-left hover:bg-accent;
+  @apply grid min-w-0 grid-cols-[42px_minmax(0,1fr)] items-center gap-2 rounded-md bg-transparent p-1 text-left hover:bg-accent xl:grid-cols-[36px_minmax(0,1fr)];
+}
+
+.creationHistoryThumb {
+  @apply grid size-10 shrink-0 place-items-center overflow-hidden rounded-sm border bg-card text-muted-foreground xl:size-9;
+}
+
+.creationHistoryThumb img {
+  @apply h-full w-full object-cover;
+}
+
+.creationHistoryThumb svg {
+  @apply size-4;
+}
+
+.creationHistoryText {
+  @apply grid min-w-0 gap-0.5;
 }
 
 .creationHistoryTitle {
@@ -497,6 +615,10 @@
 
 .creationHistoryMeta {
   @apply truncate text-xs text-muted-foreground;
+}
+
+.creationHistoryStatusBadge {
+  @apply max-w-20 px-1.5 py-0 text-[11px];
 }
 
 .creationHistoryEmpty {
@@ -622,29 +744,17 @@
   @apply border border-dashed bg-background p-4 text-xs text-muted-foreground;
 }
 
-.detailFacts {
-  @apply grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-2 border bg-background p-3 text-xs;
-}
-
-.detailFacts dt {
-  @apply text-muted-foreground;
-}
-
-.detailFacts dd {
-  @apply min-w-0 break-words text-foreground;
-}
-
 .dialogActions {
   @apply flex flex-col items-stretch gap-2;
 }
 
 .detailActionGroup {
-  @apply flex flex-wrap items-center gap-1.5;
+  @apply flex flex-wrap items-center gap-0 overflow-hidden rounded-md border bg-background;
 }
 
 .detailActionGroup button,
 .detailActionGroup a {
-  @apply h-8;
+  @apply h-8 rounded-none border-0 border-r shadow-none last:border-r-0;
 }
 
 .detailActionSecondary {
@@ -664,19 +774,50 @@
 }
 
 .detailPreview {
-  @apply grid aspect-square place-items-center overflow-hidden bg-background;
-  align-self: center;
-  justify-self: center;
-  width: min(100%, calc(100dvh - 3rem));
-  max-width: min(100%, calc(100dvw - 28rem));
+  @apply relative col-start-1 row-start-1 grid h-full min-h-0 w-full place-items-center overflow-hidden bg-background;
+}
+
+.detailPreview[data-media="image"],
+.detailPreview[data-media="missing"] {
+  @apply p-3;
+}
+
+.detailPreview > img,
+.detailPreview > video {
+  @apply absolute inset-0 block max-h-full max-w-full;
+}
+
+.detailPreview[data-media="video"] video {
+  @apply block h-full w-full;
 }
 
 .detailPanel {
-  @apply grid min-h-0 content-start gap-4 overflow-y-auto border-l p-4 pt-10;
+  @apply col-start-2 row-start-1 grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3 overflow-hidden border-l p-4;
 }
 
+.detailPanelHeader {
+  @apply flex min-h-9 items-center justify-end;
+}
+
+.detailPanelContent {
+  @apply grid min-h-0 content-start gap-4 overflow-y-auto pr-1;
+}
+
+.detailNav {
+  @apply grid grid-cols-2 gap-2 border-t pt-3;
+}
+
+.detailNavButton {
+  @apply h-9 min-w-0 justify-center gap-1.5 border bg-background/80 text-xs text-foreground shadow-sm disabled:opacity-30;
+}
+
+.detailSectionHeader {
+  @apply mb-2 flex min-h-6 items-center justify-between gap-2;
+}
+
+.detailSectionHeader h3,
 .detailPanel h3 {
-  @apply mb-2 text-xs font-medium text-muted-foreground;
+  @apply text-xs font-medium text-muted-foreground;
 }
 
 .detailText {
@@ -740,12 +881,32 @@
 }
 
 .settingsActionGrid {
-  @apply grid gap-2 sm:grid-cols-2;
+  @apply grid gap-0 overflow-hidden rounded-md border bg-background sm:grid-cols-2;
 }
 
 .settingsActionGrid button,
 .settingsActionGrid a {
-  @apply min-w-0 justify-start overflow-hidden;
+  @apply min-w-0 justify-start overflow-hidden rounded-none border-0 border-b bg-transparent shadow-none sm:border-r;
+}
+
+.settingsActionGrid button:nth-child(2n),
+.settingsActionGrid a:nth-child(2n) {
+  @apply sm:border-r-0;
+}
+
+.settingsActionGrid button:nth-last-child(-n + 2),
+.settingsActionGrid a:nth-last-child(-n + 2) {
+  @apply sm:border-b-0;
+}
+
+.settingsActionGrid button:last-child,
+.settingsActionGrid a:last-child {
+  @apply border-b-0;
+}
+
+.settingsActionGrid button:last-child:nth-child(odd),
+.settingsActionGrid a:last-child:nth-child(odd) {
+  @apply sm:col-span-2 sm:border-r-0;
 }
 
 .settingsAccountStatus,
@@ -788,17 +949,8 @@
     @apply text-left;
   }
 
-  .createLayout,
-  .createResult {
+  .createLayout {
     @apply grid-cols-1;
-  }
-
-  .createSourcePreview {
-    @apply h-[220px];
-  }
-
-  .createResultPreview {
-    @apply h-[280px];
   }
 
   .creationHistoryRow {
@@ -828,11 +980,7 @@
   }
 
   .cardActions {
-    @apply grid grid-cols-2;
-  }
-
-  .cardActions a {
-    @apply col-span-2;
+    @apply grid-flow-col auto-cols-fr;
   }
 
   .detailDialog {
@@ -846,15 +994,10 @@
   }
 
   .detailPreview {
-    width: min(100dvw, 58dvh);
-    max-width: 100%;
+    @apply col-start-1 row-start-1 p-0;
   }
 
   .detailPanel {
-    @apply border-t border-l-0 p-4;
-  }
-
-  .detailFacts {
-    @apply grid-cols-1;
+    @apply col-start-1 row-start-2 border-t border-l-0 p-4;
   }
 }

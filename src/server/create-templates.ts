@@ -13,7 +13,17 @@ import { hasApiAuth } from "./auth-state.ts"
 import { findCreationJob, listCatalogItemsByTemplate, readCatalogMeta, writeCatalogMeta } from "./catalog-db.ts"
 import { jobFromCatalogItem, loadCatalog, toPublicCatalogItem } from "./catalog.ts"
 import { CREATE_HISTORY_PAGE_LIMIT, MEDIA_DIR } from "./config.ts"
-import { CREATE_BUILTIN_TEMPLATE_SEEDS, CREATE_IMAGE_ACCEPT, CREATE_POLL_MS, CREATE_VIDEO_QUALITY_OPTIONS } from "./create-constants.ts"
+import {
+  CREATE_BUILTIN_TEMPLATE_SEEDS,
+  CREATE_IMAGE_ACCEPT,
+  CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
+  CREATE_IMAGE_DEFAULT_MODEL_ID,
+  CREATE_VIDEO_DEFAULT_DURATION,
+  CREATE_VIDEO_DEFAULT_QUALITY,
+  CREATE_VIDEO_DEFAULT_RESOLUTION,
+  CREATE_POLL_MS,
+  CREATE_VIDEO_QUALITY_OPTIONS,
+} from "./create-constants.ts"
 import {
   parseCreateSubmissionRequest,
   parseCreateTemplateInput,
@@ -41,6 +51,33 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
       },
       fields: [{ name: "prompt", label: "Prompt", type: "textarea", required: true }],
       defaults: {
+        seed: null,
+      },
+    },
+    {
+      id: "text-to-image",
+      label: "Text to Image",
+      kind: "custom",
+      mediaType: "image",
+      endpoint: "text2image",
+      source: {
+        required: false,
+        acceptedKinds: [],
+      },
+      fields: [
+        { name: "prompt", label: "Prompt", type: "textarea", required: true },
+        {
+          name: "quality",
+          label: "Aspect ratio",
+          type: "select",
+          required: true,
+          default: "3:4",
+          options: CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
+        },
+      ],
+      defaults: {
+        modelId: CREATE_IMAGE_DEFAULT_MODEL_ID,
+        aspectRatio: "3:4",
         seed: null,
       },
     },
@@ -76,7 +113,7 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
           label: "Quality",
           type: "select",
           required: true,
-          default: "720p-4",
+          default: CREATE_VIDEO_DEFAULT_QUALITY,
           options: CREATE_VIDEO_QUALITY_OPTIONS.map((option) => ({
             value: `${option.resolution}-${option.duration}`,
             label: option.label,
@@ -86,8 +123,72 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
         },
       ],
       defaults: {
-        resolution: "720p",
-        duration: 4,
+        resolution: CREATE_VIDEO_DEFAULT_RESOLUTION,
+        duration: CREATE_VIDEO_DEFAULT_DURATION,
+        seed: null,
+      },
+    },
+    {
+      id: "custom-image-video",
+      label: "Image Edit + Video",
+      kind: "workflow",
+      mediaType: "video",
+      endpoint: "workflow",
+      source: {
+        required: true,
+        acceptedKinds: ["catalog", "upload", "url"],
+      },
+      fields: [
+        { name: "prompt", label: "Prompt", type: "textarea", required: true },
+        {
+          name: "quality",
+          label: "Quality",
+          type: "select",
+          required: true,
+          default: CREATE_VIDEO_DEFAULT_QUALITY,
+          options: CREATE_VIDEO_QUALITY_OPTIONS.map((option) => ({
+            value: `${option.resolution}-${option.duration}`,
+            label: option.label,
+            resolution: option.resolution,
+            duration: option.duration,
+          })),
+        },
+      ],
+      defaults: {
+        resolution: CREATE_VIDEO_DEFAULT_RESOLUTION,
+        duration: CREATE_VIDEO_DEFAULT_DURATION,
+        seed: null,
+      },
+    },
+    {
+      id: "nudify-video",
+      label: "Nudify + Video",
+      kind: "workflow",
+      mediaType: "video",
+      endpoint: "workflow",
+      source: {
+        required: true,
+        acceptedKinds: ["catalog", "upload", "url"],
+      },
+      fields: [
+        { name: "prompt", label: "Video prompt", type: "textarea", required: true },
+        {
+          name: "quality",
+          label: "Quality",
+          type: "select",
+          required: true,
+          default: CREATE_VIDEO_DEFAULT_QUALITY,
+          options: CREATE_VIDEO_QUALITY_OPTIONS.map((option) => ({
+            value: `${option.resolution}-${option.duration}`,
+            label: option.label,
+            resolution: option.resolution,
+            duration: option.duration,
+          })),
+        },
+      ],
+      defaults: {
+        resolution: CREATE_VIDEO_DEFAULT_RESOLUTION,
+        duration: CREATE_VIDEO_DEFAULT_DURATION,
         seed: null,
       },
     },
@@ -176,7 +277,7 @@ export async function prepareCreateSubmission(requestBody: Record<string, unknow
 
   if (template) {
     const settings = getPrimaryTemplateSettings(template)
-    const modeId = body.modeId || settings.modeId
+    const modeId = body.modeId || templateDefaultModeId(template)
     const mode = modes.find((entry) => entry.id === modeId)
 
     return {
@@ -185,7 +286,7 @@ export async function prepareCreateSubmission(requestBody: Record<string, unknow
       template,
       sourceRequest: body.source || settings.source,
       params: {
-        ...settings.params,
+        ...templateParamsForMode(template, modeId),
         ...paramsFromUnknown(body.params),
       },
     }
@@ -280,7 +381,7 @@ function normalizeCreateTemplate(template: unknown): CreateTemplate | null {
     description: templateRecord.description ? String(templateRecord.description).trim() : "",
     type,
     settings,
-    workflow: type === "combo" && workflow.length === 1 ? buildDefaultComboWorkflow(settings) : workflow,
+    workflow: defaultWorkflowForType(type, settings, workflow),
     prompt: String(settings.params["prompt"] || ""),
     negativePrompt: String(settings.params["negativePrompt"] || ""),
     resolution: quality.resolution,
@@ -329,7 +430,7 @@ function normalizeTemplateParams(params: unknown = {}): CreateParams {
 }
 
 function normalizeTemplateType(value: unknown): CreateTemplate["type"] {
-  if (value === "image" || value === "video" || value === "combo") {
+  if (value === "image" || value === "video" || value === "combo" || value === "nudify-video") {
     return value
   }
 
@@ -340,11 +441,61 @@ function inferTemplateTypeFromSettings(settings: TemplateSettings): CreateTempla
   return settings.modeId === "custom-image" ? "image" : "video"
 }
 
+function templateDefaultModeId(template: CreateTemplate): string {
+  if (template.type === "image") return "custom-image"
+  if (template.type === "combo") return "custom-image-video"
+  if (template.type === "nudify-video") return "nudify-video"
+
+  return "custom-video"
+}
+
+function templateParamsForMode(template: CreateTemplate, modeId: string): CreateParams {
+  const settings = getPrimaryTemplateSettings(template)
+
+  if (modeId === "custom-image-video") {
+    const imageStep = template.workflow.find((step) => step.modeId === "custom-image")
+    const videoStep = template.workflow.find((step) => step.modeId === "custom-video")
+    return {
+      ...settings.params,
+      prompt: String(videoStep?.params["prompt"] || imageStep?.params["prompt"] || settings.params["prompt"] || ""),
+      quality: String(videoStep?.params["quality"] || settings.params["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+    }
+  }
+
+  if (modeId === "nudify-video") {
+    const videoStep = template.workflow.find((step) => step.modeId === "custom-video")
+    return {
+      ...settings.params,
+      prompt: String(videoStep?.params["prompt"] || settings.params["prompt"] || ""),
+      quality: String(videoStep?.params["quality"] || settings.params["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+    }
+  }
+
+  if (modeId === "custom-video") {
+    const videoStep = template.workflow.find((step) => step.modeId === "custom-video")
+    return {
+      ...settings.params,
+      prompt: String(videoStep?.params["prompt"] || settings.params["prompt"] || ""),
+      quality: String(videoStep?.params["quality"] || settings.params["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+    }
+  }
+
+  if (modeId === "custom-image") {
+    const imageStep = template.workflow.find((step) => step.modeId === "custom-image")
+    return {
+      ...settings.params,
+      prompt: String(imageStep?.params["prompt"] || settings.params["prompt"] || ""),
+    }
+  }
+
+  return settings.params
+}
+
 export function getPrimaryTemplateSettings(template: CreateTemplate): TemplateSettings {
   return (
     template.settings ||
     template.workflow?.[0] || {
-      modeId: template.type === "image" ? "custom-image" : "custom-video",
+      modeId: template.type === "image" ? "custom-image" : template.type === "combo" ? "custom-image-video" : "custom-video",
       source: null,
       params: {},
     }
@@ -363,18 +514,45 @@ function buildDefaultComboWorkflow(settings: TemplateSettings): TemplateSettings
       modeId: "custom-video",
       params: {
         prompt: String(settings.params?.["prompt"] || ""),
-        quality: String(settings.params?.["quality"] || "720p-4"),
+        quality: String(settings.params?.["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
       },
     },
   ]
 }
 
+function buildDefaultNudifyVideoWorkflow(settings: TemplateSettings): TemplateSettings[] {
+  return [
+    {
+      modeId: "nudify",
+      params: {},
+    },
+    {
+      modeId: "custom-video",
+      params: {
+        prompt: String(settings.params?.["prompt"] || ""),
+        quality: String(settings.params?.["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+      },
+    },
+  ]
+}
+
+function defaultWorkflowForType(
+  type: CreateTemplate["type"],
+  settings: TemplateSettings,
+  workflow: TemplateSettings[],
+): TemplateSettings[] {
+  if (type === "combo" && workflow.length === 1) return buildDefaultComboWorkflow(settings)
+  if (type === "nudify-video" && workflow.length === 1) return buildDefaultNudifyVideoWorkflow(settings)
+
+  return workflow
+}
+
 export function getQualityFromTemplateParams(params: CreateParams = {}): { resolution: string; duration: number } {
-  const [resolution, duration] = String(params["quality"] || "720p-4").split("-")
+  const [resolution, duration] = String(params["quality"] || CREATE_VIDEO_DEFAULT_QUALITY).split("-")
 
   return {
-    resolution: resolution || "720p",
-    duration: Number(duration || 4),
+    resolution: resolution || CREATE_VIDEO_DEFAULT_RESOLUTION,
+    duration: Number(duration || CREATE_VIDEO_DEFAULT_DURATION),
   }
 }
 

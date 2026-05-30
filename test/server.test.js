@@ -8,7 +8,7 @@ import test from "node:test"
 import { parseCreateApiResponse } from "../src/server/create-schemas.ts"
 import { parseGeneratePornJob } from "../src/server/schemas.ts"
 import { ensureVideoThumbnail, getThumbnailRelativePath, setThumbnailProcessRunnerForTests } from "../src/thumbnails.ts"
-import { fakeBearerToken, importServer, jsonResponse, readCatalog, writeCatalog } from "./helpers/server.js"
+import { fakeBearerToken, importServer, jsonResponse, PNG_BYTES, readCatalog, writeCatalog } from "./helpers/server.js"
 
 test("job response parser normalizes upstream aliases at the boundary", () => {
   const job = parseGeneratePornJob({
@@ -96,6 +96,9 @@ test("sync downloads known missing catalog files without API auth", async () => 
     ],
     downloadedJobIds: [],
     lastSeenJobId: id,
+    lastRun: {
+      fullCoverageCompletedAt: new Date().toISOString(),
+    },
   })
 
   const originalFetch = globalThis.fetch
@@ -134,6 +137,8 @@ test("sync downloads known missing catalog files without API auth", async () => 
 test("incremental sync refreshes a previously seen pending job before stopping", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-pending-refresh-"))
   const id = "13131313-1313-4131-8131-131313131313"
+  const createdAt = Math.floor(Date.now() / 1000)
+  const createdDate = new Date(createdAt * 1000).toISOString().slice(0, 10)
   await writeCatalog(mediaDir, {
     items: [
       {
@@ -141,7 +146,7 @@ test("incremental sync refreshes a previously seen pending job before stopping",
         type: "video",
         status: "processing",
         outputUrl: null,
-        createdAt: 1779769825,
+        createdAt,
         prompt: "pending prompt",
       },
     ],
@@ -166,7 +171,7 @@ test("incremental sync refreshes a previously seen pending job before stopping",
             duration: 8,
             output_url: "https://assets.example/pending_now_done.mp4",
             input_url: null,
-            created_at: 1779769825,
+            created_at: createdAt,
             external_task_id: "task_pending",
             shared: false,
             favorited: false,
@@ -193,7 +198,7 @@ test("incremental sync refreshes a previously seen pending job before stopping",
       GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
     })
 
-    await server.startSync({ incremental: true })
+    await server.startSync({ incremental: true, forceFullCoverageIfMissing: false })
 
     const catalog = await readCatalog(mediaDir)
     const item = catalog.items.find((entry) => entry.id === id)
@@ -202,11 +207,254 @@ test("incremental sync refreshes a previously seen pending job before stopping",
     assert.equal(item.status, "done")
     assert.equal(item.duration, 8)
     assert.equal(item.downloadError, null)
-    assert.equal(item.localFile, `2026-05-26/2026-05-26_video_${id}.mp4`)
+    assert.equal(item.localFile, `${createdDate}/${createdDate}_video_${id}.mp4`)
     assert.equal(catalog.downloadedJobIds.includes(id), true)
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test("incremental sync scans past previous boundary for older pending completions", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-pending-past-boundary-"))
+  const boundaryId = "41414141-4141-4141-8141-414141414141"
+  const pendingId = "42424242-4242-4242-8242-424242424242"
+  const createdAt = Math.floor(Date.now() / 1000)
+  const pendingDate = new Date((createdAt - 10) * 1000).toISOString().slice(0, 10)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: boundaryId,
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/already_seen.mp4",
+        localFile: `2026-05-26/2026-05-26_video_${boundaryId}.mp4`,
+        createdAt,
+      },
+      {
+        id: pendingId,
+        type: "video",
+        status: "processing",
+        outputUrl: null,
+        createdAt: createdAt - 10,
+        prompt: "older pending prompt",
+      },
+    ],
+    downloadedJobIds: [boundaryId],
+    lastSeenJobId: boundaryId,
+    lastRun: {
+      fullCoverageCompletedAt: new Date().toISOString(),
+    },
+  })
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const href = String(url)
+
+    if (href.includes("/api/jobs") && href.includes("page=1")) {
+      return jsonResponse({
+        results: [
+          {
+            id: boundaryId,
+            user_id: "user_test",
+            type: "video",
+            prompt: "already seen",
+            status: "done",
+            output_url: "https://assets.example/already_seen.mp4",
+            created_at: createdAt,
+          },
+        ],
+      })
+    }
+
+    if (href.includes("/api/jobs") && href.includes("page=2")) {
+      return jsonResponse({
+        results: [
+          {
+            id: pendingId,
+            user_id: "user_test",
+            type: "video",
+            prompt: "older pending prompt",
+            negative_prompt: "",
+            status: "done",
+            duration: 8,
+            output_url: "https://assets.example/older_pending_done.mp4",
+            input_url: null,
+            created_at: createdAt - 10,
+            external_task_id: "task_older_pending",
+            shared: false,
+            favorited: false,
+            error: null,
+          },
+        ],
+      })
+    }
+
+    if (href.includes("/api/jobs") && href.includes("page=3")) {
+      return jsonResponse({ results: [] })
+    }
+
+    if (href === "https://assets.example/older_pending_done.mp4") {
+      return new Response(new Uint8Array([4, 2, 4, 2]), {
+        status: 200,
+        headers: {
+          "content-type": "video/mp4",
+        },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+
+    await server.startSync({ incremental: true, forceFullCoverageIfMissing: false })
+
+    const catalog = await readCatalog(mediaDir)
+    const item = catalog.items.find((entry) => entry.id === pendingId)
+
+    assert.equal(server.syncState.currentPage, 3)
+    assert.equal(server.syncState.downloaded, 1)
+    assert.equal(item.status, "done")
+    assert.equal(item.localFile, `${pendingDate}/${pendingDate}_video_${pendingId}.mp4`)
+    assert.equal(catalog.downloadedJobIds.includes(pendingId), true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("incremental sync runs full coverage when the last full scan is older than an hour", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-hourly-full-"))
+  const presentId = "51515151-5151-4151-8151-515151515151"
+  const deletedId = "52525252-5252-4252-8252-525252525252"
+  const presentFile = `2026-05-26/2026-05-26_edit_${presentId}.jpg`
+  const deletedFile = `2026-05-26/2026-05-26_edit_${deletedId}.jpg`
+  await mkdir(path.join(mediaDir, "2026-05-26"), { recursive: true })
+  await writeFile(path.join(mediaDir, presentFile), PNG_BYTES)
+  await writeFile(path.join(mediaDir, deletedFile), PNG_BYTES)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: presentId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/present.png",
+        localFile: presentFile,
+        createdAt: 1779769925,
+      },
+      {
+        id: deletedId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/deleted.png",
+        localFile: deletedFile,
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [presentId, deletedId],
+    lastSeenJobId: presentId,
+    lastRun: {
+      fullCoverageCompletedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+    },
+  })
+
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const href = String(url)
+
+    if (href.includes("/api/jobs") && href.includes("page=1")) {
+      return jsonResponse({
+        results: [
+          {
+            id: presentId,
+            user_id: "user_test",
+            type: "edit",
+            prompt: "still present",
+            status: "done",
+            output_url: "https://assets.example/present.png",
+            created_at: 1779769925,
+          },
+        ],
+      })
+    }
+
+    if (href.includes("/api/jobs") && href.includes("page=2")) {
+      return jsonResponse({ results: [] })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+
+    await server.startSync({ incremental: true })
+
+    const catalog = await readCatalog(mediaDir)
+    const present = catalog.items.find((entry) => entry.id === presentId)
+    const deleted = catalog.items.find((entry) => entry.id === deletedId)
+
+    assert.equal(server.syncState.currentPage, 2)
+    assert.equal(present.remoteDeletedAt, undefined)
+    assert.equal(deleted.remoteDeleteStatus, "deleted")
+    assert.equal(typeof deleted.remoteDeletedAt, "string")
+    assert.equal(catalog.lastRun.fullCoverageScan, true)
+    assert.equal(catalog.lastRun.fullCoverageCompleted, true)
+    assert.equal(catalog.lastRun.remoteDeleted, 1)
+    assert.equal(typeof catalog.lastRun.fullCoverageCompletedAt, "string")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("sync removes no-output media records after an hour", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-expired-no-output-"))
+  const staleId = "61616161-6161-4161-8161-616161616161"
+  const freshId = "62626262-6262-4262-8262-626262626262"
+  const now = Date.now()
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: staleId,
+        type: "video",
+        status: "processing",
+        outputUrl: null,
+        createdAtIso: new Date(now - 61 * 60 * 1000).toISOString(),
+      },
+      {
+        id: freshId,
+        type: "video",
+        status: "processing",
+        outputUrl: null,
+        createdAtIso: new Date(now - 5 * 60 * 1000).toISOString(),
+      },
+    ],
+    downloadedJobIds: [],
+    lastSeenJobId: null,
+  })
+
+  const server = await importServer(mediaDir, {
+    GENERATEPORN_AUTHORIZATION: "",
+    GENERATEPORN_COOKIE: "",
+  })
+
+  await server.startSync({ incremental: true })
+
+  const catalog = await readCatalog(mediaDir)
+
+  assert.equal(
+    catalog.items.some((entry) => entry.id === staleId),
+    false,
+  )
+  assert.equal(
+    catalog.items.some((entry) => entry.id === freshId),
+    true,
+  )
+  assert.equal(catalog.lastRun.prunedExpiredNoMediaItems, 1)
 })
 
 test("sync does not use pending jobs as the incremental stop marker", async () => {
@@ -260,7 +508,7 @@ test("sync does not use pending jobs as the incremental stop marker", async () =
     }
 
     if (href === "https://assets.example/ready_marker.png") {
-      return new Response(new Uint8Array([1, 5, 1, 5]), {
+      return new Response(PNG_BYTES, {
         status: 200,
         headers: {
           "content-type": "image/png",
@@ -282,10 +530,8 @@ test("sync does not use pending jobs as the incremental stop marker", async () =
     const pending = catalog.items.find((entry) => entry.id === pendingId)
     const done = catalog.items.find((entry) => entry.id === doneId)
 
-    assert.equal(pending.status, "processing")
-    assert.equal(pending.localFile, undefined)
-    assert.equal(pending.downloadError, undefined)
-    assert.equal(done.localFile, `2026-05-26/2026-05-26_edit_${doneId}.png`)
+    assert.equal(pending, undefined)
+    assert.equal(done.localFile, `2026-05-26/2026-05-26_edit_${doneId}.jpg`)
     assert.equal(catalog.lastSeenJobId, doneId)
   } finally {
     globalThis.fetch = originalFetch
@@ -442,7 +688,7 @@ test("sync scans stubbed API responses and downloads completed media", async () 
     }
 
     if (href === "https://assets.example/result_00.png") {
-      return new Response(new Uint8Array([9, 8, 7, 6]), {
+      return new Response(PNG_BYTES, {
         status: 200,
         headers: {
           "content-type": "image/png",
@@ -466,12 +712,12 @@ test("sync scans stubbed API responses and downloads completed media", async () 
 
     assert.equal(server.syncState.scanned, 2)
     assert.equal(server.syncState.downloaded, 1)
-    assert.equal(catalog.items.length, 2)
+    assert.equal(catalog.items.length, 1)
     assert.equal(catalog.lastSeenJobId, id)
-    assert.equal(downloaded.localFile, `2026-05-26/2026-05-26_edit_${id}.png`)
-    assert.equal(downloaded.size, 4)
-    assert.equal(failed.status, "failed")
-    assert.equal(failed.localFile, undefined)
+    assert.equal(downloaded.localFile, `2026-05-26/2026-05-26_edit_${id}.jpg`)
+    assert.equal(downloaded.contentType, "image/jpeg")
+    assert.ok(downloaded.size > 0)
+    assert.equal(failed, undefined)
   } finally {
     globalThis.fetch = originalFetch
   }

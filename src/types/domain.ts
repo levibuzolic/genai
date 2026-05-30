@@ -98,6 +98,8 @@ export type CatalogItem = {
   sourceItemId?: string | null | undefined
   sourceUrl?: string | null | undefined
   createdLocallyAt?: string | null | undefined
+  remoteDeletedAt?: string | null | undefined
+  remoteDeleteStatus?: string | null | undefined
   [key: string]: unknown
 }
 
@@ -187,7 +189,7 @@ export type CreateTemplate = {
   id: string
   label: string
   description: string
-  type: "image" | "video" | "combo"
+  type: "image" | "video" | "combo" | "nudify-video"
   settings: TemplateSettings
   workflow: TemplateSettings[]
   prompt: string

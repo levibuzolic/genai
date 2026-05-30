@@ -1,5 +1,3 @@
-import type * as React from "react"
-
 import type { CatalogItem, ItemsResponse, SourceKind, ViewMode } from "@/types/domain"
 
 export type OpenCreateOptions = {
@@ -13,6 +11,8 @@ export type LibraryViewProps = {
   itemsData: ItemsResponse | null
   itemsLoading: boolean
   deferredItems: CatalogItem[]
+  hasMoreItems: boolean
+  loadingMore: boolean
   pending: boolean
   searchDraft: string
   setSearchDraft: (value: string) => void
@@ -23,14 +23,13 @@ export type LibraryViewProps = {
   setStatus: (value: string) => void
   sort: string
   setSort: (value: string) => void
-  pageSize: string
-  setPageSize: (value: string) => void
-  page: number
-  setPage: React.Dispatch<React.SetStateAction<number>>
   view: ViewMode
   setView: (value: ViewMode) => void
   clearFilters: () => void
+  onLoadMore: () => void
   onOpenCreate: (options?: OpenCreateOptions) => void
   onDetails: (item: CatalogItem) => void
   onCopyPrompt: (item: CatalogItem) => void
+  onDeleteRemote: (item: CatalogItem) => void
+  onToggleFavorite: (item: CatalogItem) => void
 }
