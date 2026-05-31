@@ -12,6 +12,7 @@ import {
   CREATE_VIDEO_DEFAULT_RESOLUTION,
 } from "./create-constants.ts"
 import { assertCreateTextAllowed } from "./create-shared.ts"
+import { imageBufferToCreateJpeg } from "./media-conversion.ts"
 import { redactDataUrlFields } from "./redaction.ts"
 import type { CatalogItem, CreateMode, CreateParams, CreateSource, GeneratePornJob, ResolvedCreateSource } from "./types.ts"
 import { contentTypeFor } from "./utils.ts"
@@ -153,15 +154,14 @@ export async function resolveCreateSource(source: CreateSource | null | undefine
   }
 
   if (source.kind === "upload") {
-    const parsed = validateCreateDataUrl(source.dataUrl)
-    const dataUrl = String(source.dataUrl || "")
+    const image = await normalizeCreateDataUrl(source.dataUrl)
     return {
-      value: dataUrl,
+      value: image.dataUrl,
       isDataUrl: true,
       publicSource: {
         kind: "upload",
-        contentType: parsed.contentType,
-        size: parsed.byteLength,
+        contentType: image.contentType,
+        size: image.byteLength,
       },
     }
   }
@@ -197,16 +197,15 @@ export async function resolveCreateSource(source: CreateSource | null | undefine
       throw new Error("Catalog source item does not have a usable image URL or local file.")
     }
 
-    const dataUrl = await catalogItemToDataUrl(item)
-    const parsed = validateCreateDataUrl(dataUrl)
+    const image = await normalizeCreateDataUrl(await catalogItemToDataUrl(item))
     return {
-      value: dataUrl,
+      value: image.dataUrl,
       isDataUrl: true,
       publicSource: {
         kind: "catalog",
         itemId: item.id,
-        contentType: parsed.contentType,
-        size: parsed.byteLength,
+        contentType: image.contentType,
+        size: image.byteLength,
       },
     }
   }
@@ -253,7 +252,7 @@ export function validateCreateSourceUrl(value: unknown): string {
   }
 }
 
-function validateCreateDataUrl(value: unknown): { contentType: string; byteLength: number } {
+function parseCreateDataUrl(value: unknown): { contentType: string; bytes: Buffer; byteLength: number } {
   const match = String(value || "").match(/^data:([^;,]+);base64,([a-z0-9+/=]+)$/i)
   if (!match) {
     throw new Error("Upload source must be an image data URL.")
@@ -268,9 +267,28 @@ function validateCreateDataUrl(value: unknown): { contentType: string; byteLengt
     throw new Error("Upload source must be a JPEG, PNG, WebP, or BMP image.")
   }
 
+  const bytes = Buffer.from(payload, "base64")
   return {
     contentType,
-    byteLength: Buffer.byteLength(payload, "base64"),
+    bytes,
+    byteLength: bytes.byteLength,
+  }
+}
+
+async function normalizeCreateDataUrl(value: unknown): Promise<{ dataUrl: string; contentType: string; byteLength: number }> {
+  const parsed = parseCreateDataUrl(value)
+  let output: Awaited<ReturnType<typeof imageBufferToCreateJpeg>>
+
+  try {
+    output = await imageBufferToCreateJpeg(parsed.bytes)
+  } catch (error) {
+    throw new Error("Upload source could not be decoded as a supported image.", { cause: error })
+  }
+
+  return {
+    dataUrl: `data:image/jpeg;base64,${output.bytes.toString("base64")}`,
+    contentType: "image/jpeg",
+    byteLength: output.bytes.byteLength,
   }
 }
 

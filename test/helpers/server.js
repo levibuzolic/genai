@@ -255,7 +255,7 @@ export function fakeBearerToken() {
 }
 
 export function imageDataUrl() {
-  return "data:image/png;base64,AQID"
+  return `data:image/png;base64,${PNG_BYTES.toString("base64")}`
 }
 
 function ensureTestCatalogSchema(db) {

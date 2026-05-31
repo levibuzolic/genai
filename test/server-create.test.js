@@ -4,8 +4,10 @@ import os from "node:os"
 import path from "node:path"
 import test from "node:test"
 
+import sharp from "sharp"
+
 import { setThumbnailProcessRunnerForTests } from "../src/thumbnails.ts"
-import { fakeBearerToken, imageDataUrl, importServer, jsonResponse, readCatalog, writeCatalog } from "./helpers/server.js"
+import { PNG_BYTES, fakeBearerToken, imageDataUrl, importServer, jsonResponse, readCatalog, writeCatalog } from "./helpers/server.js"
 
 test("creation request shaping uses image_base64 for uploads and input_url for URLs", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-shape-"))
@@ -148,7 +150,7 @@ test("creation source resolver prefers catalog output URL and falls back to loca
   const localId = "15151515-1515-4151-8151-151515151515"
   const localFile = `2026-05-27/2026-05-27_edit_${localId}.png`
   await mkdir(path.dirname(path.join(mediaDir, localFile)), { recursive: true })
-  await writeFile(path.join(mediaDir, localFile), new Uint8Array([1, 2, 3]))
+  await writeFile(path.join(mediaDir, localFile), PNG_BYTES)
   await writeCatalog(mediaDir, {
     items: [
       {
@@ -183,7 +185,7 @@ test("creation source resolver prefers catalog output URL and falls back to loca
   assert.equal(remote.isDataUrl, false)
   assert.equal(remote.value, "https://assets.example/remote.png")
   assert.equal(local.isDataUrl, true)
-  assert.equal(local.value, "data:image/png;base64,AQID")
+  assert.equal(local.value.startsWith("data:image/jpeg;base64,"), true)
 })
 
 test("text-to-image creation submits without a source image", async () => {
@@ -217,6 +219,58 @@ test("text-to-image creation submits without a source image", async () => {
       modelId: "qwen-image-2.0-pro",
       aspectRatio: "4:3",
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("uploaded images are resized and compressed before create submission", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-image-resize-"))
+  const jobId = "58585858-5858-4585-8585-585858585858"
+  const sourceBytes = await sharp({
+    create: {
+      width: 3200,
+      height: 1800,
+      channels: 4,
+      background: { r: 20, g: 100, b: 180, alpha: 0.8 },
+    },
+  })
+    .png()
+    .toBuffer()
+  const sourceDataUrl = `data:image/png;base64,${sourceBytes.toString("base64")}`
+  const originalFetch = globalThis.fetch
+  let submittedBody = null
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), "https://api.generateporn.ai/api/jobs/edit")
+    submittedBody = JSON.parse(String(options.body))
+    return jsonResponse({ job_id: jobId })
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    await server.createMediaJob({
+      modeId: "custom-image",
+      source: {
+        kind: "upload",
+        dataUrl: sourceDataUrl,
+      },
+      params: {
+        prompt: "resize this",
+      },
+    })
+    const details = await server.getCreationDetails(jobId)
+    const submittedDataUrl = submittedBody.image_base64
+    const submittedBytes = Buffer.from(submittedDataUrl.split(",")[1], "base64")
+    const metadata = await sharp(submittedBytes).metadata()
+
+    assert.equal(submittedDataUrl.startsWith("data:image/jpeg;base64,"), true)
+    assert.equal(metadata.format, "jpeg")
+    assert.equal(metadata.width, 2400)
+    assert.equal(metadata.height, 1350)
+    assert.equal(details.creation.source.contentType, "image/jpeg")
+    assert.equal(details.creation.source.size, submittedBytes.byteLength)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -521,7 +575,8 @@ test("creation job submit and download use mocked API and merge into catalog", a
     const details = await server.getCreationDetails(jobId)
 
     assert.equal(created.jobId, jobId)
-    assert.equal(submitBody.image_base64, sourceDataUrl)
+    assert.equal(submitBody.image_base64.startsWith("data:image/jpeg;base64,"), true)
+    assert.notEqual(submitBody.image_base64, sourceDataUrl)
     assert.equal(submitBody.input_url, undefined)
     assert.equal(submitBody.seed, null)
     assert.equal(
