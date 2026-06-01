@@ -253,11 +253,12 @@ export function jsonResponse(body) {
   })
 }
 
-export function fakeBearerToken() {
+export function fakeBearerToken(claims = {}) {
   const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url")
   const payload = Buffer.from(
     JSON.stringify({
       exp: Math.floor(Date.now() / 1000) + 3600,
+      ...claims,
     }),
   ).toString("base64url")
 

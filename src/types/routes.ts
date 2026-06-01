@@ -52,6 +52,7 @@ export type PublicCatalogItem = {
   duplicateOf?: string | null
   duplicateGroupSize?: number | null
   createModeId?: string | null
+  createParams?: CreateParams | null
   templateId?: string | null
   templateLabel?: string | null
   sourceKind?: string | null

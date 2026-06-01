@@ -316,12 +316,14 @@ test("item delete endpoint deletes upstream job and keeps local files by default
   }
 })
 
-test("item index hides failed generations from the default view and shows them with deleted items", async () => {
+test("item index keeps recent failed generations visible before moving them to deleted items", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-failed-index-"))
   const doneId = "45454545-4545-4454-8454-454545454545"
-  const failedId = "46464646-4646-4464-8464-464646464646"
+  const recentFailedId = "46464646-4646-4464-8464-464646464646"
+  const oldFailedId = "48484848-4848-4484-8484-484848484848"
   const deletedId = "47474747-4747-4474-8474-474747474747"
   const doneFile = `2026-05-26/2026-05-26_edit_${doneId}.jpg`
+  const now = Date.now()
   await mkdir(path.dirname(path.join(mediaDir, doneFile)), { recursive: true })
   await writeFile(path.join(mediaDir, doneFile), PNG_BYTES)
   await writeCatalog(mediaDir, {
@@ -335,12 +337,22 @@ test("item index hides failed generations from the default view and shows them w
         createdAt: 1779769825,
       },
       {
-        id: failedId,
+        id: recentFailedId,
         type: "edit",
         status: "failed",
-        prompt: "failed generation",
+        prompt: "recent failed generation",
         error: "upstream failure",
-        createdAt: 1779769824,
+        createdAt: Math.floor((now - 4 * 60 * 1000) / 1000),
+        updatedAt: new Date(now - 4 * 60 * 1000).toISOString(),
+      },
+      {
+        id: oldFailedId,
+        type: "edit",
+        status: "failed",
+        prompt: "old failed generation",
+        error: "upstream failure",
+        createdAt: Math.floor((now - 6 * 60 * 1000) / 1000),
+        updatedAt: new Date(now - 6 * 60 * 1000).toISOString(),
       },
       {
         id: deletedId,
@@ -365,15 +377,15 @@ test("item index hides failed generations from the default view and shows them w
 
   assert.deepEqual(
     defaultView.items.map((item) => item.id),
-    [doneId],
+    [recentFailedId, doneId],
   )
-  assert.equal(defaultView.total, 1)
-  assert.equal(defaultView.facets.status?.all, 1)
+  assert.equal(defaultView.total, 2)
+  assert.equal(defaultView.facets.status?.all, 2)
   assert.equal(defaultView.facets.status?.deleted, 2)
   assert.equal(missingView.total, 0)
   assert.deepEqual(
     deletedView.items.map((item) => item.id),
-    [failedId, deletedId],
+    [oldFailedId, deletedId],
   )
   assert.equal(deletedView.total, 2)
 })

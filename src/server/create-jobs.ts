@@ -982,6 +982,7 @@ export async function downloadCreateJob(jobId: string): Promise<DownloadCreateJo
     accountEmail: createState?.accountEmail || job.accountEmail || existing?.accountEmail || null,
     downloadError: null,
     createModeId: creationState?.modeId || existing?.createModeId || null,
+    createParams: creationState?.params || existing?.createParams || null,
     templateId: creationState?.templateId || existing?.templateId || null,
     templateLabel: creationState?.templateLabel || existing?.templateLabel || null,
     sourceKind: stringOrNull(creationState?.source?.["kind"]) || existing?.sourceKind || null,
@@ -1142,11 +1143,13 @@ async function refreshActiveCreations(): Promise<{ refreshed: number; errors: { 
   for (const row of activeRows) {
     try {
       const job = await fetchCreateJob(row.jobId || "", { accountEmail: row.accountEmail })
-      saveCreationFromJob(job, {
-        existing: row,
-        eventMessage: `Job ${job.status || "updated"}.`,
-      })
-      refreshed += 1
+      if (shouldPersistCreationPollResult(row, job)) {
+        saveCreationFromJob(job, {
+          existing: row,
+          eventMessage: `Job ${job.status || "updated"}.`,
+        })
+        refreshed += 1
+      }
     } catch (error) {
       errors.push({
         id: row.id,
@@ -1181,6 +1184,22 @@ export async function fetchCreateJob(
   }
 
   return accountEmail ? { ...job, accountEmail } : job
+}
+
+function shouldPersistCreationPollResult(existing: CreationJob, job: GeneratePornJob): boolean {
+  const publicJob = toPublicCreateJob(job)
+  const status = publicJob.status || existing.status || "pending"
+  const createdAtIso = publicJob.createdAtIso || existing.createdAtIso || null
+
+  return (
+    existing.status !== status ||
+    (existing.outputUrl || null) !== (job.output_url || null) ||
+    (existing.inputUrl || null) !== (job.input_url || null) ||
+    (existing.error || null) !== (job.error || null) ||
+    (existing.externalTaskId || null) !== (job.external_task_id || null) ||
+    (existing.createdAt || null) !== (job.created_at || existing.createdAt || null) ||
+    (existing.createdAtIso || null) !== createdAtIso
+  )
 }
 
 export function saveCreationFromJob(

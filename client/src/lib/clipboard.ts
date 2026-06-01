@@ -5,12 +5,12 @@ function fallbackCopyTextToClipboard(value: string): void {
   const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
 
   textarea.value = value
-  textarea.readOnly = true
   textarea.setAttribute("aria-hidden", "true")
   textarea.style.position = "fixed"
   textarea.style.left = "-9999px"
   textarea.style.top = "0"
   textarea.style.opacity = "0"
+  textarea.style.fontSize = "16px"
 
   document.body.append(textarea)
 
@@ -27,8 +27,26 @@ function fallbackCopyTextToClipboard(value: string): void {
 }
 
 export async function copyTextToClipboard(value: string): Promise<void> {
+  if (shouldUseSynchronousClipboardFirst()) {
+    try {
+      fallbackCopyTextToClipboard(value)
+      return
+    } catch (fallbackError) {
+      const clipboard = navigator.clipboard
+      if (clipboard?.writeText) {
+        try {
+          await clipboard.writeText(value)
+          return
+        } catch {
+          throw fallbackError
+        }
+      }
+      throw fallbackError
+    }
+  }
+
   const clipboard = navigator.clipboard
-  if (clipboard) {
+  if (clipboard?.writeText) {
     try {
       await clipboard.writeText(value)
       return
@@ -39,4 +57,12 @@ export async function copyTextToClipboard(value: string): Promise<void> {
   }
 
   fallbackCopyTextToClipboard(value)
+}
+
+function shouldUseSynchronousClipboardFirst(): boolean {
+  const platform = navigator.platform || ""
+  const userAgent = navigator.userAgent || ""
+  const maxTouchPoints = navigator.maxTouchPoints || 0
+
+  return /iPad|iPhone|iPod/.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1)
 }

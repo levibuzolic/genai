@@ -45,7 +45,7 @@ export function useSyncOperations(onSettled: () => void, onProgress?: () => void
         setSyncStatus((current) => replaceEqualJson(current, next))
         timer = window.setTimeout(poll, next.running ? ACTIVE_POLL_MS : IDLE_POLL_MS)
         if (next.running) {
-          const progressSignature = JSON.stringify([next.currentPage, next.scanned, next.downloaded, next.skipped, next.errors.length])
+          const progressSignature = JSON.stringify([next.downloaded, next.errors.length])
           if (progressSignature !== lastProgressSignatureRef.current) {
             lastProgressSignatureRef.current = progressSignature
             onProgressRef.current?.()

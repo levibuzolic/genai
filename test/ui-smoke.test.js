@@ -385,6 +385,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     await page.getByRole("option", { name: /Deleted/ }).click()
     await page.waitForURL(/status=deleted/, { timeout: 5000 })
     assert.equal(new URL(page.url()).searchParams.get("status"), "deleted")
+    await page.waitForFunction(() => document.querySelectorAll(".card").length === 1, { timeout: 5000 })
     assert.equal(await page.locator(".card").count(), 1)
     assert.equal(await page.locator('.card[data-remote-deleted="true"].is-deleted').count(), 1)
     assert.equal(await page.locator(".deletedMediaBadge").isVisible(), true)
@@ -466,26 +467,147 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
       assert.equal(mobileLayout.pageSizeRendered, false)
       assert.equal(mobileLayout.viewToggleRendered, false)
 
+      await mobilePage.getByRole("button", { name: "Settings" }).click()
+      await mobilePage.waitForSelector("#settingsDialog", { timeout: 5000 })
+      await mobilePage.waitForTimeout(250)
+      const mobileSettingsLayout = await mobilePage.evaluate(() => {
+        const dialog = document.querySelector("#settingsDialog")
+        const sidebar = document.querySelector(".settingsSidebar")
+        const content = document.querySelector(".settingsContent")
+        const dialogRect = dialog?.getBoundingClientRect()
+
+        return {
+          left: dialogRect?.left ?? -1,
+          top: dialogRect?.top ?? -1,
+          width: dialogRect?.width ?? 0,
+          height: dialogRect?.height ?? 0,
+          right: dialogRect?.right ?? 0,
+          bottom: dialogRect?.bottom ?? 0,
+          sidebarOverflowX: sidebar ? getComputedStyle(sidebar).overflowX : "",
+          contentOverflowY: content ? getComputedStyle(content).overflowY : "",
+        }
+      })
+      assert.ok(Math.abs(mobileSettingsLayout.left) < 1)
+      assert.ok(Math.abs(mobileSettingsLayout.top) < 1)
+      assert.ok(mobileSettingsLayout.width >= 390)
+      assert.ok(mobileSettingsLayout.height >= 844)
+      assert.ok(mobileSettingsLayout.right <= 391)
+      assert.ok(mobileSettingsLayout.bottom <= 845)
+      assert.equal(mobileSettingsLayout.sidebarOverflowX, "auto")
+      assert.equal(mobileSettingsLayout.contentOverflowY, "auto")
+      await mobilePage.keyboard.press("Escape")
+      await mobilePage.waitForSelector("#settingsDialog", { state: "detached", timeout: 5000 })
+
+      await mobilePage.goto(`${baseUrl}/create`)
+      await mobilePage.waitForSelector("#createArea", { timeout: 5000 })
+      const mobileCreateLayout = await mobilePage.evaluate(() => {
+        const overlay = document.querySelector(".createOverlay")
+        const createArea = document.querySelector("#createArea")
+        const overlayRect = overlay?.getBoundingClientRect()
+        const createRect = createArea?.getBoundingClientRect()
+
+        return {
+          overlay: {
+            left: Math.round(overlayRect?.left ?? -1),
+            top: Math.round(overlayRect?.top ?? -1),
+            right: Math.round(overlayRect?.right ?? 0),
+            bottom: Math.round(overlayRect?.bottom ?? 0),
+          },
+          create: {
+            left: Math.round(createRect?.left ?? -1),
+            top: Math.round(createRect?.top ?? -1),
+            right: Math.round(createRect?.right ?? 0),
+            bottom: Math.round(createRect?.bottom ?? 0),
+            width: Math.round(createRect?.width ?? 0),
+            height: Math.round(createRect?.height ?? 0),
+            borderRadius: createArea ? getComputedStyle(createArea).borderRadius : "",
+          },
+          bodyPosition: document.body.style.position,
+          htmlOverflow: document.documentElement.style.overflow,
+          bodyOverflow: document.body.style.overflow,
+          viewportWidth: innerWidth,
+          viewportHeight: innerHeight,
+        }
+      })
+      assert.deepEqual(mobileCreateLayout.overlay, {
+        left: 0,
+        top: 0,
+        right: mobileCreateLayout.viewportWidth,
+        bottom: mobileCreateLayout.viewportHeight,
+      })
+      assert.deepEqual(
+        {
+          left: mobileCreateLayout.create.left,
+          top: mobileCreateLayout.create.top,
+          right: mobileCreateLayout.create.right,
+          bottom: mobileCreateLayout.create.bottom,
+        },
+        {
+          left: 0,
+          top: 0,
+          right: mobileCreateLayout.viewportWidth,
+          bottom: mobileCreateLayout.viewportHeight,
+        },
+      )
+      assert.equal(mobileCreateLayout.create.borderRadius, "0px")
+      assert.equal(mobileCreateLayout.bodyPosition, "fixed")
+      assert.equal(mobileCreateLayout.htmlOverflow, "hidden")
+      assert.equal(mobileCreateLayout.bodyOverflow, "hidden")
+      await mobilePage.getByRole("button", { name: "Browse library" }).click()
+      await mobilePage.waitForFunction(() => document.querySelectorAll(".sourceImageTile").length > 0, { timeout: 10000 })
+      const mobileSourceGrid = await mobilePage.evaluate(() => {
+        const tile = document.querySelector(".sourceImageTile")
+        const grid = document.querySelector(".sourceImageGrid")
+        const tileRect = tile?.getBoundingClientRect()
+        const gridRect = grid?.getBoundingClientRect()
+
+        return {
+          tileWidth: tileRect?.width ?? 0,
+          tileHeight: tileRect?.height ?? 0,
+          gridHeight: gridRect?.height ?? 0,
+        }
+      })
+      assert.ok(mobileSourceGrid.tileHeight >= 90, `expected visible source tiles, got ${mobileSourceGrid.tileHeight}px`)
+      assert.ok(Math.abs(mobileSourceGrid.tileHeight - mobileSourceGrid.tileWidth) < 4)
+      assert.ok(mobileSourceGrid.gridHeight >= mobileSourceGrid.tileHeight)
+
+      await mobilePage.goto(baseUrl)
+      await mobilePage.waitForFunction(() => document.querySelectorAll('.media-card:not([aria-hidden="true"])').length > 0, {
+        timeout: 10000,
+      })
+
       await mobilePage.locator('.card[data-media="video"][data-media-state="ready"] .mediaPreviewButton').first().click()
       await mobilePage.waitForSelector("#itemDialog", { timeout: 5000 })
       const mobileDialog = await mobilePage.locator("#itemDialog").boundingBox()
       assert.ok(mobileDialog)
-      assert.ok(mobileDialog.width >= 370, `expected mobile dialog to fill viewport, got ${mobileDialog.width}px`)
+      assert.equal(Math.round(mobileDialog.x), 0)
+      assert.equal(Math.round(mobileDialog.y), 0)
+      assert.equal(Math.round(mobileDialog.width), 390)
+      assert.equal(Math.round(mobileDialog.height), 844)
       const mobileDetailControls = await mobilePage.evaluate(() => {
         const preview = document.querySelector("#detailPreview")
         const close = document.querySelector("#detailCloseButton")
         const panel = document.querySelector(".detailPanel")
+        const dialog = document.querySelector("#itemDialog")
         const previewRect = preview?.getBoundingClientRect()
         const closeRect = close?.getBoundingClientRect()
         const panelRect = panel?.getBoundingClientRect()
 
         return {
+          bodyPosition: document.body.style.position,
+          htmlOverflow: document.documentElement.style.overflow,
+          bodyOverflow: document.body.style.overflow,
+          dialogBorderRadius: dialog ? getComputedStyle(dialog).borderRadius : "",
           closeInPanel: Boolean(close?.closest(".detailPanel")),
           closeTop: closeRect?.top || 0,
           panelTop: panelRect?.top || 0,
           previewBottom: previewRect?.bottom || 0,
         }
       })
+      assert.equal(mobileDetailControls.bodyPosition, "fixed")
+      assert.equal(mobileDetailControls.htmlOverflow, "hidden")
+      assert.equal(mobileDetailControls.bodyOverflow, "hidden")
+      assert.equal(mobileDetailControls.dialogBorderRadius, "0px")
       assert.equal(mobileDetailControls.closeInPanel, true)
       assert.ok(mobileDetailControls.closeTop >= mobileDetailControls.panelTop)
       assert.ok(mobileDetailControls.closeTop >= mobileDetailControls.previewBottom)

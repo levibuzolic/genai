@@ -140,16 +140,6 @@ export function AppShell({
     >
       {isDesktop && (
         <aside className="fixed inset-y-0 left-0 z-40 flex w-56 flex-col border-r bg-background p-3">
-          <div className="mb-4 flex min-h-10 items-center gap-3 rounded-md px-2">
-            <div className="grid size-8 shrink-0 place-items-center rounded-md border bg-card text-foreground">
-              <Sparkles className="size-4" />
-            </div>
-            <div className="min-w-0">
-              <strong className="block truncate text-sm font-semibold leading-5">GenAI</strong>
-              <span className="block truncate text-xs text-muted-foreground">Local media</span>
-            </div>
-          </div>
-
           <nav className="grid gap-1" aria-label="Primary">
             <RailButton id="libraryViewButton" active={activeView === "library"} icon={Archive} label="Library" onClick={onOpenLibrary} />
             <RailButton id="playboxViewButton" active={activeView === "playbox"} icon={Images} label="Playbox" onClick={onOpenPlaybox} />
@@ -188,15 +178,9 @@ export function AppShell({
         <header
           className={cn(
             "sticky top-0 z-30 flex min-h-14 justify-between gap-3 border-b bg-background px-3 py-2",
-            isDesktop ? "items-center px-5" : "static flex-col items-stretch",
+            isDesktop ? "items-center px-5" : "static flex-col items-end",
           )}
         >
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <h1>{currentTitle}</h1>
-            </div>
-          </div>
-
           <div className={cn("top-actions actions shrink-0 gap-2", isDesktop ? "flex items-center" : "grid grid-cols-[1fr_1fr_auto]")}>
             <Button
               id="syncNewButton"

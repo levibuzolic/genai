@@ -55,6 +55,12 @@ export function resolveMediaDirFromRoot(rootDir: string, value: unknown): string
 
 export { sleep }
 
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => {
+    setImmediate(resolve)
+  })
+}
+
 export function parseBooleanEnv(value: string | undefined, defaultValue: boolean): boolean {
   if (value === undefined || value === null || value === "") {
     return defaultValue

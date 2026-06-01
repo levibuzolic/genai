@@ -82,6 +82,16 @@
   textarea {
     font: inherit;
   }
+
+  @supports (-webkit-touch-callout: none) {
+    @media (max-width: 860px) {
+      input,
+      select,
+      textarea {
+        font-size: 16px;
+      }
+    }
+  }
 }
 
 .toolbar,
@@ -512,6 +522,33 @@
 
 .selectedSourcePreview strong {
   @apply line-clamp-2 text-xs leading-4 font-medium;
+}
+
+.sourceBrowserHeader {
+  @apply flex items-center justify-between gap-2;
+}
+
+.sourceImageGrid {
+  @apply grid max-h-80 grid-cols-4 gap-1.5 overflow-y-auto rounded-md border bg-card/40 p-1.5 md:grid-cols-5 xl:grid-cols-4 2xl:grid-cols-5;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  align-items: start;
+}
+
+.sourceImageTile {
+  @apply aspect-square min-h-24 overflow-hidden rounded-sm border border-transparent bg-background p-0 outline-none transition-colors hover:border-foreground/30 focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/40;
+  display: block;
+}
+
+.sourceImageTile.is-selected {
+  @apply border-primary ring-2 ring-primary/35;
+}
+
+.sourceImageTile img {
+  @apply size-full object-contain;
+}
+
+.sourceImageEmpty {
+  @apply col-span-full flex min-h-24 items-center justify-center gap-2 text-xs text-muted-foreground;
 }
 
 .field {
@@ -1012,6 +1049,15 @@
     @apply text-left;
   }
 
+  .createOverlay {
+    @apply place-items-stretch p-0;
+  }
+
+  .create-studio {
+    @apply h-[100dvh] w-[100dvw] max-w-none rounded-none border-0 shadow-none;
+    max-height: 100dvh;
+  }
+
   .createLayout {
     @apply grid-cols-1;
   }
@@ -1047,8 +1093,17 @@
   }
 
   .detailDialog {
-    @apply h-[100dvh] max-w-none rounded-none;
+    @apply h-[100dvh] max-w-none rounded-none border-0;
+    top: 0 !important;
+    left: 0 !important;
     width: 100dvw !important;
+    height: 100dvh !important;
+    max-width: 100dvw !important;
+    max-height: 100dvh !important;
+    --tw-translate-x: 0 !important;
+    --tw-translate-y: 0 !important;
+    translate: 0 0 !important;
+    transform: none !important;
   }
 
   .dialogBody {
@@ -1062,5 +1117,99 @@
 
   .detailPanel {
     @apply col-start-1 row-start-2 border-t border-l-0 p-4;
+  }
+}
+
+@media (max-width: 720px) {
+  .settingsDialog {
+    @apply h-[100dvh] w-[100dvw] max-w-none grid-cols-1 grid-rows-[auto_minmax(0,1fr)] rounded-none;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100dvw !important;
+    height: 100dvh !important;
+    max-width: 100dvw !important;
+    max-height: 100dvh !important;
+    --tw-translate-x: 0 !important;
+    --tw-translate-y: 0 !important;
+    translate: 0 0 !important;
+    transform: none !important;
+    grid-template-rows: auto minmax(0, 1fr) !important;
+  }
+
+  .settingsSidebar {
+    @apply flex min-w-0 gap-1 overflow-x-auto border-r-0 border-b bg-background p-2;
+    scrollbar-width: none;
+  }
+
+  .settingsSidebar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settingsTitle {
+    @apply sr-only;
+  }
+
+  .settingsNavButton {
+    @apply mb-0 h-9 w-auto shrink-0 px-3;
+  }
+
+  .settingsContent {
+    @apply p-3;
+  }
+
+  .settingsPane {
+    @apply max-w-none gap-4;
+  }
+
+  .settingsStatusGrid {
+    @apply grid-cols-2;
+  }
+
+  .settingsActionGrid {
+    @apply grid-cols-1;
+  }
+
+  .settingsActionGrid button,
+  .settingsActionGrid a {
+    @apply border-r-0;
+  }
+
+  .settingsActionGrid button:not(:last-child),
+  .settingsActionGrid a:not(:last-child) {
+    @apply border-b;
+  }
+
+  .settingsStatusHeading {
+    @apply items-start;
+  }
+
+  .settingsAccountStatus .flex,
+  .settingsField .flex,
+  .settingsPath .flex {
+    @apply flex-col;
+  }
+
+  #accountEmailInput,
+  #generationLimitInput {
+    @apply w-full;
+  }
+
+  .sourceImageGrid {
+    max-height: min(52dvh, 24rem);
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  }
+
+  .sourceImageTile {
+    min-height: 104px;
+  }
+}
+
+@media (max-width: 420px) {
+  .sourceImageGrid {
+    grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  }
+
+  .sourceImageTile {
+    min-height: 92px;
   }
 }

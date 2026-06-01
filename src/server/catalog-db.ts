@@ -33,6 +33,7 @@ import type {
   CreationWorkflow,
   OrphanFile,
 } from "./types.ts"
+import { yieldToEventLoop } from "./utils.ts"
 
 type TableInfoRow = {
   name: string
@@ -817,8 +818,11 @@ export function parseJson(value: unknown, fallback: unknown): unknown {
 }
 
 export async function saveCatalog(catalog: Catalog): Promise<void> {
+  await yieldToEventLoop()
   await mkdir(MEDIA_DIR, { recursive: true })
+  await yieldToEventLoop()
   writeCatalogToDb(catalog)
+  await yieldToEventLoop()
 }
 
 export function closeCatalogDb(): void {

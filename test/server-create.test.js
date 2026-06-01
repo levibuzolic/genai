@@ -2,8 +2,8 @@ import assert from "node:assert/strict"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import test from "node:test"
 import { DatabaseSync } from "node:sqlite"
+import test from "node:test"
 
 import sharp from "sharp"
 
@@ -912,6 +912,7 @@ test("creation job submit and download use mocked API and merge into catalog", a
         quality: "720p-4",
       },
     })
+    const pendingView = await server.getItems(new URLSearchParams())
     const downloaded = await server.downloadCreateJob(jobId)
     const catalog = await readCatalog(mediaDir)
     const item = catalog.items.find((entry) => entry.id === jobId)
@@ -919,6 +920,10 @@ test("creation job submit and download use mocked API and merge into catalog", a
     const details = await server.getCreationDetails(jobId)
 
     assert.equal(created.jobId, jobId)
+    assert.equal(
+      pendingView.items.some((entry) => entry.id === jobId && entry.status === "pending" && entry.createModeId === "custom-video"),
+      true,
+    )
     assert.equal(submitBody.image_base64.startsWith("data:image/jpeg;base64,"), true)
     assert.notEqual(submitBody.image_base64, sourceDataUrl)
     assert.equal(submitBody.input_url, undefined)
@@ -938,7 +943,15 @@ test("creation job submit and download use mocked API and merge into catalog", a
       true,
     )
     assert.equal(downloaded.item.id, jobId)
+    assert.deepEqual(downloaded.item.createParams, {
+      prompt: "animate this",
+      quality: "720p-4",
+    })
     assert.equal(item.createModeId, "custom-video")
+    assert.deepEqual(item.createParams, {
+      prompt: "animate this",
+      quality: "720p-4",
+    })
     assert.equal(item.sourceKind, "upload")
     assert.equal(item.localFile, `2026-05-27/2026-05-27_video_${jobId}.mp4`)
     assert.equal(item.thumbnailFile, `_thumbnails/2026-05-27/2026-05-27_video_${jobId}.jpg`)
@@ -1121,6 +1134,117 @@ test("creation refresh updates active jobs and imports upstream history", async 
     assert.equal(activeDetails.creation.outputUrl, "https://assets.example/active.png")
     assert.equal(importedDetails.creation.status, "processing")
     assert.equal(importedDetails.creation.modeId, "custom-video")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("active creation polling does not rewrite unchanged pending jobs", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-poll-stable-"))
+  const activeId = "20202020-2020-4202-8202-202020202020"
+  const activeJob = {
+    id: activeId,
+    type: "video",
+    prompt: "still rendering",
+    status: "processing",
+    output_url: null,
+    input_url: "https://assets.example/source.png",
+    resolution: "720p",
+    duration: 4,
+    created_at: 1779893300,
+  }
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/video" && options.method === "POST") {
+      return jsonResponse({ job_id: activeId })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${activeId}`) {
+      return jsonResponse(activeJob)
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    await server.createMediaJob({
+      modeId: "custom-video",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "still rendering",
+      },
+    })
+
+    await server.getCreations(new URLSearchParams("status=all&refresh=true"))
+    const firstDetails = await server.getCreationDetails(activeId)
+    await server.getCreations(new URLSearchParams("status=all&refresh=true"))
+    const secondDetails = await server.getCreationDetails(activeId)
+
+    assert.equal(secondDetails.creation.status, "processing")
+    assert.equal(secondDetails.creation.updatedAt, firstDetails.creation.updatedAt)
+    assert.equal(secondDetails.events.length, firstDetails.events.length)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("failed app-created pending media remains visible in the gallery after polling", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-failed-gallery-"))
+  const activeId = "21212121-2121-4212-8212-212121212121"
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/video" && options.method === "POST") {
+      return jsonResponse({ job_id: activeId })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${activeId}`) {
+      return jsonResponse({
+        id: activeId,
+        type: "video",
+        prompt: "failed visible",
+        status: "failed",
+        error: "upstream failed",
+        output_url: null,
+        input_url: "https://assets.example/source.png",
+        created_at: Math.floor(Date.now() / 1000),
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    await server.createMediaJob({
+      modeId: "custom-video",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "failed visible",
+      },
+    })
+
+    await server.getCreations(new URLSearchParams("status=all&refresh=true"))
+    const items = await server.getItems(new URLSearchParams())
+
+    assert.equal(
+      items.items.some((item) => item.id === activeId && item.status === "failed"),
+      true,
+    )
   } finally {
     globalThis.fetch = originalFetch
   }

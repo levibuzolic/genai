@@ -10,14 +10,25 @@ import { drizzle } from "drizzle-orm/node-sqlite"
 import { ensureVideoThumbnail } from "../thumbnails.ts"
 import type { BackupSummary, CatalogItemResponse, DeleteCatalogItemResponse, ItemsResponse, PublicCatalogItem } from "../types/routes.ts"
 import { deleteRemoteJob, setRemoteJobFavorite } from "./api-client.ts"
-import { closeCatalogDb, getCatalogDb, parseJson, readCatalogFromDb, saveCatalog } from "./catalog-db.ts"
+import { closeCatalogDb, getCatalogDb, listCreationJobs, parseJson, readCatalogFromDb, saveCatalog } from "./catalog-db.ts"
 import { BACKUP_DIR, CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
+import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import { catalogMeta, catalogSchema, mediaItems } from "./db-schema.ts"
 import { httpError } from "./errors.ts"
 import { pngBufferToHighQualityJpeg } from "./media-conversion.ts"
 import { sendJson } from "./static.ts"
-import type { Catalog, CatalogItem, GeneratePornJob, HttpResponse, LocalMediaFile, NormalizedJob, ThumbnailPatch } from "./types.ts"
-import { clamp, contentTypeFor, fileExists, hashBuffer, sanitizePathPart } from "./utils.ts"
+import type {
+  Catalog,
+  CatalogItem,
+  CreateParams,
+  CreationJob,
+  GeneratePornJob,
+  HttpResponse,
+  LocalMediaFile,
+  NormalizedJob,
+  ThumbnailPatch,
+} from "./types.ts"
+import { clamp, contentTypeFor, fileExists, hashBuffer, sanitizePathPart, yieldToEventLoop } from "./utils.ts"
 
 export { saveCatalog }
 
@@ -52,6 +63,7 @@ type BackupRetentionCandidate = CatalogBackupSummary & {
 const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
 const FAILED_MEDIA_STATUSES = new Set(["failed", "error", "cancelled", "canceled"])
 const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
+const FAILED_MEDIA_VISIBLE_MS = 5 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
 
@@ -224,7 +236,7 @@ async function prepareDownloadedMedia(
 }
 
 export async function getItems(searchParams: URLSearchParams): Promise<ItemsResponse> {
-  const catalog = await loadCatalog()
+  const catalog = await loadCatalog({ reconcileLocalFiles: false })
   const query = (searchParams.get("q") || "").trim().toLowerCase()
   const media = searchParams.get("media") || "all"
   const provider = searchParams.get("provider") || "all"
@@ -233,7 +245,9 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
   const page = Math.max(1, Number(searchParams.get("page") || 1))
   const pageSize = clamp(Number(searchParams.get("pageSize") || 60), 12, 240)
 
-  const catalogItems = (catalog.items || []).filter((item) => !isStaleRenderingMediaItem(item) && matchesProviderFilter(item, provider))
+  const catalogItems = includeActiveCreationItems(catalog.items || [], provider).filter(
+    (item) => !isStaleRenderingMediaItem(item) && matchesProviderFilter(item, provider),
+  )
   const visibleItems = catalogItems.filter((item) => !isDeletedFilterItem(item))
   const deletedItems = catalogItems.filter(isDeletedFilterItem)
   let items = status === "deleted" ? deletedItems : visibleItems
@@ -320,7 +334,7 @@ export async function getCatalogItem(id: string): Promise<CatalogItemResponse> {
     throw httpError("Item id is required.", 400)
   }
 
-  const catalog = await loadCatalog()
+  const catalog = await loadCatalog({ reconcileLocalFiles: false })
   const item = catalog.items.find((entry) => entry.id === id)
   if (!item) {
     throw httpError("Catalog item was not found.", 404)
@@ -365,6 +379,78 @@ export function buildFacets(items: CatalogItem[], deletedCount = 0): CatalogFace
   }
 }
 
+function includeActiveCreationItems(items: CatalogItem[], provider: string): CatalogItem[] {
+  if (provider === "playbox") {
+    return items
+  }
+
+  const itemById = new Map(items.map((item) => [item.id, item]))
+  const next = items.slice()
+
+  for (const creation of listCreationJobs({ status: "all", limit: 500 })) {
+    const item = catalogItemFromActiveCreation(creation)
+    if (!item || itemById.has(item.id)) continue
+    itemById.set(item.id, item)
+    next.push(item)
+  }
+
+  return next
+}
+
+function catalogItemFromActiveCreation(creation: CreationJob): CatalogItem | null {
+  if (!creation.id || creation.status === "draft" || !isVisibleCreationCatalogProjection(creation)) {
+    return null
+  }
+
+  const id = creation.jobId || creation.id
+  return {
+    id,
+    accountEmail: creation.accountEmail,
+    type: creation.mediaType || mediaTypeFromCreateMode(creation.modeId),
+    status: creation.status,
+    prompt: typeof creation.params["prompt"] === "string" ? creation.params["prompt"] : "",
+    negativePrompt: typeof creation.params["negativePrompt"] === "string" ? creation.params["negativePrompt"] : "",
+    outputUrl: creation.outputUrl,
+    inputUrl: creation.inputUrl,
+    createdAt: creation.createdAt,
+    createdAtIso: creation.createdAtIso,
+    externalTaskId: creation.externalTaskId,
+    modelId: typeof creation.params["modelId"] === "string" ? creation.params["modelId"] : null,
+    duration: durationFromCreateParams(creation.params),
+    error: creation.error,
+    updatedAt: creation.updatedAt,
+    createModeId: creation.modeId,
+    createParams: creation.params,
+    templateId: creation.templateId,
+    templateLabel: creation.templateLabel,
+    sourceKind: sourceString(creation.source, "kind"),
+    sourceItemId: sourceString(creation.source, "itemId"),
+    sourceUrl: sourceString(creation.source, "url"),
+    createdLocallyAt: creation.createdLocallyAt,
+  }
+}
+
+function isVisibleCreationCatalogProjection(creation: CreationJob): boolean {
+  if (isActiveCreationStatus(creation.status)) return true
+  if (creation.downloadedItemId) return false
+  return isTerminalCreationStatus(creation.status) && !creation.outputUrl
+}
+
+function mediaTypeFromCreateMode(modeId: string | null): string {
+  return modeId === "custom-image" ? "image" : "video"
+}
+
+function durationFromCreateParams(params: CreateParams): number | null {
+  const quality = typeof params["quality"] === "string" ? params["quality"] : ""
+  const match = /-(\d+)$/.exec(quality)
+  return match ? Number(match[1]) : null
+}
+
+function sourceString(source: Record<string, unknown> | null, key: string): string | null {
+  const value = source?.[key]
+  return typeof value === "string" && value ? value : null
+}
+
 export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
   return {
     id: item.id,
@@ -405,6 +491,7 @@ export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
     duplicateOf: item.duplicateOf ?? null,
     duplicateGroupSize: item.duplicateGroupSize ?? null,
     createModeId: item.createModeId ?? null,
+    createParams: item.createParams ?? null,
     templateId: item.templateId ?? null,
     templateLabel: item.templateLabel ?? null,
     sourceKind: item.sourceKind ?? null,
@@ -607,7 +694,7 @@ function isDeletedCatalogItem(item: CatalogItem): boolean {
 }
 
 function isDeletedFilterItem(item: CatalogItem): boolean {
-  return isDeletedCatalogItem(item) || isFailedMediaGenerationItem(item)
+  return isDeletedCatalogItem(item) || isExpiredFailedMediaGenerationItem(item)
 }
 
 function isFailedMediaGenerationItem(item: CatalogItem): boolean {
@@ -622,8 +709,28 @@ function isFailedMediaGenerationItem(item: CatalogItem): boolean {
   )
 }
 
-export async function loadCatalog(): Promise<Catalog> {
+function isExpiredFailedMediaGenerationItem(item: CatalogItem, now = Date.now()): boolean {
+  if (!isFailedMediaGenerationItem(item)) return false
+
+  const failedAt = mediaItemFailureObservedAtMs(item)
+  return failedAt === null || now - failedAt >= FAILED_MEDIA_VISIBLE_MS
+}
+
+function mediaItemFailureObservedAtMs(item: CatalogItem): number | null {
+  for (const value of [item.updatedAt, item.lastPolledAt, item.last_polled_at, item.createdLocallyAt, item.createdAtIso, item.createdAt]) {
+    const timestamp = timestampMs(value)
+    if (timestamp !== null) return timestamp
+  }
+
+  return null
+}
+
+export async function loadCatalog({ reconcileLocalFiles = true }: { reconcileLocalFiles?: boolean } = {}): Promise<Catalog> {
   const catalog = readCatalogFromDb()
+  if (!reconcileLocalFiles) {
+    return catalog
+  }
+
   const changed = await reconcileCatalogWithLocalFiles(catalog)
 
   if (changed) {
@@ -639,7 +746,11 @@ export async function reconcileCatalogWithLocalFiles(catalog: Catalog): Promise<
   const downloadedJobIds = new Set(catalog.downloadedJobIds || [])
   let changed = false
 
-  for (const item of catalog.items) {
+  for (const [index, item] of catalog.items.entries()) {
+    if (index > 0 && index % 100 === 0) {
+      await yieldToEventLoop()
+    }
+
     if (item.provider === "playbox") {
       if (await reconcilePlayboxCatalogItem(item)) {
         changed = true
@@ -869,7 +980,11 @@ export async function getLocalMediaFiles(): Promise<LocalMediaFile[]> {
   const entries = await listMediaFiles(MEDIA_DIR)
   const files: LocalMediaFile[] = []
 
-  for (const filePath of entries) {
+  for (const [index, filePath] of entries.entries()) {
+    if (index > 0 && index % 100 === 0) {
+      await yieldToEventLoop()
+    }
+
     const fileStat = await stat(filePath)
     const localFile = path.relative(MEDIA_DIR, filePath).split(path.sep).join("/")
 
@@ -913,7 +1028,11 @@ async function listMediaFiles(directory: string): Promise<string[]> {
 
   const files: string[] = []
 
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
+    if (index > 0 && index % 100 === 0) {
+      await yieldToEventLoop()
+    }
+
     const entryPath = path.join(directory, entry.name)
 
     if (entry.isDirectory()) {

@@ -104,6 +104,7 @@ export type CatalogItem = {
   prompt?: string | null
   negativePrompt?: string | null
   outputUrl?: string | null
+  inputUrl?: string | null
   localFile?: string | null
   thumbnailFile?: string | null
   modelId?: string | null
@@ -125,6 +126,7 @@ export type CatalogItem = {
   contentType?: string | null
   externalTaskId?: string | null
   createModeId?: string | null
+  createParams?: CreateParams | null
   templateId?: string | null
   templateLabel?: string | null
   sourceKind?: string | null

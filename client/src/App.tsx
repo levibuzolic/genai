@@ -13,18 +13,25 @@ import { useConfig } from "@/hooks/use-config"
 import { useCreateStudio } from "@/hooks/use-create-studio"
 import { useCreationHistory } from "@/hooks/use-creation-history"
 import { useLibrary } from "@/hooks/use-library"
+import { usePreventIosViewportZoom } from "@/hooks/use-prevent-ios-viewport-zoom"
 import { useSyncOperations } from "@/hooks/use-sync-operations"
 import { useTemplates } from "@/hooks/use-templates"
 import { fetchJson } from "@/lib/api"
 import { copyTextToClipboard } from "@/lib/clipboard"
 import { isTextEntryTarget } from "@/lib/keyboard"
-import { isImageItem, isPendingMediaItem } from "@/lib/media"
-import type { CatalogItem, DeleteCatalogItemResponse, FavoriteCatalogItemResponse, MediaFitMode } from "@/types/domain"
-
-const PENDING_GALLERY_POLL_MS = 15_000
-const PENDING_GALLERY_INITIAL_POLL_MS = 2_500
+import { isImageItem } from "@/lib/media"
+import type {
+  CatalogItem,
+  CreateParams,
+  CreationSource,
+  DeleteCatalogItemResponse,
+  FavoriteCatalogItemResponse,
+  MediaFitMode,
+} from "@/types/domain"
 
 function App() {
+  usePreventIosViewportZoom()
+
   const { route, navigateToCreate, navigateToItem, navigateToLibrary, navigateToPlaybox, navigateToSettings, navigateToTemplates } =
     useAppNavigation()
   const { config, reloadConfig } = useConfig()
@@ -52,8 +59,13 @@ function App() {
         params: form.params,
       })
     },
-    () => {
-      void sync.startSync(true)
+    (transition) => {
+      if (transition.hasDownloadableCompletion) {
+        library.addOptimisticCreations(transition.downloadableCreations)
+        void sync.startSync(true)
+      } else if (transition.hasFailedCompletion) {
+        void library.loadItems({ keepLoading: true })
+      }
     },
   )
   const [selectedItem, setSelectedItem] = React.useState<CatalogItem | null>(null)
@@ -74,33 +86,15 @@ function App() {
   const setSelectedCreateAccountEmail = create.setSelectedAccountEmail
   const galleryItems = library.itemsData?.items ?? []
   const accountOptions = React.useMemo(() => config?.authAccounts?.map((account) => account.email) ?? [], [config?.authAccounts])
-  const hasPendingGalleryMedia = galleryItems.some(isPendingMediaItem)
-  const loadLibraryItems = library.loadItems
-  const startIncrementalSync = sync.startSync
-  const syncRunning = sync.syncStatus.running
+  const pendingGenerationCountsByAccount = React.useMemo(
+    () => getPendingGenerationCountsByAccount(creationHistory.creations, config?.pendingGenerationsByAccount),
+    [config?.pendingGenerationsByAccount, creationHistory.creations],
+  )
   const selectedItemIndex = selectedItem ? galleryItems.findIndex((item) => item.id === selectedItem.id) : -1
+  const detailOpen = Boolean(selectedItem)
   const previousDetailItem = selectedItemIndex > 0 ? (galleryItems[selectedItemIndex - 1] ?? null) : null
   const nextDetailItem =
     selectedItemIndex >= 0 && selectedItemIndex < galleryItems.length - 1 ? (galleryItems[selectedItemIndex + 1] ?? null) : null
-
-  React.useEffect(() => {
-    if (!hasPendingGalleryMedia) return
-
-    const pollPendingMedia = () => {
-      void loadLibraryItems({ keepLoading: true })
-      if (!syncRunning) {
-        void startIncrementalSync(true).catch(() => undefined)
-      }
-    }
-
-    const initialTimer = window.setTimeout(pollPendingMedia, PENDING_GALLERY_INITIAL_POLL_MS)
-    const timer = window.setInterval(pollPendingMedia, PENDING_GALLERY_POLL_MS)
-
-    return () => {
-      window.clearTimeout(initialTimer)
-      window.clearInterval(timer)
-    }
-  }, [hasPendingGalleryMedia, loadLibraryItems, startIncrementalSync, syncRunning])
 
   React.useEffect(() => {
     setSelectedCreateAccountEmail((current) => {
@@ -206,10 +200,33 @@ function App() {
   }, [detailVideoMuted])
 
   React.useEffect(() => {
-    if (!create.open) return
+    const overlayOpen = create.open || detailOpen
+    if (!overlayOpen) return
 
-    const previousOverflow = document.body.style.overflow
+    const scrollY = window.scrollY
+    const previousHtmlOverflow = document.documentElement.style.overflow
+    const previousBodyOverflow = document.body.style.overflow
+    const previousBodyPosition = document.body.style.position
+    const previousBodyTop = document.body.style.top
+    const previousBodyWidth = document.body.style.width
+    document.documentElement.style.overflow = "hidden"
     document.body.style.overflow = "hidden"
+    document.body.style.position = "fixed"
+    document.body.style.top = `-${scrollY}px`
+    document.body.style.width = "100%"
+
+    return () => {
+      document.documentElement.style.overflow = previousHtmlOverflow
+      document.body.style.overflow = previousBodyOverflow
+      document.body.style.position = previousBodyPosition
+      document.body.style.top = previousBodyTop
+      document.body.style.width = previousBodyWidth
+      window.scrollTo(0, scrollY)
+    }
+  }, [create.open, detailOpen])
+
+  React.useEffect(() => {
+    if (!create.open) return
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") navigateToLibrary({ replace: true })
@@ -217,7 +234,6 @@ function App() {
 
     window.addEventListener("keydown", onKeyDown)
     return () => {
-      document.body.style.overflow = previousOverflow
       window.removeEventListener("keydown", onKeyDown)
     }
   }, [create.open, navigateToLibrary])
@@ -463,7 +479,6 @@ function App() {
           deferredItems={library.deferredItems}
           hasMoreItems={library.hasMoreItems}
           loadingMore={library.loadingMore}
-          pending={library.pending}
           searchDraft={library.searchDraft}
           setSearchDraft={library.setSearchDraft}
           query={library.query}
@@ -489,7 +504,7 @@ function App() {
 
       <MediaDialog
         item={selectedItem}
-        open={Boolean(selectedItem)}
+        open={detailOpen}
         onOpenChange={(open) =>
           !open && (activeView === "playbox" ? navigateToPlaybox({ replace: true }) : navigateToLibrary({ replace: true }))
         }
@@ -502,6 +517,9 @@ function App() {
         }}
         onUsePrompt={(item) => {
           void create.openCreator({ sourceItem: isImageItem(item) ? item : null, prompt: item.prompt || undefined })
+        }}
+        onTryAgain={(item) => {
+          void create.openCreator(buildRetryCreateOptions(item))
         }}
         onDeleteRemote={requestRemoteDelete}
         onToggleFavorite={(item) => void toggleFavorite(item)}
@@ -561,6 +579,10 @@ function App() {
             ref={create.panelRef}
             sourceKind={create.sourceKind}
             setSourceKind={create.setSourceKind}
+            sourceItems={create.sourceItems}
+            sourceItemsLoading={create.sourceItemsLoading}
+            onSelectCatalogSource={create.onSelectCatalogSource}
+            onRefreshCatalogSources={create.onRefreshCatalogSources}
             selectedSource={create.selectedSource}
             uploadMeta={create.uploadMeta}
             uploadedDataUrl={create.uploadedDataUrl}
@@ -573,7 +595,8 @@ function App() {
             accountOptions={accountOptions}
             selectedAccountEmail={create.selectedAccountEmail}
             setSelectedAccountEmail={create.setSelectedAccountEmail}
-            pendingGenerationCount={getPendingGenerationCount(creationHistory.creations, create.selectedAccountEmail)}
+            pendingGenerationCountsByAccount={pendingGenerationCountsByAccount}
+            pendingGenerationCount={getAccountPendingGenerationCount(pendingGenerationCountsByAccount, create.selectedAccountEmail)}
             queuedGenerationCount={getQueuedGenerationCount(creationHistory.creations, create.selectedAccountEmail)}
             generationConcurrencyLimit={config?.mediaGenerationConcurrencyLimit || 2}
             prompt={create.prompt}
@@ -651,14 +674,76 @@ function App() {
 
 export default App
 
-function getPendingGenerationCount(
+function getPendingGenerationCountsByAccount(
   creations: { accountEmail?: string | null; jobId?: string | null; status: string }[],
-  accountEmail: string,
-): number {
-  return creations.filter(
-    (creation) =>
-      accountKey(creation.accountEmail) === accountKey(accountEmail) && Boolean(creation.jobId) && isActiveCreationStatus(creation.status),
-  ).length
+  serverCounts: Record<string, number> | undefined,
+): Record<string, number> {
+  const localCounts: Record<string, number> = {}
+  for (const creation of creations) {
+    if (!creation.jobId || !isActiveCreationStatus(creation.status)) continue
+    const key = accountKey(creation.accountEmail)
+    localCounts[key] = (localCounts[key] || 0) + 1
+  }
+
+  const counts: Record<string, number> = { ...serverCounts }
+  for (const [key, count] of Object.entries(localCounts)) {
+    counts[key] = Math.max(counts[key] || 0, count)
+  }
+
+  return counts
+}
+
+function getAccountPendingGenerationCount(counts: Record<string, number>, accountEmail: string): number {
+  return counts[accountKey(accountEmail)] || 0
+}
+
+function buildRetryCreateOptions(item: CatalogItem): {
+  accountEmail?: string | null
+  modeId?: string
+  params?: CreateParams
+  source?: CreationSource | null
+} {
+  const options: {
+    accountEmail?: string | null
+    modeId?: string
+    params?: CreateParams
+    source?: CreationSource | null
+  } = {
+    modeId: item.createModeId || defaultCreateModeForItem(item),
+    params: item.createParams || createParamsFromCatalogItem(item),
+    source: createSourceFromCatalogItem(item),
+  }
+  if (item.accountEmail) options.accountEmail = item.accountEmail
+  return options
+}
+
+function defaultCreateModeForItem(item: CatalogItem): string {
+  return item.type === "image" ? "custom-image" : "custom-video"
+}
+
+function createParamsFromCatalogItem(item: CatalogItem): CreateParams {
+  const params: CreateParams = {}
+  if (item.prompt) params["prompt"] = item.prompt
+  if (item.negativePrompt) params["negativePrompt"] = item.negativePrompt
+  if (item.modelId || item.model_id) params["modelId"] = item.modelId || item.model_id
+  if (item.duration) params["quality"] = `1080p-${item.duration}`
+  return params
+}
+
+function createSourceFromCatalogItem(item: CatalogItem): CreationSource | null {
+  if (item.sourceKind === "catalog" && item.sourceItemId) {
+    return { kind: "catalog", itemId: item.sourceItemId }
+  }
+  if (item.sourceKind === "url" && item.sourceUrl) {
+    return { kind: "url", url: item.sourceUrl }
+  }
+  if (item.sourceKind === "upload") {
+    return { kind: "upload" }
+  }
+  if (item.inputUrl) {
+    return { kind: "url", url: item.inputUrl }
+  }
+  return null
 }
 
 function getQueuedGenerationCount(creations: { accountEmail?: string | null; status: string }[], accountEmail: string): number {

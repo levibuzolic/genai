@@ -6,10 +6,15 @@ import type { CreateParams, Creation, CreationEvent, CreationSource, CreationsRe
 import type { CreationDetailsResponse, DuplicateCreationResponse, RefreshCreationsResponse } from "@/types/routes"
 
 const IDLE_CREATION_POLL_MS = 10000
+export type ActiveCreationTransition = {
+  hasDownloadableCompletion: boolean
+  hasFailedCompletion: boolean
+  downloadableCreations: Creation[]
+}
 
 export function useCreationHistory(
   onApplyDraft: (form: { modeId?: string | null; source?: CreationSource | null; params?: CreateParams }) => Promise<void>,
-  onActiveCompletion?: () => void | Promise<void>,
+  onActiveCompletion?: (transition: ActiveCreationTransition) => void | Promise<void>,
 ) {
   const [creations, setCreations] = React.useState<Creation[]>([])
   const [activeCount, setActiveCount] = React.useState(0)
@@ -34,17 +39,15 @@ export function useCreationHistory(
         if (refresh) params.set("refresh", "true")
         const data = await fetchJson<CreationsResponse>(`/api/creations?${params}`)
         const nextActiveCount = data.activeCount || 0
-        const shouldSyncCompletedCreations =
-          refresh &&
-          activeCountRef.current > 0 &&
-          nextActiveCount < activeCountRef.current &&
-          (data.creations || []).some((creation) => creation.status === "done" && creation.outputUrl && !creation.downloadedItemId)
+        const transition = getActiveCreationTransition(activeCountRef.current, nextActiveCount, data.creations || [])
         setCreations((current) => replaceEqualJson(current, data.creations || []))
         setActiveCount(nextActiveCount)
         activeCountRef.current = nextActiveCount
         setPollMs(data.pollMs || IDLE_CREATION_POLL_MS)
         setStatusMessage((current) => (current ? "" : current))
-        if (shouldSyncCompletedCreations) await onActiveCompletionRef.current?.()
+        if (refresh && (transition.hasDownloadableCompletion || transition.hasFailedCompletion)) {
+          await onActiveCompletionRef.current?.(transition)
+        }
       } catch (error) {
         setStatusMessage(error instanceof Error ? error.message : String(error))
       } finally {
@@ -63,7 +66,7 @@ export function useCreationHistory(
       window.clearTimeout(pollTimerRef.current)
     }
 
-    pollTimerRef.current = window.setTimeout(
+    pollTimerRef.current = window.setInterval(
       () => {
         void loadCreations({ refresh: activeCount > 0, showLoading: false })
       },
@@ -86,16 +89,15 @@ export function useCreationHistory(
         body: JSON.stringify({}),
       })
       const nextActiveCount = data.activeCount || 0
-      const shouldSyncCompletedCreations =
-        activeCountRef.current > 0 &&
-        nextActiveCount < activeCountRef.current &&
-        (data.creations || []).some((creation) => creation.status === "done" && creation.outputUrl && !creation.downloadedItemId)
+      const transition = getActiveCreationTransition(activeCountRef.current, nextActiveCount, data.creations || [])
       setCreations((current) => replaceEqualJson(current, data.creations || []))
       setActiveCount(nextActiveCount)
       activeCountRef.current = nextActiveCount
       setPollMs(data.pollMs || IDLE_CREATION_POLL_MS)
       setStatusMessage("Creation history refreshed.")
-      if (shouldSyncCompletedCreations) await onActiveCompletionRef.current?.()
+      if (transition.hasDownloadableCompletion || transition.hasFailedCompletion) {
+        await onActiveCompletionRef.current?.(transition)
+      }
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : String(error))
     }
@@ -131,4 +133,32 @@ export function useCreationHistory(
     openDetails,
     duplicateSettings,
   }
+}
+
+function getActiveCreationTransition(
+  previousActiveCount: number,
+  nextActiveCount: number,
+  creations: Creation[],
+): ActiveCreationTransition {
+  if (previousActiveCount <= 0 || nextActiveCount >= previousActiveCount) {
+    return {
+      hasDownloadableCompletion: false,
+      hasFailedCompletion: false,
+      downloadableCreations: [],
+    }
+  }
+
+  const downloadableCreations = creations.filter(
+    (creation) => creation.status === "done" && Boolean(creation.outputUrl) && !creation.downloadedItemId,
+  )
+
+  return {
+    hasDownloadableCompletion: downloadableCreations.length > 0,
+    hasFailedCompletion: creations.some((creation) => isFailedCreationStatus(creation.status) && !creation.downloadedItemId),
+    downloadableCreations,
+  }
+}
+
+function isFailedCreationStatus(status: string): boolean {
+  return ["failed", "error", "cancelled", "canceled"].includes(status.toLowerCase())
 }

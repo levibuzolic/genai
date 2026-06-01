@@ -29,6 +29,7 @@ describe("MediaDialog", () => {
         onCreate={vi.fn<(item: CatalogItem) => void>()}
         onAnimate={vi.fn<(item: CatalogItem) => void>()}
         onUsePrompt={vi.fn<(item: CatalogItem) => void>()}
+        onTryAgain={vi.fn<(item: CatalogItem) => void>()}
         onDeleteRemote={vi.fn<(item: CatalogItem) => void>()}
         onToggleFavorite={vi.fn<(item: CatalogItem) => void>()}
         previousItem={null}
@@ -64,6 +65,7 @@ describe("MediaDialog", () => {
         onCreate={vi.fn<(item: CatalogItem) => void>()}
         onAnimate={vi.fn<(item: CatalogItem) => void>()}
         onUsePrompt={vi.fn<(item: CatalogItem) => void>()}
+        onTryAgain={vi.fn<(item: CatalogItem) => void>()}
         onDeleteRemote={vi.fn<(item: CatalogItem) => void>()}
         onToggleFavorite={vi.fn<(item: CatalogItem) => void>()}
         previousItem={null}
@@ -76,5 +78,45 @@ describe("MediaDialog", () => {
     )
 
     expect(screen.queryByRole("link", { name: /open/i })).toBeNull()
+  })
+
+  it("offers try again for app-created media", () => {
+    const onTryAgain = vi.fn<(item: CatalogItem) => void>()
+    const item = {
+      id: "created-item-1",
+      type: "video",
+      status: "done",
+      prompt: "animate this",
+      localFile: "renders/clip.mp4",
+      createModeId: "custom-video",
+      createParams: { prompt: "animate this", quality: "720p-4" },
+      sourceKind: "catalog",
+      sourceItemId: "source-image-1",
+    } satisfies CatalogItem
+
+    render(
+      <MediaDialog
+        item={item}
+        open
+        onOpenChange={vi.fn<(open: boolean) => void>()}
+        onCopy={vi.fn<(value: string | null | undefined, label: string) => void>()}
+        onCreate={vi.fn<(item: CatalogItem) => void>()}
+        onAnimate={vi.fn<(item: CatalogItem) => void>()}
+        onUsePrompt={vi.fn<(item: CatalogItem) => void>()}
+        onTryAgain={onTryAgain}
+        onDeleteRemote={vi.fn<(item: CatalogItem) => void>()}
+        onToggleFavorite={vi.fn<(item: CatalogItem) => void>()}
+        previousItem={null}
+        nextItem={null}
+        onPrevious={vi.fn<() => void>()}
+        onNext={vi.fn<() => void>()}
+        videoMuted
+        onVideoMutedChange={vi.fn<(muted: boolean) => void>()}
+      />,
+    )
+
+    screen.getByRole("button", { name: /try again/i }).click()
+
+    expect(onTryAgain).toHaveBeenCalledWith(item)
   })
 })

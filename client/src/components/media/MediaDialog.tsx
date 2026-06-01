@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Copy, ExternalLink, Heart, ImageIcon, Play, Trash2, WandSparkles, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Copy, ExternalLink, Heart, ImageIcon, Play, RotateCcw, Trash2, WandSparkles, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -17,6 +17,7 @@ export function MediaDialog({
   onCreate,
   onAnimate,
   onUsePrompt,
+  onTryAgain,
   onDeleteRemote,
   onToggleFavorite,
   previousItem,
@@ -33,6 +34,7 @@ export function MediaDialog({
   onCreate: (item: CatalogItem) => void
   onAnimate: (item: CatalogItem) => void
   onUsePrompt: (item: CatalogItem) => void
+  onTryAgain: (item: CatalogItem) => void
   onDeleteRemote: (item: CatalogItem) => void
   onToggleFavorite: (item: CatalogItem) => void
   previousItem: CatalogItem | null
@@ -46,6 +48,7 @@ export function MediaDialog({
   const isFailed = Boolean(item && isFailedMediaItem(item))
   const canUsePrompt = Boolean(item?.prompt)
   const canUseImage = Boolean(item && isImageItem(item))
+  const canTryAgain = Boolean(item && item.provider !== "playbox" && (item.createModeId || item.createParams || item.sourceKind))
   const isPlaybox = item?.provider === "playbox"
   const dialogOpen = open && Boolean(item)
   const modelId = item ? (item.modelId ?? item.model_id) : null
@@ -151,6 +154,12 @@ export function MediaDialog({
                         <Button id="detailUsePromptButton" size="sm" onClick={() => onUsePrompt(item)}>
                           <WandSparkles />
                           Use prompt
+                        </Button>
+                      )}
+                      {canTryAgain && (
+                        <Button id="detailTryAgainButton" size="sm" variant="outline" onClick={() => onTryAgain(item)}>
+                          <RotateCcw />
+                          Try again
                         </Button>
                       )}
                       {canUseImage && (

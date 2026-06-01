@@ -63,6 +63,7 @@ test("server serves the app shell for client routes", async () => {
       assert.equal(response.statusCode, 200)
       assert.match(response.headers["content-type"], /text\/html/)
       assert.match(response.body.toString("utf8"), /<div id="root"><\/div>/)
+      assert.match(response.body.toString("utf8"), /user-scalable=no/)
     }
 
     const shell = await requestRaw(listener.port, "/")
@@ -160,6 +161,59 @@ test("primary auth browser account is listed alongside added accounts", async ()
   assert.equal(accounts[1].isDefault, undefined)
   assert.equal(accounts[1].hasAuthorization, true)
   assert.equal(server.getDefaultAccountEmail(), "emizah@wtf0.com")
+})
+
+test("sync fetches multiple accounts in parallel", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-parallel-accounts-"))
+  await writeCatalog(mediaDir, {
+    items: [],
+    downloadedJobIds: [],
+    lastSeenJobId: null,
+  })
+
+  const primaryToken = fakeBearerToken({ account: "primary" })
+  const secondaryToken = fakeBearerToken({ account: "secondary" })
+  const originalFetch = globalThis.fetch
+  const releasePageOneResponses = deferred()
+  const pageOneAuthorizations = new Set()
+  let pageOneRequests = 0
+  let timeout = null
+
+  globalThis.fetch = async (url, init = {}) => {
+    const href = String(url)
+
+    if (href.includes("/api/jobs") && href.includes("page=1")) {
+      pageOneRequests += 1
+      pageOneAuthorizations.add(new Headers(init.headers).get("authorization"))
+      if (pageOneRequests === 2) {
+        clearTimeout(timeout)
+        releasePageOneResponses.resolve()
+      }
+      await releasePageOneResponses.promise
+      return jsonResponse({ results: [] })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir)
+    server.acceptAuthorization(primaryToken, "auth-browser", "one@example.com")
+    server.acceptAuthorization(secondaryToken, "auth-browser", "two@example.com")
+
+    timeout = setTimeout(() => {
+      releasePageOneResponses.reject(new Error("Second account page request did not start while the first was pending."))
+    }, 500)
+    await server.startSync({ incremental: false })
+
+    assert.equal(pageOneRequests, 2)
+    assert.deepEqual(pageOneAuthorizations, new Set([primaryToken, secondaryToken]))
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+    globalThis.fetch = originalFetch
+  }
 })
 
 test("video thumbnail helper writes predictable poster path with a stubbed ffmpeg runner", async () => {
@@ -845,6 +899,60 @@ test("thumbnail generation action creates posters for existing downloaded videos
     assert.equal(existsSync(path.join(mediaDir, item.thumbnailFile)), true)
   } finally {
     restoreRunner()
+  }
+})
+
+test("media requests stay responsive while thumbnail generation is running", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-responsive-thumbs-"))
+  const id = "15151515-1515-4151-8151-151515151515"
+  const localFile = `2026-05-26/2026-05-26_video_${id}.mp4`
+  await mkdir(path.dirname(path.join(mediaDir, localFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, localFile), new Uint8Array([1, 2, 3]))
+  await writeFile(path.join(mediaDir, "keepalive.png"), PNG_BYTES)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/responsive_00.mp4",
+        localFile,
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+
+  const thumbnailStarted = deferred()
+  const finishThumbnail = deferred()
+  const restoreRunner = setThumbnailProcessRunnerForTests(async (_command, args) => {
+    thumbnailStarted.resolve()
+    await finishThumbnail.promise
+    await writeFile(args.at(-1), new Uint8Array([9, 9, 9]))
+  })
+
+  let listener = null
+
+  try {
+    const server = await importServer(mediaDir)
+    listener = await listenOnRandomPort(server.server)
+    const generationPromise = server.startThumbnailGeneration()
+
+    await thumbnailStarted.promise
+    const response = await requestRaw(listener.port, "/media/keepalive.png")
+
+    assert.equal(response.statusCode, 200)
+    assert.deepEqual(response.body, PNG_BYTES)
+
+    finishThumbnail.resolve()
+    await generationPromise
+  } finally {
+    if (listener) {
+      await listener.close()
+    }
+    restoreRunner()
+    finishThumbnail.resolve()
   }
 })
 

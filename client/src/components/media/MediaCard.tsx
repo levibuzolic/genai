@@ -1,4 +1,17 @@
-import { AlertTriangle, Clapperboard, Copy, FileDown, FileQuestion, Heart, ImageIcon, Info, Loader2, Sparkles, Trash2, WandSparkles } from "lucide-react"
+import {
+  AlertTriangle,
+  Clapperboard,
+  Copy,
+  FileDown,
+  FileQuestion,
+  Heart,
+  ImageIcon,
+  Info,
+  Loader2,
+  Sparkles,
+  Trash2,
+  WandSparkles,
+} from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
@@ -14,15 +27,7 @@ function mediaTypeBadge(item: CatalogItem, isVideo: boolean, isImage: boolean) {
   return { Icon: FileQuestion, label: item.type || "Unknown media" }
 }
 
-export function MediaCard({
-  item,
-  view,
-  onDetails,
-  onCopyPrompt,
-  onCreate,
-  onDeleteRemote,
-  onToggleFavorite,
-}: {
+type MediaCardProps = {
   item: CatalogItem
   view: ViewMode
   onDetails: () => void
@@ -30,7 +35,17 @@ export function MediaCard({
   onCreate: () => void
   onDeleteRemote: () => void
   onToggleFavorite: () => void
-}) {
+}
+
+export const MediaCard = React.memo(function MediaCard({
+  item,
+  view,
+  onDetails,
+  onCopyPrompt,
+  onCreate,
+  onDeleteRemote,
+  onToggleFavorite,
+}: MediaCardProps) {
   const [previewActive, setPreviewActive] = React.useState(false)
   const mediaUrl = mediaUrlForItem(item)
   const isVideo = isVideoItem(item)
@@ -55,12 +70,7 @@ export function MediaCard({
 
   return (
     <article
-      className={cn(
-        "card media-card group",
-        view === "list" && "is-list",
-        isDeleted && "is-deleted",
-        isFailed && "is-failed",
-      )}
+      className={cn("card media-card group", view === "list" && "is-list", isDeleted && "is-deleted", isFailed && "is-failed")}
       data-media={isVideo ? "video" : isImage ? "image" : "missing"}
       data-media-state={isFailed ? "failed" : isPendingMedia ? "loading" : mediaUrl ? "ready" : "missing"}
       data-remote-deleted={isDeleted ? "true" : undefined}
@@ -222,4 +232,8 @@ export function MediaCard({
       </div>
     </article>
   )
+}, areMediaCardPropsEqual)
+
+function areMediaCardPropsEqual(left: MediaCardProps, right: MediaCardProps): boolean {
+  return left.view === right.view && JSON.stringify(left.item) === JSON.stringify(right.item)
 }

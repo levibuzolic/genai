@@ -13,7 +13,6 @@ export function LibraryView({
   deferredItems,
   hasMoreItems,
   loadingMore,
-  pending,
   searchDraft,
   setSearchDraft,
   query,
@@ -71,7 +70,6 @@ export function LibraryView({
         <VirtualMediaGrid
           items={deferredItems}
           itemsLoading={itemsLoading}
-          pending={pending}
           view={view}
           hasMore={hasMoreItems}
           loadingMore={loadingMore}

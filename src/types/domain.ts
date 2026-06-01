@@ -111,6 +111,7 @@ export type CatalogItem = {
   duplicateOf?: string | null | undefined
   duplicateGroupSize?: number | null | undefined
   createModeId?: string | null | undefined
+  createParams?: CreateParams | null | undefined
   templateId?: string | null | undefined
   templateLabel?: string | null | undefined
   sourceKind?: string | null | undefined

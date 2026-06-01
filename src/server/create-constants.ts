@@ -16,7 +16,7 @@ export const CREATE_VIDEO_MODEL_DEFINITIONS = [
   },
   {
     id: "wan2.7-i2v-spicy",
-    label: "Spicy",
+    label: "Wan 2.7 Spicy",
     dashscopeModelId: "wan2.7-i2v-spicy",
     host: "maas",
     protocol: "media",

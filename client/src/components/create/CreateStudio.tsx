@@ -23,6 +23,7 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
   const showNudifyToggle = visibleModeId === "custom-video"
   const sourceRequired = selectedMode?.source?.required !== false
   const shouldQueue = props.pendingGenerationCount >= props.generationConcurrencyLimit || props.queuedGenerationCount > 0
+  const defaultPendingCount = getPendingGenerationCount(props.pendingGenerationCountsByAccount, "")
 
   return (
     <section id="createArea" ref={ref} className="create-studio createArea" aria-label="Create media">
@@ -66,11 +67,11 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
                 onChange={(value) => props.setSelectedAccountEmail(value)}
               >
                 {props.accountOptions.length === 0 ? (
-                  <option value="">Default</option>
+                  <option value="">{formatAccountOptionLabel("Default", defaultPendingCount)}</option>
                 ) : (
                   props.accountOptions.map((email) => (
                     <option key={email} value={email}>
-                      {email}
+                      {formatAccountOptionLabel(email, getPendingGenerationCount(props.pendingGenerationCountsByAccount, email))}
                     </option>
                   ))
                 )}
@@ -168,3 +169,11 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
     </section>
   )
 })
+
+export function formatAccountOptionLabel(label: string, pendingCount: number): string {
+  return `${label} (${pendingCount.toLocaleString()} pending)`
+}
+
+function getPendingGenerationCount(counts: Record<string, number>, accountEmail: string): number {
+  return counts[accountEmail || "__default__"] || 0
+}

@@ -15,6 +15,10 @@ import type {
 export type CreateStudioProps = {
   sourceKind: SourceKind
   setSourceKind: (kind: SourceKind) => void
+  sourceItems: CatalogItem[]
+  sourceItemsLoading: boolean
+  onSelectCatalogSource: (item: CatalogItem) => void
+  onRefreshCatalogSources: () => Promise<void>
   selectedSource: CatalogItem | null
   uploadMeta: string
   uploadedDataUrl: string | null
@@ -27,6 +31,7 @@ export type CreateStudioProps = {
   accountOptions: string[]
   selectedAccountEmail: string
   setSelectedAccountEmail: (email: string) => void
+  pendingGenerationCountsByAccount: Record<string, number>
   pendingGenerationCount: number
   queuedGenerationCount: number
   generationConcurrencyLimit: number

@@ -57,12 +57,12 @@ describe("useSyncOperations", () => {
     expect(onSettled).toHaveBeenCalledTimes(2)
   })
 
-  it("reports running progress when sync counters advance", async () => {
+  it("reports running progress when visible library counters advance", async () => {
     vi.useFakeTimers()
     const statuses = [
       syncStatus({ running: true, status: "running", currentPage: 1, scanned: 1, downloaded: 0, finishedAt: null }),
-      syncStatus({ running: true, status: "running", currentPage: 1, scanned: 1, downloaded: 1, finishedAt: null }),
-      syncStatus({ running: true, status: "running", currentPage: 1, scanned: 1, downloaded: 1, finishedAt: null }),
+      syncStatus({ running: true, status: "running", currentPage: 2, scanned: 24, downloaded: 0, skipped: 23, finishedAt: null }),
+      syncStatus({ running: true, status: "running", currentPage: 2, scanned: 24, downloaded: 1, skipped: 23, finishedAt: null }),
       syncStatus({ running: false, finishedAt: "2026-05-28T00:02:00.000Z" }),
     ]
     let index = 0
@@ -85,7 +85,7 @@ describe("useSyncOperations", () => {
       await vi.advanceTimersByTimeAsync(1400)
     })
     await flushAsyncWork()
-    expect(onProgress).toHaveBeenCalledTimes(2)
+    expect(onProgress).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1400)

@@ -90,7 +90,7 @@ describe("useCreationHistory", () => {
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => {
       return jsonResponse(responses.shift() || responses[responses.length - 1])
     })
-    const onActiveCompletion = vi.fn<() => void>()
+    const onActiveCompletion = vi.fn<(transition: { hasDownloadableCompletion: boolean; hasFailedCompletion: boolean }) => void>()
     globalThis.fetch = fetchMock
 
     renderHook(() => useCreationHistory(async () => undefined, onActiveCompletion))
@@ -102,7 +102,79 @@ describe("useCreationHistory", () => {
     await flushAsyncWork()
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(onActiveCompletion).toHaveBeenCalledTimes(1)
+    expect(onActiveCompletion).toHaveBeenCalledWith({
+      downloadableCreations: [completedCreation],
+      hasDownloadableCompletion: true,
+      hasFailedCompletion: false,
+    })
+  })
+
+  it("reports failed active completion without treating unchanged active polls as gallery updates", async () => {
+    vi.useFakeTimers()
+    const activeCreation: Creation = {
+      ...finishedCreation,
+      id: "creation-active",
+      jobId: "job-active",
+      status: "pending",
+      outputUrl: null,
+      active: true,
+    }
+    const failedCreation: Creation = {
+      ...activeCreation,
+      status: "failed",
+      outputUrl: null,
+      downloadedItemId: null,
+      active: false,
+    }
+    const responses: CreationsResponse[] = [
+      {
+        creations: [activeCreation],
+        activeCount: 1,
+        total: 1,
+        pollMs: 1000,
+      },
+      {
+        creations: [activeCreation],
+        activeCount: 1,
+        total: 1,
+        pollMs: 1000,
+      },
+      {
+        creations: [failedCreation],
+        activeCount: 0,
+        total: 1,
+        pollMs: 10000,
+      },
+    ]
+    let index = 0
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => {
+      const response = responses[Math.min(index, responses.length - 1)]
+      index += 1
+      return jsonResponse(response)
+    })
+    const onActiveCompletion = vi.fn<(transition: { hasDownloadableCompletion: boolean; hasFailedCompletion: boolean }) => void>()
+    globalThis.fetch = fetchMock
+
+    renderHook(() => useCreationHistory(async () => undefined, onActiveCompletion))
+
+    await flushAsyncWork()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    await flushAsyncWork()
+    expect(onActiveCompletion).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000)
+    })
+    await flushAsyncWork()
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(onActiveCompletion).toHaveBeenCalledWith({
+      downloadableCreations: [],
+      hasDownloadableCompletion: false,
+      hasFailedCompletion: true,
+    })
   })
 })
 

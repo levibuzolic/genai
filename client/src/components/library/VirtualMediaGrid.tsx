@@ -15,7 +15,6 @@ const OVERSCAN_ROWS = 2
 export function VirtualMediaGrid({
   items,
   itemsLoading,
-  pending,
   view,
   hasMore,
   loadingMore,
@@ -28,7 +27,6 @@ export function VirtualMediaGrid({
 }: {
   items: CatalogItem[]
   itemsLoading: boolean
-  pending: boolean
   view: ViewMode
   hasMore: boolean
   loadingMore: boolean
@@ -128,7 +126,7 @@ export function VirtualMediaGrid({
       <section
         id="grid"
         ref={gridRef}
-        className={cn("media-grid virtual-media-grid", view === "list" && "is-list", pending && "opacity-75")}
+        className={cn("media-grid virtual-media-grid", view === "list" && "is-list")}
         aria-label="Downloaded media"
         data-view={view}
       >

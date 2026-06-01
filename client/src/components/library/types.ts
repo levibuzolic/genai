@@ -13,7 +13,6 @@ export type LibraryViewProps = {
   deferredItems: CatalogItem[]
   hasMoreItems: boolean
   loadingMore: boolean
-  pending: boolean
   searchDraft: string
   setSearchDraft: (value: string) => void
   query: string

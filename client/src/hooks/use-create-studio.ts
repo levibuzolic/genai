@@ -30,6 +30,7 @@ export function useCreateStudio(onOpen?: () => void) {
   const [modes, setModes] = React.useState<CreateMode[]>([])
   const [sourceKind, setSourceKind] = React.useState<SourceKind>("catalog")
   const [sourceItems, setSourceItems] = React.useState<CatalogItem[]>([])
+  const [sourceItemsLoading, setSourceItemsLoading] = React.useState(false)
   const [selectedSourceId, setSelectedSourceId] = React.useState("")
   const [uploadedDataUrl, setUploadedDataUrl] = React.useState<string | null>(null)
   const [uploadedName, setUploadedName] = React.useState("")
@@ -76,6 +77,25 @@ export function useCreateStudio(onOpen?: () => void) {
     })
   }, [])
 
+  const loadCatalogSourceItems = React.useCallback(async () => {
+    setSourceItemsLoading(true)
+    try {
+      const data = await fetchJson<{ items: CatalogItem[] }>(
+        "/api/items?provider=generateporn&media=image&status=all&sort=newest&pageSize=120",
+      )
+      setSourceItems((current) => {
+        const selected = current.find((item) => item.id === selectedSourceId)
+        const nextItems = (data.items || []).filter((item) => isImageItem(item) && (item.localFile || item.outputUrl))
+        const next = selected && !nextItems.some((item) => item.id === selected.id) ? [selected, ...nextItems] : nextItems
+        return replaceEqualJson(current, next)
+      })
+    } catch {
+      setSourceItems((current) => replaceEqualJson(current, []))
+    } finally {
+      setSourceItemsLoading(false)
+    }
+  }, [selectedSourceId])
+
   React.useEffect(() => {
     void loadModes()
   }, [loadModes])
@@ -113,6 +133,19 @@ export function useCreateStudio(onOpen?: () => void) {
     }
   }, [availableQualityOptions, modeId, qualityField, selectedMode])
 
+  const attachCatalogSourceItem = React.useCallback(async (itemId: string) => {
+    try {
+      const data = await fetchJson<{ item: CatalogItem }>(`/api/items/${encodeURIComponent(itemId)}`)
+      if (!isImageItem(data.item)) return
+      setSourceItems((current) => {
+        if (current.some((item) => item.id === data.item.id)) return current
+        return [data.item, ...current]
+      })
+    } catch {
+      // The source id is still enough for submission; the preview is best-effort.
+    }
+  }, [])
+
   const openCreator = React.useCallback(
     async function openCreator(
       options: {
@@ -147,6 +180,7 @@ export function useCreateStudio(onOpen?: () => void) {
       } else if (options.source?.kind === "catalog" && typeof options.source.itemId === "string") {
         setSourceKind("catalog")
         setSelectedSourceId(options.source.itemId)
+        void attachCatalogSourceItem(options.source.itemId)
       } else if (options.source?.kind === "upload") {
         setSourceKind("upload")
         setUploadMeta("Choose, drop, or paste the source image again.")
@@ -165,8 +199,18 @@ export function useCreateStudio(onOpen?: () => void) {
         panelRef.current?.scrollIntoView({ block: "start", behavior: "smooth" })
       })
     },
-    [onOpen],
+    [attachCatalogSourceItem, onOpen],
   )
+
+  const selectCatalogSource = React.useCallback((item: CatalogItem) => {
+    if (!isImageItem(item)) return
+    setSourceKind("catalog")
+    setSourceItems((current) => {
+      if (current.some((entry) => entry.id === item.id)) return current
+      return [item, ...current]
+    })
+    setSelectedSourceId(item.id)
+  }, [])
 
   const acceptUploadFile = React.useCallback(async function acceptUploadFile(file: File | null, source: UploadSource) {
     setUploadedDataUrl(null)
@@ -246,7 +290,13 @@ export function useCreateStudio(onOpen?: () => void) {
       if (response.rateLimited) {
         dispatchCreateToast(response.error || "Upstream rate limit exceeded; retry queued.")
       }
-      setStatus(response.rateLimited ? "Rate limited. Retry queued." : response.queued ? "Queued. Waiting for an account slot..." : "Submitted. Waiting for output...")
+      setStatus(
+        response.rateLimited
+          ? "Rate limited. Retry queued."
+          : response.queued
+            ? "Queued. Waiting for an account slot..."
+            : "Submitted. Waiting for output...",
+      )
       await pollCreateJob(response.jobId, response.pollMs || 2000)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -414,6 +464,10 @@ export function useCreateStudio(onOpen?: () => void) {
     modes,
     sourceKind,
     setSourceKind,
+    sourceItems,
+    sourceItemsLoading,
+    onSelectCatalogSource: selectCatalogSource,
+    onRefreshCatalogSources: loadCatalogSourceItems,
     selectedSource,
     uploadedDataUrl,
     uploadedName,
