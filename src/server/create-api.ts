@@ -357,6 +357,24 @@ export function toPublicCreateJob(job: GeneratePornJob): PublicCreateJob {
     status: job.status || null,
     error: job.error || null,
     createdAt: job.created_at || null,
-    createdAtIso: job.created_at ? new Date(Number(job.created_at) * 1000).toISOString() : null,
+    createdAtIso: createJobCreatedAtIso(job.created_at),
   }
+}
+
+function createJobCreatedAtIso(value: unknown): string | null {
+  if (!value) {
+    return null
+  }
+
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return new Date(numeric > 1e11 ? numeric : numeric * 1000).toISOString()
+  }
+
+  if (typeof value === "string") {
+    const timestamp = Date.parse(value)
+    return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null
+  }
+
+  return null
 }

@@ -73,6 +73,10 @@ export type NormalizedJob = GeneratePornJob & {
 export type CatalogItem = {
   id: string
   accountEmail?: string | null | undefined
+  provider?: string | null | undefined
+  collectionId?: string | null | undefined
+  assetId?: string | null | undefined
+  assetKind?: string | null | undefined
   userId?: string | null | undefined
   type?: string | null | undefined
   prompt?: string | null | undefined
@@ -116,6 +120,83 @@ export type CatalogItem = {
   remoteDeletedAt?: string | null | undefined
   remoteDeleteStatus?: string | null | undefined
   [key: string]: unknown
+}
+
+export type PlayboxMediaRef = {
+  url?: string | null | undefined
+  compressedUrl?: string | null | undefined
+  posterUrl?: string | null | undefined
+  resizedImage?:
+    | {
+        url?: string | null | undefined
+        width?: number | null | undefined
+        height?: number | null | undefined
+      }
+    | null
+    | undefined
+  width?: number | null | undefined
+  height?: number | null | undefined
+}
+
+export type PlayboxCollection = {
+  _id: string
+  name?: string | null | undefined
+  user?: string | null | undefined
+  username?: string | null | undefined
+  model?: string | null | undefined
+  modelName?: string | null | undefined
+  modelType?: string | null | undefined
+  status?: string | null | undefined
+  isPublic?: boolean | null | undefined
+  isPinned?: boolean | null | undefined
+  customPrompt?: string | null | undefined
+  prompt?: string | null | undefined
+  negativePrompt?: string | null | undefined
+  nudify?: boolean | null | undefined
+  upscale?: boolean | null | undefined
+  audio?: boolean | null | undefined
+  input?:
+    | {
+        type?: string | null | undefined
+        image?: PlayboxMediaRef | null | undefined
+        video?: PlayboxMediaRef | null | undefined
+        shouldEnhancePrompt?: boolean | null | undefined
+      }
+    | null
+    | undefined
+  midProcessMedia?:
+    | {
+        image?: PlayboxMediaRef | null | undefined
+        video?: PlayboxMediaRef | null | undefined
+        audio?: PlayboxMediaRef | null | undefined
+      }
+    | null
+    | undefined
+  output?:
+    | {
+        type?: string | null | undefined
+        image?: PlayboxMediaRef | null | undefined
+        video?: PlayboxMediaRef | null | undefined
+        resolution?: string | null | undefined
+        fps?: number | null | undefined
+        videoDuration?: number | null | undefined
+      }
+    | null
+    | undefined
+  pricing?: Record<string, unknown> | null | undefined
+  seed?: string | number | null | undefined
+  createdAt?: string | null | undefined
+  updatedAt?: string | null | undefined
+  [key: string]: unknown
+}
+
+export type PlayboxCollectionsResponse = {
+  message?: string | null | undefined
+  data: PlayboxCollection[]
+  maxReached?: boolean | null | undefined
+  total?: number | null | undefined
+  perPage?: number | null | undefined
+  page?: string | number | null | undefined
 }
 
 export type OrphanFile = {
@@ -267,6 +348,9 @@ export type CreationJob = {
   accountEmail: string | null
   jobId: string | null
   status: string
+  queueNotBefore: string | null
+  queueAttempt: number
+  lastRateLimitedAt: string | null
   modeId: string | null
   modeLabel: string | null
   mediaType: string | null

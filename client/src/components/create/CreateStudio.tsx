@@ -22,6 +22,7 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
     : props.modes.filter((mode) => mode.id !== "nudify-video")
   const showNudifyToggle = visibleModeId === "custom-video"
   const sourceRequired = selectedMode?.source?.required !== false
+  const shouldQueue = props.pendingGenerationCount >= props.generationConcurrencyLimit || props.queuedGenerationCount > 0
 
   return (
     <section id="createArea" ref={ref} className="create-studio createArea" aria-label="Create media">
@@ -31,9 +32,9 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
           <p id="createStatus">{props.createStatus}</p>
         </div>
         <div className="createHeaderActions">
-          <Button id="createSubmitButton" onClick={() => void props.onSubmit()} disabled={props.createSubmitting}>
+          <Button id="createSubmitButton" onClick={() => void props.onSubmit({ queue: shouldQueue })} disabled={props.createSubmitting}>
             {props.createSubmitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            Create
+            {shouldQueue ? "Queue" : "Create"}
           </Button>
           <Button id="createResetButton" variant="outline" onClick={props.onReset}>
             Reset

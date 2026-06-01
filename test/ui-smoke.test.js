@@ -67,6 +67,12 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.equal(await page.getByRole("heading", { name: "Templates", exact: true }).isVisible(), true)
     await page.getByRole("button", { name: "Library" }).click()
     await page.waitForSelector(".card", { timeout: 10000 })
+    await page.locator("#playboxViewButton").click()
+    await page.waitForFunction(() => document.querySelector("#libraryStatus")?.textContent === "1 of 1 loaded", { timeout: 5000 })
+    assert.equal(await page.locator(".card").first().locator(".prompt").textContent(), "Playbox fixture prompt")
+    assert.equal(page.url(), `${baseUrl}/playbox`)
+    await page.locator("#libraryViewButton").click()
+    await page.waitForFunction(() => document.querySelector("#libraryStatus")?.textContent === "48 of 51 loaded", { timeout: 5000 })
 
     await openViewOptions(page)
     await page.locator("#mediaBlurButton").click()
@@ -82,7 +88,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.equal(await page.locator(".inspector-panel").count(), 0)
     await page.getByRole("button", { name: "Settings" }).click()
     await page.waitForSelector("#settingsDialog", { timeout: 5000 })
-    assert.deepEqual(await page.locator(".settingsSidebar button").allTextContents(), ["Library", "Account", "Backups"])
+    assert.deepEqual(await page.locator(".settingsSidebar button").allTextContents(), ["Library", "Account", "Playbox Auth", "Backups"])
     assert.equal(await page.getByRole("button", { name: "Full rescan" }).isVisible(), true)
     assert.equal(await page.getByRole("link", { name: "Export database" }).isVisible(), true)
     await page.getByRole("button", { name: "Backups" }).click()
@@ -551,6 +557,35 @@ async function writeFixtureCatalog(mediaDir) {
     })
   }
 
+  const playboxId = "playbox-fixture-collection"
+  const playboxDate = "2026-05-27"
+  const playboxLocalFile = `playbox/${playboxDate}/${playboxDate}_image_${playboxId}.png`
+  await mkdir(path.dirname(path.join(mediaDir, playboxLocalFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, playboxLocalFile), PNG_BYTES)
+  items.push({
+    id: playboxId,
+    provider: "playbox",
+    collectionId: "fixture-collection",
+    assetId: "fixture-asset",
+    assetKind: "image",
+    type: "image",
+    status: "done",
+    outputUrl: "https://playbox.example/fixture.png",
+    localFile: playboxLocalFile,
+    size: PNG_BYTES.byteLength,
+    duration: null,
+    thumbnailFile: null,
+    thumbnailError: null,
+    createdAt: createdAtBase + 1,
+    createdAtIso: new Date((createdAtBase + 1) * 1000).toISOString(),
+    prompt: "Playbox fixture prompt",
+    favorited: false,
+    remoteDeletedAt: null,
+    remoteDeleteStatus: null,
+    sha256: null,
+    verifiedAt: null,
+  })
+
   writeFixtureCatalogDb(mediaDir, {
     items,
     downloadedJobIds: items.filter((item) => item.localFile).map((item) => item.id),
@@ -614,6 +649,8 @@ async function importServer(mediaDir) {
     GENERATEPORN_AUTHORIZATION: process.env.GENERATEPORN_AUTHORIZATION,
     GENERATEPORN_COOKIE: process.env.GENERATEPORN_COOKIE,
     GENERATEPORN_PAGE_LIMIT: process.env.GENERATEPORN_PAGE_LIMIT,
+    REDIRECT_STATIC_TO_VITE: process.env.REDIRECT_STATIC_TO_VITE,
+    VITE_PORT: process.env.VITE_PORT,
   }
 
   process.env.MEDIA_DIR = mediaDir
@@ -622,6 +659,8 @@ async function importServer(mediaDir) {
   process.env.GENERATEPORN_PAGE_LIMIT = "3"
   process.env.GENERATEPORN_AUTHORIZATION = ""
   process.env.GENERATEPORN_COOKIE = ""
+  process.env.REDIRECT_STATIC_TO_VITE = "false"
+  process.env.VITE_PORT = ""
 
   const imported = await import(`${SERVER_PATH.href}?uiTest=${Date.now()}-${Math.random()}`)
 

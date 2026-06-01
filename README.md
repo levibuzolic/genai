@@ -39,8 +39,10 @@ mise exec -- pnpm start
 Then open:
 
 ```text
-http://localhost:5177
+http://localhost:6173
 ```
+
+`pnpm start` runs both the backend API server and the Vite frontend server. During local development, direct browser visits to the backend port redirect to Vite; if Vite is not running, the backend returns a short error page instead of serving stale built assets. To serve the built `public/` assets without Vite, run `mise exec -- pnpm start:api`.
 
 The server stores downloaded files in `media/` by default. It stores app catalog data in SQLite:
 
@@ -78,11 +80,18 @@ cp .env.example .env
 
 Useful settings:
 
-- `PORT`: local web server port, defaults to `5177`
+- `PORT`: local API/static server port, defaults to `6177`
+- `VITE_PORT`: local Vite app server port, defaults to `6173`
+- `LOCAL_APP_URL`: optional URL override for the startup message; by default the server detects this repo's Vite dev server on ports `6173`-`6183`, then falls back to the API/static server URL
+- `REDIRECT_STATIC_TO_VITE`: redirect direct browser visits to the API/static server back to Vite when the dev server is running, defaults to `true`; `/api` and `/media` are never redirected
 - `MEDIA_DIR`: download/catalog directory, defaults to `media`; absolute and `~` paths are supported
 - `GENERATEPORN_PAGE_LIMIT`: max API pages to scan
 - `GENERATEPORN_APP_URL`: visible/headless auth browser URL, defaults to `https://app.generateporn.ai/`
 - `AUTH_BROWSER_PROFILE_DIR`: persistent auth browser profile directory, defaults to `MEDIA_DIR/_auth_browser_profile`
+- `PLAYBOX_APP_URL`: visible Playbox auth URL, defaults to `https://www.playbox.com/collection`
+- `PLAYBOX_AUTH_BROWSER_PROFILE_DIR`: persistent Playbox Chrome profile directory, defaults to `MEDIA_DIR/_playbox_auth_browser_profile`
+- `PLAYBOX_AUTH_IMPORT_PATH`: imported Playbox cURL session file, defaults to `MEDIA_DIR/_playbox_auth_session.json`
+- `PLAYBOX_CHROME_PATH`: optional path to the Chrome executable used for Playbox auth
 - `AUTH_BROWSER_REFRESH_MS`: fallback headless refresh interval, defaults to 15 minutes
 - `AUTO_SYNC_ENABLED`: run background incremental syncs while the server is running, defaults to `true`
 - `AUTO_SYNC_STARTUP_DELAY_MS`: delay before the boot sync, defaults to 10 seconds
@@ -101,6 +110,8 @@ Prefer the in-app auth browser for auth. Static tokens expire quickly.
 
 The persisted browser profile survives server restarts as long as `AUTH_BROWSER_PROFILE_DIR` is not deleted. On startup, the server attempts a headless refresh from that profile. If the saved session can no longer refresh, use **Connect account** again.
 
+Playbox auth uses a dedicated server-owned Chrome profile instead of the Playwright auth browser. The server opens normal Chrome visibly, you complete Playbox/Cloudflare/login there, and the backend connects to that Chrome through the Chrome DevTools Protocol to capture the current Playbox access token. Playbox refreshes may briefly reopen visible Chrome because headless refresh is not reliable behind its bot checks.
+
 The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.sqlite`, SQLite exports/backups, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
 
 ## Auth Helper Extension
@@ -115,6 +126,19 @@ The extension is now a fallback path when the app-owned auth browser is not suit
 6. Keep that tab open while syncing from the local app.
 
 The extension refreshes auth every 30 seconds while the logged-in tab is open. You can also press **Send auth to local app** to force an immediate refresh.
+
+## Playbox cURL Auth Import
+
+If Playbox's Cloudflare check works in your normal Chrome profile but not in the server-owned auth window, import one authenticated API request from Chrome:
+
+1. Start the local app.
+2. Open `https://www.playbox.com/collection` in your normal Chrome profile and sign in.
+3. Open DevTools, then the Network tab.
+4. Select a successful request to `api.playbox.com`, preferably `users/me-new` or `refresh-token`.
+5. Choose **Copy as cURL**.
+6. Open **Settings > Playbox Auth** in the local app, paste the cURL command, and import it.
+
+The server parses the request's cookie/header state, immediately validates that it can mint a fresh Playbox access token from Node, and stores the imported session at `PLAYBOX_AUTH_IMPORT_PATH`. The bearer token remains in memory only, but the imported cookie session is sensitive and should be treated like a browser profile.
 
 ## Background Sync
 

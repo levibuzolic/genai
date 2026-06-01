@@ -85,6 +85,11 @@ export function useSyncOperations(onSettled: () => void, onProgress?: () => void
     setSyncStatus((current) => replaceEqualJson(current, { ...current, running: true, status: modeName, message: "Download queued." }))
   }
 
+  async function startPlayboxSync() {
+    await fetchJson("/api/playbox/sync/start", { method: "POST" })
+    setSyncStatus((current) => replaceEqualJson(current, { ...current, running: true, status: "playbox", message: "Playbox sync queued." }))
+  }
+
   async function startThumbnailGeneration() {
     await fetchJson("/api/thumbnails/generate", { method: "POST" })
     setSyncStatus((current) =>
@@ -106,6 +111,7 @@ export function useSyncOperations(onSettled: () => void, onProgress?: () => void
     syncStatus,
     startSync,
     startDownload,
+    startPlayboxSync,
     startThumbnailGeneration,
     startLibraryVerification,
     cancelSync,

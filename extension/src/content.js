@@ -1,5 +1,6 @@
 const PANEL_ID = "gp-auth-helper-panel";
 const AUTH_REFRESH_MS = 30000;
+const provider = getProvider();
 
 const state = {
   authInFlight: false,
@@ -9,17 +10,22 @@ const state = {
 init();
 
 function init() {
+  if (!provider) {
+    return;
+  }
+
   if (document.getElementById(PANEL_ID)) {
     return;
   }
 
+  const label = provider === "playbox" ? "Playbox Auth" : "GP Auth";
   const panel = document.createElement("section");
   panel.id = PANEL_ID;
   panel.innerHTML = `
     <span class="gp-panel__dot" data-role="dot" aria-hidden="true"></span>
-    <span class="gp-panel__label" data-role="state">GP Auth</span>
+    <span class="gp-panel__label" data-role="state">${label}</span>
     <button class="gp-panel__button" type="button" data-action="auth" title="Send auth to local app" aria-label="Send auth to local app">Sync</button>
-    <button class="gp-panel__icon" type="button" data-action="hide" title="Hide GP Auth Helper" aria-label="Hide GP Auth Helper">x</button>
+    <button class="gp-panel__icon" type="button" data-action="hide" title="Hide Auth Helper" aria-label="Hide Auth Helper">x</button>
   `;
 
   document.documentElement.appendChild(panel);
@@ -64,7 +70,8 @@ async function sendAuthToLocal(options = {}) {
   }
 
   const response = await chrome.runtime.sendMessage({
-    type: "gp-auth:sendAuthToLocal"
+    type: "auth-helper:sendAuthToLocal",
+    provider
   });
 
   if (!response?.ok) {
@@ -98,8 +105,8 @@ function renderState() {
   }
 
   label.textContent = state.lastAuthExpiresAt
-    ? `GP Auth ${new Date(state.lastAuthExpiresAt).toLocaleTimeString()}`
-    : "GP Auth";
+    ? `${providerLabel()} ${new Date(state.lastAuthExpiresAt).toLocaleTimeString()}`
+    : providerLabel();
   setPanelTone("ok");
 }
 
@@ -121,4 +128,20 @@ function setPanelTone(tone) {
   }
 
   panel.dataset.tone = tone;
+}
+
+function getProvider() {
+  if (location.hostname === "www.playbox.com") {
+    return "playbox";
+  }
+
+  if (location.hostname === "app.generateporn.ai") {
+    return "generateporn";
+  }
+
+  return null;
+}
+
+function providerLabel() {
+  return provider === "playbox" ? "Playbox Auth" : "GP Auth";
 }

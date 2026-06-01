@@ -1,5 +1,6 @@
 import {
   Archive,
+  Images,
   Loader2,
   Maximize2,
   Minimize2,
@@ -39,9 +40,11 @@ export function AppShell({
   createOpen,
   activeView,
   onOpenLibrary,
+  onOpenPlaybox,
   onOpenCreate,
   onOpenTemplates,
   onStartSync,
+  onStartPlayboxSync,
   onStartDownload,
   onGenerateThumbnails,
   onVerifyLibrary,
@@ -49,10 +52,18 @@ export function AppShell({
   onAuthConnect,
   onAuthRefresh,
   onAuthDisconnect,
+  onPlayboxAuthConnect,
+  onPlayboxAuthRefresh,
+  onPlayboxAuthDisconnect,
+  onImportPlayboxCurl,
+  onRefreshPlayboxImport,
+  onClearPlayboxImport,
   onAuthAccountConnect,
   onAuthAccountRefresh,
   onAuthAccountRemove,
   authActionPending,
+  settingsActionPending,
+  onSaveMediaGenerationConcurrencyLimit,
   mediaBlurred,
   onToggleMediaBlur,
   mediaFitMode,
@@ -72,11 +83,13 @@ export function AppShell({
   config: Config | null
   syncStatus: SyncStatus
   createOpen: boolean
-  activeView: "library" | "templates"
+  activeView: "library" | "playbox" | "templates"
   onOpenLibrary: () => void
+  onOpenPlaybox: () => void
   onOpenCreate: () => void
   onOpenTemplates: () => void
   onStartSync: (incremental: boolean) => void
+  onStartPlayboxSync: () => void
   onStartDownload: (mode: "missing" | "retry-errors") => void
   onGenerateThumbnails: () => void
   onVerifyLibrary: () => void
@@ -84,10 +97,18 @@ export function AppShell({
   onAuthConnect: () => void
   onAuthRefresh: () => void
   onAuthDisconnect: () => void
+  onPlayboxAuthConnect: () => void
+  onPlayboxAuthRefresh: () => void
+  onPlayboxAuthDisconnect: () => void
+  onImportPlayboxCurl: (curl: string) => void
+  onRefreshPlayboxImport: () => void
+  onClearPlayboxImport: () => void
   onAuthAccountConnect: (email: string) => void
   onAuthAccountRefresh: (email: string) => void
   onAuthAccountRemove: (email: string) => void
   authActionPending: boolean
+  settingsActionPending: boolean
+  onSaveMediaGenerationConcurrencyLimit: (limit: number) => void
   mediaBlurred: boolean
   onToggleMediaBlur: () => void
   mediaFitMode: MediaFitMode
@@ -105,7 +126,8 @@ export function AppShell({
   children: React.ReactNode
 }) {
   const autoSync = config?.autoSync
-  const currentTitle = createOpen ? "Create" : activeView === "templates" ? "Templates" : "Media"
+  const currentTitle = createOpen ? "Create" : activeView === "templates" ? "Templates" : activeView === "playbox" ? "Playbox" : "Media"
+  const syncLabel = activeView === "playbox" ? "Sync Playbox" : "Sync"
   const isDesktop = useMediaQuery("(min-width: 1024px)")
 
   return (
@@ -130,6 +152,7 @@ export function AppShell({
 
           <nav className="grid gap-1" aria-label="Primary">
             <RailButton id="libraryViewButton" active={activeView === "library"} icon={Archive} label="Library" onClick={onOpenLibrary} />
+            <RailButton id="playboxViewButton" active={activeView === "playbox"} icon={Images} label="Playbox" onClick={onOpenPlaybox} />
             <RailButton id="createViewButton" active={createOpen} icon={WandSparkles} label="Create" onClick={onOpenCreate} />
             <RailButton
               id="templateViewButton"
@@ -180,13 +203,24 @@ export function AppShell({
               className={cn(!isDesktop && "w-full")}
               variant={syncStatus.running ? "secondary" : "default"}
               aria-pressed={syncStatus.running}
-              title={syncStatus.running ? syncStatus.message || "Sync running" : "Sync and download new media"}
+              title={
+                syncStatus.running
+                  ? syncStatus.message || "Sync running"
+                  : activeView === "playbox"
+                    ? "Sync and download Playbox media"
+                    : "Sync and download new media"
+              }
               onClick={() => {
-                if (!syncStatus.running) onStartSync(true)
+                if (syncStatus.running) return
+                if (activeView === "playbox") {
+                  onStartPlayboxSync()
+                } else {
+                  onStartSync(true)
+                }
               }}
             >
               {syncStatus.running ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-              {syncStatus.running ? "Syncing" : "Sync"}
+              {syncStatus.running ? "Syncing" : syncLabel}
             </Button>
             {syncStatus.running && (
               <Button id="cancelSyncButton" className={cn(!isDesktop && "w-full")} variant="outline" onClick={onCancelSync}>
@@ -236,13 +270,20 @@ export function AppShell({
       </div>
 
       {!isDesktop && (
-        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t bg-background p-2" aria-label="Primary">
+        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t bg-background p-2" aria-label="Primary">
           <RailButton
             className="h-10 justify-center [&_svg]:size-4"
             active={activeView === "library"}
             icon={Archive}
             label="Library"
             onClick={onOpenLibrary}
+          />
+          <RailButton
+            className="h-10 justify-center [&_svg]:size-4"
+            active={activeView === "playbox"}
+            icon={Images}
+            label="Playbox"
+            onClick={onOpenPlaybox}
           />
           <RailButton
             className="h-10 justify-center [&_svg]:size-4"
@@ -275,15 +316,24 @@ export function AppShell({
         selectedBackup={selectedBackup}
         setSelectedBackup={setSelectedBackup}
         onStartSync={onStartSync}
+        onStartPlayboxSync={onStartPlayboxSync}
         onStartDownload={onStartDownload}
         onGenerateThumbnails={onGenerateThumbnails}
         onVerifyLibrary={onVerifyLibrary}
         onAuthConnect={onAuthConnect}
         onAuthRefresh={onAuthRefresh}
         onAuthDisconnect={onAuthDisconnect}
+        onPlayboxAuthConnect={onPlayboxAuthConnect}
+        onPlayboxAuthRefresh={onPlayboxAuthRefresh}
+        onPlayboxAuthDisconnect={onPlayboxAuthDisconnect}
+        onImportPlayboxCurl={onImportPlayboxCurl}
+        onRefreshPlayboxImport={onRefreshPlayboxImport}
+        onClearPlayboxImport={onClearPlayboxImport}
         onAuthAccountConnect={onAuthAccountConnect}
         onAuthAccountRefresh={onAuthAccountRefresh}
         onAuthAccountRemove={onAuthAccountRemove}
+        settingsActionPending={settingsActionPending}
+        onSaveMediaGenerationConcurrencyLimit={onSaveMediaGenerationConcurrencyLimit}
         onCreateBackup={onCreateBackup}
         onRestoreBackup={onRestoreBackup}
       />

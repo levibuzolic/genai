@@ -25,6 +25,8 @@ export function LibraryView({
   setSort,
   view,
   setView,
+  emptyTitle = "No media found",
+  emptyDescription = "Adjust filters, sync the library, or start creating from an upload.",
   clearFilters,
   onLoadMore,
   onOpenCreate,
@@ -84,8 +86,8 @@ export function LibraryView({
         {showEmptyState && (
           <section id="emptyState" className="empty-state">
             <Sparkles className="size-9 text-muted-foreground" />
-            <h2>No media found</h2>
-            <p>Adjust filters, sync the library, or start creating from an upload.</p>
+            <h2>{emptyTitle}</h2>
+            <p>{emptyDescription}</p>
           </section>
         )}
       </div>

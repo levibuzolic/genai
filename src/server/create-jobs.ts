@@ -11,14 +11,16 @@ import type {
 } from "../types/routes.ts"
 import { fetchGeneratePornApi, fetchJobsPage, getJobsApiBaseUrl } from "./api-client.ts"
 import { getAuthBrowserForAccount, getSyncAccountEmails, hasApiAuth, normalizeAccountEmail } from "./auth-state.ts"
+import { scheduleBackgroundJob } from "./background-worker.ts"
 import {
   addCreationEvent,
   findCreationJob,
   listCreationEvents,
   listCreationJobs,
-  moveCreationJob,
+  readCatalogMeta,
   saveCreationJob,
   toPublicCreation,
+  writeCatalogMeta,
 } from "./catalog-db.ts"
 import { downloadJob, loadCatalog, saveCatalog, sortItems, toCatalogItem, toPublicCatalogItem } from "./catalog.ts"
 import { AUTH_SETUP_MESSAGE, CREATE_HISTORY_PAGE_LIMIT } from "./config.ts"
@@ -33,6 +35,14 @@ import { parseGeneratePornJob } from "./schemas.ts"
 import type { CreateMode, CreateParams, CreationJob, CreationWorkflow, GeneratePornJob, TemplateSettings } from "./types.ts"
 
 export { buildCreateApiRequest, resolveCreateSource }
+
+const DEFAULT_MEDIA_GENERATION_CONCURRENCY_LIMIT = 2
+const MEDIA_GENERATION_CONCURRENCY_LIMIT_META_KEY = "mediaGenerationConcurrencyLimit"
+const QUEUED_CREATION_STATUS = "queued"
+export const CREATION_QUEUE_BACKGROUND_JOB_ID = "creation-queue"
+const RATE_LIMIT_INITIAL_BACKOFF_MS = 60_000
+const RATE_LIMIT_MAX_BACKOFF_MS = 60 * 60 * 1000
+const queuedRequestBodies = new Map<string, Record<string, unknown>>()
 
 async function createWorkflowJob(
   {
@@ -59,7 +69,9 @@ async function createWorkflowJob(
     throw new Error("Workflow first step is not available.")
   }
 
+  const queueInitial = shouldQueueCreation(accountEmail)
   const liveRequest = buildCreateApiRequest(firstMode, source, firstStep.params || {})
+  queuedRequestBodies.set(attemptId, liveRequest.body)
   const workflow = {
     templateId: template?.id || null,
     currentStep: 0,
@@ -71,7 +83,7 @@ async function createWorkflowJob(
   const baseRecord = {
     id: attemptId,
     accountEmail,
-    status: "submitted",
+    status: QUEUED_CREATION_STATUS,
     modeId: mode.id,
     modeLabel: mode.label,
     mediaType: "video",
@@ -88,25 +100,75 @@ async function createWorkflowJob(
   }
 
   saveCreationJob(baseRecord, {
-    eventStatus: "submitted",
-    eventMessage: "Submitted creation workflow.",
+    eventStatus: QUEUED_CREATION_STATUS,
+    eventMessage: "Queued creation workflow.",
   })
+
+  if (queueInitial) {
+    return queuedCreateResponse(baseRecord, mode, source.publicSource, liveRequest.publicRequest, template?.id)
+  }
+
+  const dispatched = await submitQueuedCreation(attemptId)
+  if (!dispatched) {
+    return queuedCreateResponse(
+      findCreationJob(attemptId) || baseRecord,
+      mode,
+      source.publicSource,
+      liveRequest.publicRequest,
+      template?.id,
+    )
+  }
+  if (dispatched.status === QUEUED_CREATION_STATUS) {
+    return queuedCreateResponse(dispatched, mode, source.publicSource, liveRequest.publicRequest, template?.id)
+  }
+
+  const submittedCreation = findCreationJob(attemptId) || dispatched
+
+  return {
+    ok: true,
+    jobId: submittedCreation.jobId || submittedCreation.id,
+    accountEmail,
+    modeId: submittedCreation.modeId || mode.id,
+    modeLabel: mode.label,
+    source: source.publicSource,
+    request: liveRequest.publicRequest,
+    ...(template ? { templateId: template.id } : {}),
+    pollMs: CREATE_POLL_MS,
+  }
+}
+
+async function submitWorkflowCreation(creation: CreationJob & { workflow: CreationWorkflow }): Promise<CreationJob | null> {
+  const firstStep = creation.workflow.steps[0]
+  if (!firstStep) {
+    throw new Error("Workflow has no steps.")
+  }
+
+  const registry = await loadCreateTemplateRegistry()
+  const modes = getCreateModeDefinitions(registry.templates)
+  const firstMode = modes.find((entry) => entry.id === firstStep.modeId)
+  if (!firstMode || firstMode.disabled) {
+    throw new Error("Workflow first step is not available.")
+  }
 
   let response: Response
   let body: Record<string, unknown>
   let apiResponse: ReturnType<typeof parseCreateApiResponse>
   try {
-    response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${firstMode.endpoint}`, {
-      method: "POST",
-      body: JSON.stringify(liveRequest.body),
-    }, { accountEmail })
+    response = await fetchGeneratePornApi(
+      `${getJobsApiBaseUrl()}/${firstMode.endpoint}`,
+      {
+        method: "POST",
+        body: JSON.stringify(getQueuedRequestBody(creation)),
+      },
+      { accountEmail: creation.accountEmail },
+    )
     apiResponse = parseCreateApiResponse(await readJsonObject(response))
     body = apiResponse.body
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     saveCreationJob(
       {
-        ...baseRecord,
+        ...creation,
         status: "error",
         error: message,
         finishedAt: new Date().toISOString(),
@@ -120,13 +182,17 @@ async function createWorkflowJob(
   }
 
   const jobId = apiResponse.jobId
+  if (isRetryableRateLimitCreateResponse(body, apiResponse.error)) {
+    return requeueRateLimitedCreation(creation, body, apiResponse.error)
+  }
+
   if (!response.ok || !jobId) {
     const error =
       apiResponse.error ||
       (!jobId ? "Create response did not include a job_id." : `Create request failed: ${response.status} ${response.statusText}`)
     saveCreationJob(
       {
-        ...baseRecord,
+        ...creation,
         status: "error",
         response: body,
         error,
@@ -141,35 +207,25 @@ async function createWorkflowJob(
     throw httpError(error, response.status)
   }
 
-  const workflowCreation = {
-    ...baseRecord,
-    id: jobId,
-    previousId: attemptId,
+  const workflowCreation = saveCreationJob({
+    ...creation,
     jobId,
     response: body,
+    queueNotBefore: null,
+    queueAttempt: 0,
+    lastRateLimitedAt: null,
     workflow: {
-      ...workflow,
+      ...creation.workflow,
       activeJobId: jobId,
       jobs: [{ stepIndex: 0, jobId, modeId: firstMode.id }],
     },
     status: "pending",
     updatedAt: new Date().toISOString(),
-  }
-
-  moveCreationJob(attemptId, workflowCreation)
+  })
+  queuedRequestBodies.delete(creation.id)
   addCreationEvent(jobId, "pending", "Workflow first step accepted.", body)
 
-  return {
-    ok: true,
-    jobId,
-    accountEmail,
-    modeId: workflowCreation.modeId,
-    modeLabel: mode.label,
-    source: source.publicSource,
-    request: liveRequest.publicRequest,
-    ...(template ? { templateId: template.id } : {}),
-    pollMs: CREATE_POLL_MS,
-  }
+  return workflowCreation
 }
 
 export async function createMediaJob(requestBody: Record<string, unknown>): Promise<CreateJobSubmitResponse> {
@@ -207,12 +263,13 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   }
 
   const source = mode.source?.required === false ? null : await resolveCreateSource(requireCreateSource(sourceRequest))
+  const queueInitial = shouldQueueCreation(accountEmail) || requestBody["queue"] === true
   const liveRequest = buildCreateApiRequest(mode, source, params)
-  const url = `${getJobsApiBaseUrl()}/${mode.endpoint}`
+  queuedRequestBodies.set(attemptId, liveRequest.body)
   const baseRecord = {
     id: attemptId,
     accountEmail,
-    status: "submitted",
+    status: QUEUED_CREATION_STATUS,
     modeId: mode.id,
     modeLabel: mode.label,
     mediaType: mode.mediaType || null,
@@ -228,25 +285,66 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   }
 
   saveCreationJob(baseRecord, {
-    eventStatus: "submitted",
-    eventMessage: "Submitted creation request.",
+    eventStatus: QUEUED_CREATION_STATUS,
+    eventMessage: "Queued creation request.",
   })
 
+  if (queueInitial) {
+    return queuedCreateResponse(baseRecord, mode, source?.publicSource || {}, liveRequest.publicRequest, template?.id)
+  }
+
+  const submittedCreation = await submitQueuedCreation(attemptId)
+  if (!submittedCreation) {
+    return queuedCreateResponse(
+      findCreationJob(attemptId) || baseRecord,
+      mode,
+      source?.publicSource || {},
+      liveRequest.publicRequest,
+      template?.id,
+    )
+  }
+  if (submittedCreation.status === QUEUED_CREATION_STATUS) {
+    return queuedCreateResponse(submittedCreation, mode, source?.publicSource || {}, liveRequest.publicRequest, template?.id)
+  }
+
+  return {
+    ok: true,
+    jobId: submittedCreation.jobId || submittedCreation.id,
+    accountEmail,
+    modeId: mode.id,
+    modeLabel: mode.label,
+    source: source?.publicSource || {},
+    request: liveRequest.publicRequest,
+    pollMs: CREATE_POLL_MS,
+  }
+}
+
+async function submitDirectCreation(creation: CreationJob): Promise<CreationJob | null> {
+  const mode = await findCreateMode(creation.modeId)
+  if (!mode || mode.disabled) {
+    throw new Error("Creation mode is not available.")
+  }
+
+  const url = `${getJobsApiBaseUrl()}/${mode.endpoint}`
   let response: Response
   let body: Record<string, unknown>
   let apiResponse: ReturnType<typeof parseCreateApiResponse>
   try {
-    response = await fetchGeneratePornApi(url, {
-      method: "POST",
-      body: JSON.stringify(liveRequest.body),
-    }, { accountEmail })
+    response = await fetchGeneratePornApi(
+      url,
+      {
+        method: "POST",
+        body: JSON.stringify(getQueuedRequestBody(creation)),
+      },
+      { accountEmail: creation.accountEmail },
+    )
     apiResponse = parseCreateApiResponse(await readJsonObject(response))
     body = apiResponse.body
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     saveCreationJob(
       {
-        ...baseRecord,
+        ...creation,
         status: "error",
         error: message,
         finishedAt: new Date().toISOString(),
@@ -261,9 +359,13 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
 
   if (!response.ok) {
     const error = apiResponse.error || `Create request failed: ${response.status} ${response.statusText}`
+    if (isRetryableRateLimitCreateResponse(body, error)) {
+      return requeueRateLimitedCreation(creation, body, error)
+    }
+
     saveCreationJob(
       {
-        ...baseRecord,
+        ...creation,
         status: "error",
         response: body,
         error,
@@ -279,10 +381,14 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   }
 
   const jobId = apiResponse.jobId
+  if (isRetryableRateLimitCreateResponse(body, apiResponse.error)) {
+    return requeueRateLimitedCreation(creation, body, apiResponse.error)
+  }
+
   if (!jobId) {
     saveCreationJob(
       {
-        ...baseRecord,
+        ...creation,
         status: "error",
         response: body,
         error: "Create response did not include a job_id.",
@@ -297,39 +403,20 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
     throw new Error("Create response did not include a job_id.")
   }
 
-  const creation = {
-    ...baseRecord,
-    id: jobId,
-    previousId: attemptId,
+  const submitted = saveCreationJob({
+    ...creation,
     jobId,
-    modeId: mode.id,
-    modeLabel: mode.label,
-    source: source?.publicSource || null,
-    params,
-    templateId: template?.id || mode.templateId || null,
-    templateLabel: template?.label || null,
-    request: liveRequest.publicRequest,
-    requestBody: liveRequest.body,
     response: body,
+    queueNotBefore: null,
+    queueAttempt: 0,
+    lastRateLimitedAt: null,
     status: "pending",
-    createdLocallyAt: requestStartedAt,
-    submittedAt: requestStartedAt,
     updatedAt: new Date().toISOString(),
-  }
-
-  moveCreationJob(attemptId, creation)
+  })
+  queuedRequestBodies.delete(creation.id)
   addCreationEvent(jobId, "pending", "Upstream job accepted.", body)
 
-  return {
-    ok: true,
-    jobId,
-    accountEmail,
-    modeId: mode.id,
-    modeLabel: mode.label,
-    source: source?.publicSource || {},
-    request: liveRequest.publicRequest,
-    pollMs: CREATE_POLL_MS,
-  }
+  return submitted
 }
 
 function createWorkflowSteps(modeId: string, params: CreateParams, templateWorkflow: TemplateSettings[] | null): TemplateSettings[] | null {
@@ -390,22 +477,325 @@ function createWorkflowSteps(modeId: string, params: CreateParams, templateWorkf
   return null
 }
 
+export function getMediaGenerationConcurrencyLimit(): number {
+  const stored = Number(readCatalogMeta(MEDIA_GENERATION_CONCURRENCY_LIMIT_META_KEY))
+  if (Number.isInteger(stored) && stored > 0) {
+    return stored
+  }
+
+  return DEFAULT_MEDIA_GENERATION_CONCURRENCY_LIMIT
+}
+
+export function setMediaGenerationConcurrencyLimit(limit: number): { limit: number } {
+  const normalized = Math.max(1, Math.min(20, Math.floor(Number(limit) || DEFAULT_MEDIA_GENERATION_CONCURRENCY_LIMIT)))
+  writeCatalogMeta(MEDIA_GENERATION_CONCURRENCY_LIMIT_META_KEY, normalized)
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "limit-updated")
+  return { limit: normalized }
+}
+
+export function startCreationQueueProcessing(): void {
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "startup")
+}
+
+export async function runCreationQueueBackgroundJob(): Promise<Record<string, unknown>> {
+  return processCreationQueues()
+}
+
+export function getPendingGenerationCountsByAccount(): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const creation of listCreationJobs({ status: "all", limit: 1000 })) {
+    if (!isPendingGeneration(creation)) continue
+    const key = accountQueueKey(creation.accountEmail)
+    counts[key] = (counts[key] || 0) + 1
+  }
+
+  return counts
+}
+
+async function processCreationQueues(accountEmail?: string | null): Promise<Record<string, unknown>> {
+  const accounts = new Set<string>()
+  if (accountEmail !== undefined) {
+    accounts.add(accountQueueKey(accountEmail))
+  } else {
+    for (const creation of listCreationJobs({ status: "all", limit: 1000 })) {
+      if (creation.status === QUEUED_CREATION_STATUS) {
+        accounts.add(accountQueueKey(creation.accountEmail))
+      }
+    }
+  }
+
+  let dispatched = 0
+  for (const accountKey of accounts) {
+    dispatched += await processCreationQueueForAccount(accountKey === "__default__" ? null : accountKey)
+  }
+
+  scheduleNextQueuedCreationRun()
+  return {
+    accounts: accounts.size,
+    dispatched,
+    queued: listCreationJobs({ status: "all", limit: 1000 }).filter((creation) => creation.status === QUEUED_CREATION_STATUS).length,
+  }
+}
+
+async function processCreationQueueForAccount(accountEmail: string | null): Promise<number> {
+  let dispatched = 0
+  while (countPendingGenerations(accountEmail) < getMediaGenerationConcurrencyLimit()) {
+    const queued = listCreationJobs({ status: "all", limit: 1000 })
+      .filter(
+        (creation) =>
+          creation.status === QUEUED_CREATION_STATUS && accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail),
+      )
+      .toSorted(compareQueuedCreations)
+    const nextQueued = queued.find(isQueueReady)
+
+    if (!nextQueued) {
+      return dispatched
+    }
+
+    try {
+      await submitQueuedCreation(nextQueued.id)
+      dispatched += 1
+    } catch {
+      return dispatched
+    }
+  }
+
+  return dispatched
+}
+
+async function submitQueuedCreation(id: string): Promise<CreationJob | null> {
+  const creation = findCreationJob(id)
+  if (!creation || creation.status !== QUEUED_CREATION_STATUS) {
+    return creation
+  }
+
+  await ensureAccountApiAuth(creation.accountEmail)
+  const submitting = saveCreationJob(
+    {
+      ...creation,
+      status: "submitted",
+      queueNotBefore: null,
+      submittedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    },
+    {
+      eventStatus: "submitted",
+      eventMessage: "Submitting queued creation.",
+    },
+  )
+
+  const submitted =
+    submitting.workflow && submitting.workflow.steps.length > 0
+      ? await submitWorkflowCreation({ ...submitting, workflow: submitting.workflow })
+      : await submitDirectCreation(submitting)
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "queued-submitted")
+  return submitted
+}
+
+function shouldQueueCreation(accountEmail: string | null): boolean {
+  return hasReadyQueuedCreations(accountEmail) || countPendingGenerations(accountEmail) >= getMediaGenerationConcurrencyLimit()
+}
+
+function hasReadyQueuedCreations(accountEmail: string | null): boolean {
+  return listCreationJobs({ status: "all", limit: 1000 }).some(
+    (creation) =>
+      creation.status === QUEUED_CREATION_STATUS &&
+      accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail) &&
+      isQueueReady(creation),
+  )
+}
+
+function countPendingGenerations(accountEmail: string | null): number {
+  return listCreationJobs({ status: "all", limit: 1000 }).filter(
+    (creation) => accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail) && isPendingGeneration(creation),
+  ).length
+}
+
+function isPendingGeneration(creation: CreationJob): boolean {
+  return Boolean(creation.jobId && isActiveCreationStatus(creation.status))
+}
+
+function isQueueReady(creation: CreationJob): boolean {
+  if (creation.status !== QUEUED_CREATION_STATUS) return false
+  if (!creation.queueNotBefore) return true
+
+  const timestamp = Date.parse(creation.queueNotBefore)
+  return !Number.isFinite(timestamp) || timestamp <= Date.now()
+}
+
+function compareQueuedCreations(a: CreationJob, b: CreationJob): number {
+  const aReadyAt = queueReadyAtMs(a)
+  const bReadyAt = queueReadyAtMs(b)
+  if (aReadyAt !== bReadyAt) return aReadyAt - bReadyAt
+
+  return String(a.createdLocallyAt || "").localeCompare(String(b.createdLocallyAt || ""))
+}
+
+function queueReadyAtMs(creation: CreationJob): number {
+  const timestamp = Date.parse(creation.queueNotBefore || "")
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function requeueRateLimitedCreation(creation: CreationJob, body: Record<string, unknown>, error: string | null): CreationJob {
+  const now = new Date()
+  const nextAttempt = Math.max(1, creation.queueAttempt + 1)
+  const delayMs = Math.min(RATE_LIMIT_MAX_BACKOFF_MS, RATE_LIMIT_INITIAL_BACKOFF_MS * 2 ** (nextAttempt - 1))
+  const queueNotBefore = new Date(now.getTime() + delayMs).toISOString()
+  const message = error || rateLimitMessageFromBody(body) || "Upstream rate limit exceeded."
+  const next = saveCreationJob(
+    {
+      ...creation,
+      jobId: null,
+      status: QUEUED_CREATION_STATUS,
+      response: body,
+      job: body,
+      error: message,
+      queueAttempt: nextAttempt,
+      queueNotBefore,
+      lastRateLimitedAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      finishedAt: null,
+    },
+    {
+      eventStatus: QUEUED_CREATION_STATUS,
+      eventMessage: `Rate limited; retrying after ${queueNotBefore}.`,
+      eventData: body,
+    },
+  )
+
+  scheduleNextQueuedCreationRun()
+  return next
+}
+
+function isRetryableRateLimitCreateResponse(body: Record<string, unknown>, error: string | null): boolean {
+  const status = String(body["status"] || "").toLowerCase()
+  const message = String(error || body["error"] || "")
+  return (
+    (status === "failed" || Boolean(error)) &&
+    (/throttling\.ratequota/i.test(message) || /rate limit/i.test(message) || /requests rate limit exceeded/i.test(message))
+  )
+}
+
+function rateLimitMessageFromBody(body: Record<string, unknown>): string | null {
+  return typeof body["error"] === "string" && body["error"] ? body["error"] : null
+}
+
+function queuedCreateResponse(
+  creation: {
+    id: string
+    accountEmail: string | null
+    error?: string | null
+    lastRateLimitedAt?: string | null
+    modeId: string | null
+    modeLabel: string | null
+    queueNotBefore?: string | null
+  },
+  mode: CreateMode,
+  source: Record<string, unknown>,
+  request: Record<string, unknown>,
+  templateId?: string | null,
+): CreateJobSubmitResponse {
+  return {
+    ok: true,
+    queued: true,
+    rateLimited: Boolean(creation.lastRateLimitedAt),
+    error: creation.error || null,
+    queueNotBefore: creation.queueNotBefore || null,
+    jobId: creation.id,
+    accountEmail: creation.accountEmail,
+    modeId: creation.modeId || mode.id,
+    modeLabel: creation.modeLabel || mode.label,
+    source,
+    request,
+    ...(templateId ? { templateId } : {}),
+    pollMs: CREATE_POLL_MS,
+  }
+}
+
+async function findCreateMode(modeId: string | null): Promise<CreateMode | null> {
+  if (!modeId) {
+    return null
+  }
+
+  const registry = await loadCreateTemplateRegistry()
+  const modes = getCreateModeDefinitions(registry.templates)
+  return modes.find((entry) => entry.id === modeId) || null
+}
+
+function accountQueueKey(accountEmail: string | null): string {
+  return accountEmail || "__default__"
+}
+
+function scheduleNextQueuedCreationRun(): void {
+  const nextQueued = listCreationJobs({ status: "all", limit: 1000 })
+    .filter((creation) => creation.status === QUEUED_CREATION_STATUS && !isQueueReady(creation))
+    .toSorted(compareQueuedCreations)[0]
+
+  if (!nextQueued?.queueNotBefore) {
+    return
+  }
+
+  const delayMs = Math.max(1000, Date.parse(nextQueued.queueNotBefore) - Date.now())
+  if (!Number.isFinite(delayMs)) {
+    return
+  }
+
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, delayMs, "queue-not-before")
+}
+
+function getQueuedRequestBody(creation: CreationJob): Record<string, unknown> {
+  return queuedRequestBodies.get(creation.id) || creation.requestBody || {}
+}
+
 export async function pollCreateJob(jobId: string): Promise<CreateJobPollResponse> {
-  const existing = findCreationJob(jobId)
+  let existing = findCreationJob(jobId)
+  if (existing?.status === QUEUED_CREATION_STATUS) {
+    await processCreationQueues(existing.accountEmail)
+    existing = findCreationJob(jobId)
+  }
+
+  if (existing?.status === QUEUED_CREATION_STATUS || (existing && !existing.jobId)) {
+    return {
+      job: toPublicCreateJob(creationToQueuedJob(existing)),
+      createState: toPublicCreation(existing),
+      pollMs: CREATE_POLL_MS,
+    }
+  }
+
   if (existing?.workflow && existing.workflow.steps.length > 1) {
     return pollCreateWorkflowJob({ ...existing, workflow: existing.workflow })
   }
 
-  const job = await fetchCreateJob(jobId, { accountEmail: existing?.accountEmail || null })
+  const upstreamJobId = existing?.jobId || jobId
+  const job = await fetchCreateJob(upstreamJobId, { accountEmail: existing?.accountEmail || null })
   const creation = saveCreationFromJob(job, {
     existing,
     eventMessage: `Job ${job.status || "updated"}.`,
   })
+  if (isTerminalCreationStatus(job.status)) {
+    await processCreationQueues(existing?.accountEmail || job.accountEmail || null)
+  }
 
   return {
     job: toPublicCreateJob(job),
     createState: creation ? toPublicCreation(creation) : null,
     pollMs: CREATE_POLL_MS,
+  }
+}
+
+function creationToQueuedJob(creation: CreationJob): GeneratePornJob {
+  return {
+    id: creation.id,
+    accountEmail: creation.accountEmail,
+    type: creation.mediaType,
+    prompt: typeof creation.params["prompt"] === "string" ? creation.params["prompt"] : "",
+    negative_prompt: typeof creation.params["negativePrompt"] === "string" ? creation.params["negativePrompt"] : "",
+    status: creation.status,
+    output_url: creation.outputUrl,
+    input_url: creation.inputUrl,
+    created_at: creation.createdAt || creation.createdLocallyAt,
+    external_task_id: creation.externalTaskId,
+    error: creation.error,
   }
 }
 
@@ -449,10 +839,14 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
         ...workflow.overrides,
       },
     )
-    const response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${nextMode.endpoint}`, {
-      method: "POST",
-      body: JSON.stringify(liveRequest.body),
-    }, { accountEmail: creation.accountEmail })
+    const response = await fetchGeneratePornApi(
+      `${getJobsApiBaseUrl()}/${nextMode.endpoint}`,
+      {
+        method: "POST",
+        body: JSON.stringify(liveRequest.body),
+      },
+      { accountEmail: creation.accountEmail },
+    )
     const { body, error: responseError, jobId } = parseCreateApiResponse(await readJsonObject(response))
 
     if (!response.ok || !jobId) {
@@ -555,6 +949,9 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
       eventData: publicJob,
     },
   )
+  if (isTerminalCreationStatus(status)) {
+    await processCreationQueues(creation.accountEmail)
+  }
 
   return {
     job: {
@@ -621,6 +1018,7 @@ export async function getCreations(searchParams = new URLSearchParams()): Promis
   if (refresh && getSyncAccountEmails().length > 0) {
     await refreshActiveCreations()
   }
+  await processCreationQueues()
 
   const rows = listCreationJobs({ status })
   const activeCount = rows.filter((row) => isActiveCreationStatus(row.status)).length
@@ -722,6 +1120,7 @@ export async function refreshCreations({
       }
     }
   }
+  await processCreationQueues()
 
   const rows = listCreationJobs({ status: "all" })
   return {
@@ -755,6 +1154,7 @@ async function refreshActiveCreations(): Promise<{ refreshed: number; errors: { 
       })
     }
   }
+  await processCreationQueues()
 
   return {
     refreshed,
@@ -762,7 +1162,10 @@ async function refreshActiveCreations(): Promise<{ refreshed: number; errors: { 
   }
 }
 
-export async function fetchCreateJob(jobId: string, { accountEmail = null }: { accountEmail?: string | null } = {}): Promise<GeneratePornJob> {
+export async function fetchCreateJob(
+  jobId: string,
+  { accountEmail = null }: { accountEmail?: string | null } = {},
+): Promise<GeneratePornJob> {
   await ensureAccountApiAuth(accountEmail)
 
   const response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}`, {}, { accountEmail })
@@ -807,6 +1210,9 @@ export function saveCreationFromJob(
     workflow: existing?.workflow || null,
     job: publicJob,
     error: job.error || null,
+    queueNotBefore: null,
+    queueAttempt: 0,
+    lastRateLimitedAt: null,
     inputUrl: job.input_url || null,
     outputUrl: job.output_url || null,
     externalTaskId: job.external_task_id || null,

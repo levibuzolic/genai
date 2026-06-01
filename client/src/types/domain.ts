@@ -5,8 +5,12 @@ export type Config = {
   authorizationExpiresAt: string | null
   authorizationSource: string | null
   authBrowser?: AuthBrowserStatus
+  playbox?: PlayboxAuthStatus
   authAccounts?: AuthAccountStatus[]
   defaultAccountEmail?: string | null
+  mediaGenerationConcurrencyLimit?: number
+  pendingGenerationsByAccount?: Record<string, number>
+  backgroundWorkers?: Record<string, BackgroundWorkerStatus>
   autoSync?: AutoSyncStatus
   thumbnailDir: string
   pageLimit: number
@@ -29,10 +33,32 @@ export type AuthBrowserStatus = {
 
 export type AuthAccountStatus = {
   email: string
+  isDefault?: boolean
   hasAuthorization: boolean
   authorizationExpiresAt: string | null
   authorizationSource: string | null
   authBrowser: AuthBrowserStatus
+}
+
+export type PlayboxAuthStatus = {
+  hasAuthorization: boolean
+  authorizationExpiresAt: string | null
+  authorizationSource: string | null
+  email?: string | null
+  authBrowser: AuthBrowserStatus
+  importedSession?: PlayboxImportedAuthStatus
+}
+
+export type PlayboxImportedAuthStatus = {
+  hasSession: boolean
+  path: string
+  cookieCount: number
+  email: string | null
+  sourceUrl: string | null
+  userAgent: string | null
+  lastValidatedAt: string | null
+  lastRefreshAt: string | null
+  lastError: string | null
 }
 
 export type AutoSyncStatus = {
@@ -48,9 +74,31 @@ export type AutoSyncStatus = {
   timerActive: boolean
 }
 
+export type BackgroundWorkerStatus = {
+  id: string
+  label: string
+  enabled: boolean
+  running: boolean
+  intervalMs: number | null
+  startupDelayMs: number
+  nextRunAt: string | null
+  lastRunAt: string | null
+  lastFinishedAt: string | null
+  lastError: string | null
+  lastReason: string | null
+  lastResult: Record<string, unknown> | null
+  runCount: number
+  skippedCount: number
+  timerActive: boolean
+}
+
 export type CatalogItem = {
   id: string
   accountEmail?: string | null
+  provider?: string | null
+  collectionId?: string | null
+  assetId?: string | null
+  assetKind?: string | null
   type?: string | null
   status?: string | null
   prompt?: string | null
@@ -244,6 +292,9 @@ export type Creation = {
   accountEmail?: string | null
   jobId?: string | null
   status: string
+  queueNotBefore?: string | null
+  queueAttempt?: number
+  lastRateLimitedAt?: string | null
   modeId?: string | null
   modeLabel?: string | null
   mediaType?: "image" | "video" | string | null

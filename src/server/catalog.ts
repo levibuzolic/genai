@@ -50,6 +50,7 @@ type BackupRetentionCandidate = CatalogBackupSummary & {
 }
 
 const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
+const FAILED_MEDIA_STATUSES = new Set(["failed", "error", "cancelled", "canceled"])
 const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -91,7 +92,12 @@ export async function downloadJob(job: GeneratePornJob): Promise<Partial<Catalog
 }
 
 export function toCatalogItem(job: GeneratePornJob, existing: Partial<CatalogItem> = {}): CatalogItem {
-  const lastPolledAt = job.last_polled_at || job.lastPolledAt || (existing.lastPolledAt as string | number | null | undefined) || (existing.last_polled_at as string | number | null | undefined) || null
+  const lastPolledAt =
+    job.last_polled_at ||
+    job.lastPolledAt ||
+    (existing.lastPolledAt as string | number | null | undefined) ||
+    (existing.last_polled_at as string | number | null | undefined) ||
+    null
 
   return {
     ...existing,
@@ -109,8 +115,7 @@ export function toCatalogItem(job: GeneratePornJob, existing: Partial<CatalogIte
     duration: normalizeDurationSeconds(job.duration ?? existing.duration),
     createdAt: job.created_at || null,
     createdAtIso: job.created_at ? new Date(Number(job.created_at) * 1000).toISOString() : null,
-    timeToGenerateMs:
-      calculateTimeToGenerateMs(job.created_at, lastPolledAt),
+    timeToGenerateMs: calculateTimeToGenerateMs(job.created_at, lastPolledAt),
     externalTaskId: job.external_task_id || null,
     shared: Boolean(job.shared),
     favorited: Boolean(job.favorited),
@@ -222,14 +227,15 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
   const catalog = await loadCatalog()
   const query = (searchParams.get("q") || "").trim().toLowerCase()
   const media = searchParams.get("media") || "all"
+  const provider = searchParams.get("provider") || "all"
   const status = searchParams.get("status") || "all"
   const sort = searchParams.get("sort") || "newest"
   const page = Math.max(1, Number(searchParams.get("page") || 1))
   const pageSize = clamp(Number(searchParams.get("pageSize") || 60), 12, 240)
 
-  const catalogItems = (catalog.items || []).filter((item) => !isStaleRenderingMediaItem(item))
-  const visibleItems = catalogItems.filter((item) => !isDeletedCatalogItem(item))
-  const deletedItems = catalogItems.filter(isDeletedCatalogItem)
+  const catalogItems = (catalog.items || []).filter((item) => !isStaleRenderingMediaItem(item) && matchesProviderFilter(item, provider))
+  const visibleItems = catalogItems.filter((item) => !isDeletedFilterItem(item))
+  const deletedItems = catalogItems.filter(isDeletedFilterItem)
   let items = status === "deleted" ? deletedItems : visibleItems
   const facets = buildFacets(visibleItems, deletedItems.length)
 
@@ -249,14 +255,24 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
       if (status === "favorited") return Boolean(item.favorited)
       if (status === "duplicate") return Number(item.duplicateGroupSize || 0) > 1
       if (status === "unverified") return Boolean(item.localFile) && !item.sha256
-      if (status === "deleted") return isDeletedCatalogItem(item)
+      if (status === "deleted") return isDeletedFilterItem(item)
       return true
     })
   }
 
   if (query) {
     items = items.filter((item) =>
-      [item.id, item.type, item.prompt, item.negativePrompt, item.localFile].some((value) =>
+      [
+        item.id,
+        item.type,
+        item.provider,
+        item.collectionId,
+        item.assetId,
+        item.assetKind,
+        item.prompt,
+        item.negativePrompt,
+        item.localFile,
+      ].some((value) =>
         String(value || "")
           .toLowerCase()
           .includes(query),
@@ -279,12 +295,24 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
     pageCount,
     facets: {
       ...facets,
-      orphanFiles: catalog.orphanFiles?.length || 0,
+      orphanFiles: provider === "all" || provider === "generateporn" ? catalog.orphanFiles?.length || 0 : 0,
     },
     catalogUpdatedAt: catalog.updatedAt || null,
     lastSeenJobId: catalog.lastSeenJobId || null,
     lastRun: catalog.lastRun || null,
   }
+}
+
+function matchesProviderFilter(item: CatalogItem, provider: string): boolean {
+  if (provider === "playbox") {
+    return item.provider === "playbox"
+  }
+
+  if (provider === "generateporn") {
+    return item.provider !== "playbox"
+  }
+
+  return true
 }
 
 export async function getCatalogItem(id: string): Promise<CatalogItemResponse> {
@@ -341,13 +369,17 @@ export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
   return {
     id: item.id,
     accountEmail: item.accountEmail ?? null,
+    provider: item.provider ?? null,
+    collectionId: item.collectionId ?? null,
+    assetId: item.assetId ?? null,
+    assetKind: item.assetKind ?? null,
     userId: item.userId ?? null,
     type: item.type ?? null,
     prompt: item.prompt ?? null,
     negativePrompt: item.negativePrompt ?? null,
     status: item.status ?? null,
-    outputUrl: item.outputUrl ?? null,
-    inputUrl: item.inputUrl ?? null,
+    outputUrl: item.provider === "playbox" ? null : (item.outputUrl ?? null),
+    inputUrl: item.provider === "playbox" ? null : (item.inputUrl ?? null),
     duration: item.duration ?? null,
     createdAt: item.createdAt ?? null,
     createdAtIso: item.createdAtIso ?? null,
@@ -377,7 +409,7 @@ export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
     templateLabel: item.templateLabel ?? null,
     sourceKind: item.sourceKind ?? null,
     sourceItemId: item.sourceItemId ?? null,
-    sourceUrl: item.sourceUrl ?? null,
+    sourceUrl: item.provider === "playbox" ? null : (item.sourceUrl ?? null),
     createdLocallyAt: item.createdLocallyAt ?? null,
     remoteDeletedAt: typeof item.remoteDeletedAt === "string" ? item.remoteDeletedAt : null,
     remoteDeleteStatus: typeof item.remoteDeleteStatus === "string" ? item.remoteDeleteStatus : null,
@@ -401,7 +433,9 @@ export async function deleteCatalogItemRemote(
   }
 
   const remoteStatus =
-    typeof item.remoteDeletedAt === "string" ? "previously-deleted" : (await deleteRemoteJob(id, { accountEmail: item.accountEmail })).status
+    typeof item.remoteDeletedAt === "string"
+      ? "previously-deleted"
+      : (await deleteRemoteJob(id, { accountEmail: item.accountEmail })).status
   const now = new Date().toISOString()
   let deletedLocalFiles: string[] = []
   let responseItem: PublicCatalogItem | null = null
@@ -565,11 +599,27 @@ function timestampMs(value: unknown): number | null {
 }
 
 function isMissingMediaItem(item: CatalogItem): boolean {
-  return !item.localFile && !item.downloadError && !isPendingMediaItem(item)
+  return !item.localFile && !item.downloadError && !isPendingMediaItem(item) && !isFailedMediaGenerationItem(item)
 }
 
 function isDeletedCatalogItem(item: CatalogItem): boolean {
   return typeof item.remoteDeletedAt === "string" && item.remoteDeletedAt.length > 0
+}
+
+function isDeletedFilterItem(item: CatalogItem): boolean {
+  return isDeletedCatalogItem(item) || isFailedMediaGenerationItem(item)
+}
+
+function isFailedMediaGenerationItem(item: CatalogItem): boolean {
+  return (
+    FAILED_MEDIA_STATUSES.has(
+      String(item.status || "")
+        .trim()
+        .toLowerCase(),
+    ) &&
+    !item.localFile &&
+    !item.outputUrl
+  )
 }
 
 export async function loadCatalog(): Promise<Catalog> {
@@ -590,6 +640,16 @@ export async function reconcileCatalogWithLocalFiles(catalog: Catalog): Promise<
   let changed = false
 
   for (const item of catalog.items) {
+    if (item.provider === "playbox") {
+      if (await reconcilePlayboxCatalogItem(item)) {
+        changed = true
+      }
+      if (item.localFile) {
+        downloadedJobIds.add(item.id)
+      }
+      continue
+    }
+
     const localFile = filesById.get(item.id)
 
     if (localFile) {
@@ -630,6 +690,44 @@ export async function reconcileCatalogWithLocalFiles(catalog: Catalog): Promise<
   const nextDownloadedJobIds = Array.from(downloadedJobIds).slice(-10000)
   if (JSON.stringify(catalog.downloadedJobIds || []) !== JSON.stringify(nextDownloadedJobIds)) {
     catalog.downloadedJobIds = nextDownloadedJobIds
+    changed = true
+  }
+
+  return changed
+}
+
+async function reconcilePlayboxCatalogItem(item: CatalogItem): Promise<boolean> {
+  if (!item.localFile) {
+    return false
+  }
+
+  const absolutePath = path.join(MEDIA_DIR, item.localFile)
+  let fileStat: Awaited<ReturnType<typeof stat>>
+  try {
+    fileStat = await stat(absolutePath)
+  } catch {
+    item.localFile = null
+    item.size = null
+    item.fileSize = null
+    item.sha256 = null
+    item.verifiedAt = null
+    item.contentType = null
+    item.thumbnailFile = null
+    item.thumbnailGeneratedAt = null
+    item.thumbnailError = null
+    return true
+  }
+
+  let changed = false
+  const contentType = contentTypeFor(absolutePath)
+  if (item.size !== fileStat.size || item.fileSize !== fileStat.size || item.contentType !== contentType) {
+    item.size = fileStat.size
+    item.fileSize = fileStat.size
+    item.contentType = contentType
+    changed = true
+  }
+
+  if (await reconcileCatalogItemThumbnail(item)) {
     changed = true
   }
 
@@ -836,7 +934,9 @@ async function listMediaFiles(directory: string): Promise<string[]> {
 }
 
 function isInternalMediaDirectory(name: string): boolean {
-  return name === "_thumbnails" || name === "_catalog_backups" || name === "_auth_browser_profile"
+  return (
+    name === "_thumbnails" || name === "_catalog_backups" || name === "_auth_browser_profile" || name === "_playbox_auth_browser_profile"
+  )
 }
 
 export function enqueueDownload(downloadQueue: GeneratePornJob[], queuedJobIds: Set<string>, job: GeneratePornJob): void {
@@ -849,6 +949,10 @@ export function enqueueDownload(downloadQueue: GeneratePornJob[], queuedJobIds: 
 }
 
 export function isDownloadableCatalogItem(item: CatalogItem | null | undefined): boolean {
+  if (item?.provider === "playbox") {
+    return false
+  }
+
   return Boolean(
     item?.id && item.status === "done" && typeof item.outputUrl === "string" && /\.(png|mp4)(?:[?#].*)?$/i.test(item.outputUrl),
   )

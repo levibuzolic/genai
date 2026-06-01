@@ -1,13 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "GP Auth Helper",
-  "description": "Local development helper for forwarding a fresh auth token to the local media library.",
+  "name": "GenAI Auth Helper",
+  "description": "Local development helper for forwarding fresh auth tokens to the local media library.",
   "version": "0.1.0",
   "permissions": [
     "scripting"
   ],
   "host_permissions": [
     "https://app.generateporn.ai/*",
+    "https://www.playbox.com/*",
+    "https://api.playbox.com/*",
     "http://localhost/*",
     "http://127.0.0.1/*"
   ],
@@ -18,7 +20,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://app.generateporn.ai/*"
+        "https://app.generateporn.ai/*",
+        "https://www.playbox.com/*"
       ],
       "css": [
         "src/panel.css"

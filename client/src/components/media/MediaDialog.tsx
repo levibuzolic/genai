@@ -46,8 +46,9 @@ export function MediaDialog({
   const isFailed = Boolean(item && isFailedMediaItem(item))
   const canUsePrompt = Boolean(item?.prompt)
   const canUseImage = Boolean(item && isImageItem(item))
+  const isPlaybox = item?.provider === "playbox"
   const dialogOpen = open && Boolean(item)
-  const modelId = item ? item.modelId ?? item.model_id : null
+  const modelId = item ? (item.modelId ?? item.model_id) : null
   const timeToGenerate = item?.timeToGenerateMs ? formatDuration(item.timeToGenerateMs / 1000) : null
 
   return (
@@ -164,7 +165,7 @@ export function MediaDialog({
                           </Button>
                         </>
                       )}
-                      {mediaUrl && (
+                      {mediaUrl && !isPlaybox && (
                         <Button id="detailOpenLink" className="openLink" size="sm" variant="outline" asChild>
                           <a href={mediaUrl} target="_blank" rel="noreferrer">
                             <ExternalLink />

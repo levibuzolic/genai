@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
+import http from "node:http"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
@@ -89,6 +90,76 @@ test("server serves the app shell for client routes", async () => {
   } finally {
     await listener.close()
   }
+})
+
+test("server redirects static app routes to Vite when the dev server is available", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-vite-redirect-"))
+  const viteServer = http.createServer((_request, response) => {
+    response.writeHead(200, { "content-type": "text/html" })
+    response.end(`<!doctype html><title>Media Library</title><script type="module" src="/src/main.tsx"></script>`)
+  })
+  const viteListener = await listenOnRandomPort(viteServer)
+
+  try {
+    const imported = await importServer(mediaDir, { REDIRECT_STATIC_TO_VITE: "true", VITE_PORT: String(viteListener.port) })
+    const listener = await listenOnRandomPort(imported.server)
+
+    try {
+      const appRoute = await requestRaw(listener.port, "/settings/playbox-auth?source=test")
+      assert.equal(appRoute.statusCode, 307)
+      assert.equal(appRoute.headers.location, `http://localhost:${viteListener.port}/settings/playbox-auth?source=test`)
+
+      const apiRoute = await requestRaw(listener.port, "/api/config")
+      assert.equal(apiRoute.statusCode, 200)
+      assert.equal(apiRoute.headers.location, undefined)
+    } finally {
+      await listener.close()
+    }
+  } finally {
+    await viteListener.close()
+  }
+})
+
+test("server does not serve stale static app routes while Vite redirect mode is enabled", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-vite-unavailable-"))
+  const imported = await importServer(mediaDir, { REDIRECT_STATIC_TO_VITE: "true", VITE_PORT: "9" })
+  const listener = await listenOnRandomPort(imported.server)
+
+  try {
+    const appRoute = await requestRaw(listener.port, "/settings/account")
+    assert.equal(appRoute.statusCode, 503)
+    assert.match(appRoute.headers["content-type"], /text\/html/)
+    assert.match(appRoute.body.toString("utf8"), /Vite dev server is not running/)
+
+    const apiRoute = await requestRaw(listener.port, "/api/config")
+    assert.equal(apiRoute.statusCode, 200)
+  } finally {
+    await listener.close()
+  }
+})
+
+test("primary auth browser account is listed alongside added accounts", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-auth-accounts-"))
+  const server = await importServer(mediaDir)
+
+  await server.authBrowser.acceptToken({
+    token: fakeBearerToken(),
+    email: "emizah@wtf0.com",
+  })
+  server.acceptAuthorization(fakeBearerToken(), "auth-browser", "gp@wtf0.com")
+
+  const accounts = server.getAuthAccountStatuses()
+
+  assert.deepEqual(
+    accounts.map((account) => account.email),
+    ["emizah@wtf0.com", "gp@wtf0.com"],
+  )
+  assert.equal(accounts[0].isDefault, true)
+  assert.equal(accounts[0].hasAuthorization, true)
+  assert.equal(accounts[0].authBrowser.email, "emizah@wtf0.com")
+  assert.equal(accounts[1].isDefault, undefined)
+  assert.equal(accounts[1].hasAuthorization, true)
+  assert.equal(server.getDefaultAccountEmail(), "emizah@wtf0.com")
 })
 
 test("video thumbnail helper writes predictable poster path with a stubbed ffmpeg runner", async () => {
@@ -769,6 +840,52 @@ test("thumbnail generation action creates posters for existing downloaded videos
 
     assert.equal(server.syncState.mode, "generate-thumbnails")
     assert.equal(server.syncState.downloaded, 1)
+    assert.equal(item.thumbnailFile, `_thumbnails/2026-05-26/2026-05-26_video_${id}.jpg`)
+    assert.equal(item.thumbnailError, null)
+    assert.equal(existsSync(path.join(mediaDir, item.thumbnailFile)), true)
+  } finally {
+    restoreRunner()
+  }
+})
+
+test("missing thumbnail background job creates posters for existing downloaded videos", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-background-thumbs-"))
+  const id = "14141414-1414-4141-8141-141414141414"
+  const localFile = `2026-05-26/2026-05-26_video_${id}.mp4`
+  await mkdir(path.dirname(path.join(mediaDir, localFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, localFile), new Uint8Array([1, 2, 3]))
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/background_00.mp4",
+        localFile,
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+
+  const restoreRunner = setThumbnailProcessRunnerForTests(async (_command, args) => {
+    await writeFile(args.at(-1), new Uint8Array([8, 8, 8]))
+  })
+
+  try {
+    const server = await importServer(mediaDir)
+
+    const result = await server.runMissingThumbnailBackgroundJob({ limit: 5 })
+    const catalog = await readCatalog(mediaDir)
+    const item = catalog.items.find((entry) => entry.id === id)
+
+    assert.deepEqual(result, {
+      scanned: 1,
+      queued: 1,
+      generated: 1,
+      errors: 0,
+    })
     assert.equal(item.thumbnailFile, `_thumbnails/2026-05-26/2026-05-26_video_${id}.jpg`)
     assert.equal(item.thumbnailError, null)
     assert.equal(existsSync(path.join(mediaDir, item.thumbnailFile)), true)

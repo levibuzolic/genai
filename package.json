@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "start:api": "REDIRECT_STATIC_TO_VITE=false node src/server.ts",
     "typecheck": "tsc -b",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",
@@ -13,8 +14,8 @@
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test:unit",
     "test:unit": "vitest run --config vitest.config.ts",
     "build": "pnpm typecheck && vite build",
-    "start": "node src/server.ts",
-    "tailscale:funnel": "tailscale --socket=/opt/homebrew/var/run/tailscale/tailscaled.sock funnel --bg --https=443 localhost:${PORT:-5177}",
+    "start": "node scripts/start-local.mjs",
+    "tailscale:funnel": "tailscale --socket=/opt/homebrew/var/run/tailscale/tailscaled.sock funnel --bg --https=443 localhost:${PORT:-6177}",
     "tailscale:funnel:off": "tailscale --socket=/opt/homebrew/var/run/tailscale/tailscaled.sock funnel --https=443 off",
     "tailscale:funnel:status": "tailscale --socket=/opt/homebrew/var/run/tailscale/tailscaled.sock funnel status",
     "test": "pnpm build && pnpm test:unit && node --test --test-concurrency=1 \"test/*.test.js\""

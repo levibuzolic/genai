@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import test from "node:test"
+import { DatabaseSync } from "node:sqlite"
 
 import sharp from "sharp"
 
@@ -421,6 +422,147 @@ test("text-to-video creation submits model video without a source image", async 
       duration: 8,
       seed: null,
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("creation requests queue per account when the configured generation limit is full", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-queue-"))
+  const job1 = "71717171-7171-4717-8717-717171717171"
+  const job2 = "72727272-7272-4727-8727-727272727272"
+  const submitted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      submitted.push(JSON.parse(String(options.body)))
+      return jsonResponse({ job_id: submitted.length === 1 ? job1 : job2 })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${job1}`) {
+      return jsonResponse({
+        id: job1,
+        type: "edit",
+        prompt: "first",
+        status: "done",
+        output_url: "https://assets.example/first.png",
+        created_at: 1779893000,
+      })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${job2}`) {
+      return jsonResponse({
+        id: job2,
+        type: "edit",
+        prompt: "second",
+        status: "pending",
+        created_at: 1779893001,
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    server.setMediaGenerationConcurrencyLimit(1)
+
+    const first = await server.createMediaJob({
+      modeId: "custom-image",
+      source: { kind: "url", url: "https://assets.example/source-1.png" },
+      params: { prompt: "first" },
+    })
+    const queued = await server.createMediaJob({
+      modeId: "custom-image",
+      source: { kind: "url", url: "https://assets.example/source-2.png" },
+      params: { prompt: "second" },
+    })
+
+    assert.equal(first.jobId, job1)
+    assert.equal(queued.queued, true)
+    assert.equal(submitted.length, 1)
+
+    await server.pollCreateJob(job1)
+    const queuedDetails = await server.getCreationDetails(queued.jobId)
+
+    assert.equal(submitted.length, 2)
+    assert.equal(queuedDetails.creation.jobId, job2)
+    assert.equal(queuedDetails.creation.status, "pending")
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("rate limited creation responses show queued retry with exponential backoff", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-rate-limit-"))
+  const jobId = "73737373-7373-4737-8737-737373737373"
+  const submitted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      submitted.push(JSON.parse(String(options.body)))
+      if (submitted.length === 1) {
+        return jsonResponse({
+          id: "772d7629-0073-4bb4-a237-ca5c2650a351",
+          status: "failed",
+          error: "Throttling.RateQuota: Requests rate limit exceeded, please try again later.",
+        })
+      }
+
+      return jsonResponse({ job_id: jobId })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${jobId}`) {
+      return jsonResponse({
+        id: jobId,
+        type: "edit",
+        prompt: "retry me",
+        status: "pending",
+        created_at: 1779893002,
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const created = await server.createMediaJob({
+      modeId: "custom-image",
+      source: { kind: "url", url: "https://assets.example/source.png" },
+      params: { prompt: "retry me" },
+    })
+    const queuedDetails = await server.getCreationDetails(created.jobId)
+
+    assert.equal(created.queued, true)
+    assert.equal(created.rateLimited, true)
+    assert.match(created.error, /rate limit/i)
+    assert.equal(queuedDetails.creation.status, "queued")
+    assert.equal(queuedDetails.creation.queueAttempt, 1)
+    assert.equal(submitted.length, 1)
+
+    await server.pollCreateJob(created.jobId)
+    assert.equal(submitted.length, 1)
+
+    const db = new DatabaseSync(path.join(mediaDir, "catalog.sqlite"))
+    try {
+      db.prepare("UPDATE creation_jobs SET queue_not_before = ? WHERE id = ?").run(new Date(Date.now() - 1000).toISOString(), created.jobId)
+    } finally {
+      db.close()
+    }
+
+    await server.pollCreateJob(created.jobId)
+    const retriedDetails = await server.getCreationDetails(created.jobId)
+    assert.equal(submitted.length, 2)
+    assert.equal(retriedDetails.creation.jobId, jobId)
+    assert.equal(retriedDetails.creation.status, "pending")
+    assert.equal(retriedDetails.creation.queueAttempt, 0)
   } finally {
     globalThis.fetch = originalFetch
   }

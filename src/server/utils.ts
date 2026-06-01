@@ -34,6 +34,7 @@ export function contentTypeFor(filePath: string): string {
     ".webp": "image/webp",
     ".bmp": "image/bmp",
     ".mp4": "video/mp4",
+    ".mp3": "audio/mpeg",
   } as const
   return types[extension] || "application/octet-stream"
 }

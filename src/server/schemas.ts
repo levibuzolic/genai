@@ -106,6 +106,10 @@ export const CatalogItemSchema = z
   .object({
     id: z.string(),
     accountEmail: nullableStringSchema,
+    provider: nullableStringSchema,
+    collectionId: nullableStringSchema,
+    assetId: nullableStringSchema,
+    assetKind: nullableStringSchema,
     userId: nullableStringSchema,
     type: nullableStringSchema,
     prompt: nullableStringSchema,

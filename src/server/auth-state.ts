@@ -18,6 +18,7 @@ type AuthBrowserStatus = ReturnType<AuthBrowserServiceInstance["getStatus"]>
 
 export type AuthAccountStatus = {
   email: string
+  isDefault?: boolean
   hasAuthorization: boolean
   authorizationExpiresAt: string | null
   authorizationSource: string | null
@@ -37,12 +38,13 @@ export const authState = {
 const accountStates = new Map<string, AuthState>()
 const accountBrowsers = new Map<string, AuthBrowserServiceInstance>()
 let accountEmails: string[] = []
+let primaryAccountEmail: string | null = null
 
 export let authBrowser = createAuthBrowserService({
   profileDir: AUTH_BROWSER_PROFILE_DIR,
   loginUrl: APP_LOGIN_URL,
   refreshIntervalMs: AUTH_BROWSER_REFRESH_MS,
-  onToken: acceptAuthorization,
+  onToken: acceptPrimaryAuthorization,
 })
 
 export function resetAuthRuntimeState() {
@@ -52,6 +54,7 @@ export function resetAuthRuntimeState() {
   accountBrowsers.clear()
   accountStates.clear()
   accountEmails = loadPersistedAccountEmails()
+  primaryAccountEmail = null
 
   authState.authorization = normalizeAuthorization(process.env["GENERATEPORN_AUTHORIZATION"])
   authState.expiresAt = getJwtExpiration(process.env["GENERATEPORN_AUTHORIZATION"])
@@ -61,7 +64,7 @@ export function resetAuthRuntimeState() {
     profileDir: AUTH_BROWSER_PROFILE_DIR,
     loginUrl: APP_LOGIN_URL,
     refreshIntervalMs: AUTH_BROWSER_REFRESH_MS,
-    onToken: acceptAuthorization,
+    onToken: acceptPrimaryAuthorization,
   })
 
   for (const email of accountEmails) {
@@ -122,6 +125,10 @@ export function getActiveAuthorization(accountEmail?: unknown): string | null {
   const email = normalizeAccountEmail(accountEmail)
 
   if (email) {
+    if (isPrimaryAccountEmail(email)) {
+      return getActivePrimaryAuthorization(now)
+    }
+
     const state = accountStates.get(email)
     if (state?.authorization && (!state.expiresAt || Date.parse(state.expiresAt) > now + 5000)) {
       return state.authorization
@@ -130,17 +137,7 @@ export function getActiveAuthorization(accountEmail?: unknown): string | null {
     return null
   }
 
-  if (authState.authorization && (!authState.expiresAt || Date.parse(authState.expiresAt) > now + 5000)) {
-    return authState.authorization
-  }
-
-  const envAuthorization = normalizeAuthorization(process.env["GENERATEPORN_AUTHORIZATION"])
-  const envExpiresAt = getJwtExpiration(envAuthorization)
-  if (envAuthorization && (!envExpiresAt || Date.parse(envExpiresAt) > now + 5000)) {
-    return envAuthorization
-  }
-
-  return null
+  return getActivePrimaryAuthorization(now)
 }
 
 export function hasApiAuth(accountEmail?: unknown): boolean {
@@ -156,6 +153,10 @@ export function getAuthExpiresAt(accountEmail?: unknown): string | null {
   }
 
   if (email) {
+    if (isPrimaryAccountEmail(email)) {
+      return active === authState.authorization ? authState.expiresAt : getJwtExpiration(active)
+    }
+
     return accountStates.get(email)?.expiresAt || getJwtExpiration(active)
   }
 
@@ -163,20 +164,30 @@ export function getAuthExpiresAt(accountEmail?: unknown): string | null {
 }
 
 export function getAuthAccountStatuses(): AuthAccountStatus[] {
-  return accountEmails.map((email) => {
-    const state = ensureAuthAccount(email).state
-    return {
-      email,
-      hasAuthorization: Boolean(getActiveAuthorization(email)),
-      authorizationExpiresAt: getAuthExpiresAt(email),
-      authorizationSource: state.source,
-      authBrowser: getAuthBrowserForAccount(email).getStatus(),
-    }
-  })
+  const primaryStatus = getPrimaryAccountStatus()
+  const explicitStatuses = accountEmails
+    .filter((email) => email !== primaryStatus?.email)
+    .map((email) => {
+      const state = ensureAuthAccount(email).state
+      return {
+        email,
+        hasAuthorization: Boolean(getActiveAuthorization(email)),
+        authorizationExpiresAt: getAuthExpiresAt(email),
+        authorizationSource: state.source,
+        authBrowser: getAuthBrowserForAccount(email).getStatus(),
+      }
+    })
+
+  return primaryStatus ? [primaryStatus, ...explicitStatuses] : explicitStatuses
 }
 
 export function getDefaultAccountEmail(): string | null {
-  return accountEmails.find((email) => Boolean(getActiveAuthorization(email))) || accountEmails[0] || null
+  const primaryStatus = getPrimaryAccountStatus()
+  if (primaryStatus?.hasAuthorization) {
+    return primaryStatus.email
+  }
+
+  return accountEmails.find((email) => Boolean(getActiveAuthorization(email))) || primaryStatus?.email || accountEmails[0] || null
 }
 
 export function getSyncAccountEmails(): Array<string | null> {
@@ -193,7 +204,7 @@ export function getSyncAccountEmails(): Array<string | null> {
 
 export function getAuthBrowserForAccount(accountEmail?: unknown): AuthBrowserServiceInstance {
   const email = normalizeAccountEmail(accountEmail)
-  if (!email) {
+  if (!email || isPrimaryAccountEmail(email)) {
     return authBrowser
   }
 
@@ -252,6 +263,60 @@ export function getJwtExpiration(authorization: unknown): string | null {
   } catch {
     return null
   }
+}
+
+function acceptPrimaryAuthorization(
+  value: unknown,
+  source = "browser",
+  session: { email?: string | null } = {},
+): { authorization: string; expiresAt: string; source: string; email: string | null } {
+  const result = acceptAuthorization(value, source)
+  const email = normalizeAccountEmail(session.email)
+  if (email) {
+    primaryAccountEmail = email
+  }
+
+  return {
+    ...result,
+    email: primaryAccountEmail,
+  }
+}
+
+function getPrimaryAccountStatus(): AuthAccountStatus | null {
+  const browserStatus = authBrowser.getStatus()
+  const email = primaryAccountEmail || normalizeAccountEmail(browserStatus.email)
+  if (!email) {
+    return null
+  }
+
+  primaryAccountEmail = email
+  return {
+    email,
+    isDefault: true,
+    hasAuthorization: Boolean(getActiveAuthorization(email)),
+    authorizationExpiresAt: getAuthExpiresAt(email),
+    authorizationSource: authState.source,
+    authBrowser: browserStatus,
+  }
+}
+
+function getActivePrimaryAuthorization(now: number): string | null {
+  if (authState.authorization && (!authState.expiresAt || Date.parse(authState.expiresAt) > now + 5000)) {
+    return authState.authorization
+  }
+
+  const envAuthorization = normalizeAuthorization(process.env["GENERATEPORN_AUTHORIZATION"])
+  const envExpiresAt = getJwtExpiration(envAuthorization)
+  if (envAuthorization && (!envExpiresAt || Date.parse(envExpiresAt) > now + 5000)) {
+    return envAuthorization
+  }
+
+  return null
+}
+
+function isPrimaryAccountEmail(email: string): boolean {
+  const browserEmail = normalizeAccountEmail(authBrowser.getStatus().email)
+  return Boolean(email && (email === primaryAccountEmail || email === browserEmail))
 }
 
 function ensureAuthAccount(email: string): { state: AuthState; browser: AuthBrowserServiceInstance } {

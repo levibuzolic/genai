@@ -20,6 +20,11 @@ export async function importServer(mediaDir, env = {}) {
     GENERATEPORN_COOKIE: process.env.GENERATEPORN_COOKIE,
     GENERATEPORN_PAGE_LIMIT: process.env.GENERATEPORN_PAGE_LIMIT,
     GENERATEPORN_CREATE_HISTORY_PAGE_LIMIT: process.env.GENERATEPORN_CREATE_HISTORY_PAGE_LIMIT,
+    PLAYBOX_AUTHORIZATION: process.env.PLAYBOX_AUTHORIZATION,
+    PLAYBOX_AUTH_IMPORT_PATH: process.env.PLAYBOX_AUTH_IMPORT_PATH,
+    PLAYBOX_PAGE_LIMIT: process.env.PLAYBOX_PAGE_LIMIT,
+    REDIRECT_STATIC_TO_VITE: process.env.REDIRECT_STATIC_TO_VITE,
+    VITE_PORT: process.env.VITE_PORT,
   }
 
   process.env.MEDIA_DIR = mediaDir
@@ -32,6 +37,11 @@ export async function importServer(mediaDir, env = {}) {
   process.env.GENERATEPORN_CREATE_HISTORY_PAGE_LIMIT = "3"
   process.env.GENERATEPORN_AUTHORIZATION = env.GENERATEPORN_AUTHORIZATION || ""
   process.env.GENERATEPORN_COOKIE = env.GENERATEPORN_COOKIE || ""
+  process.env.PLAYBOX_AUTHORIZATION = env.PLAYBOX_AUTHORIZATION || ""
+  process.env.PLAYBOX_AUTH_IMPORT_PATH = env.PLAYBOX_AUTH_IMPORT_PATH || ""
+  process.env.PLAYBOX_PAGE_LIMIT = env.PLAYBOX_PAGE_LIMIT || "3"
+  process.env.REDIRECT_STATIC_TO_VITE = env.REDIRECT_STATIC_TO_VITE || "false"
+  process.env.VITE_PORT = env.VITE_PORT || ""
 
   const imported = await import(`${SERVER_PATH.href}?test=${Date.now()}-${Math.random()}`)
 

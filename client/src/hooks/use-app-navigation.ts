@@ -7,10 +7,12 @@ export type AppRoute = {
   itemId: string | null
   settingsOpen: boolean
   settingsSection: SettingsSection
-  view: "library" | "templates"
+  view: AppView
 }
 
-const SETTINGS_SECTIONS = new Set<SettingsSection>(["library", "account", "backups"])
+export type AppView = "library" | "playbox" | "templates"
+
+const SETTINGS_SECTIONS = new Set<SettingsSection>(["library", "account", "playbox-auth", "backups"])
 
 export function useAppNavigation() {
   const [route, setRoute] = React.useState(() => routeFromLocation(window.location))
@@ -43,10 +45,14 @@ export function useAppNavigation() {
     route,
     navigateToCreate: React.useCallback((options?: { replace?: boolean }) => navigate("/create", options), [navigate]),
     navigateToItem: React.useCallback(
-      (id: string, options?: { replace?: boolean }) => navigate(`/items/${encodeURIComponent(id)}`, options),
+      (id: string, options?: { replace?: boolean; view?: AppView }) => {
+        const path = options?.view === "playbox" ? `/playbox/items/${encodeURIComponent(id)}` : `/items/${encodeURIComponent(id)}`
+        navigate(path, options)
+      },
       [navigate],
     ),
     navigateToLibrary: React.useCallback((options?: { replace?: boolean }) => navigate("/", options), [navigate]),
+    navigateToPlaybox: React.useCallback((options?: { replace?: boolean }) => navigate("/playbox", options), [navigate]),
     navigateToSettings: React.useCallback(
       (section: SettingsSection = "library", options?: { replace?: boolean }) => navigate(`/settings/${section}`, options),
       [navigate],
@@ -60,6 +66,10 @@ function routeFromLocation(location: Location): AppRoute {
   const firstPart = pathParts[0] || ""
 
   if (firstPart === "templates") return baseRoute({ view: "templates" })
+  if (firstPart === "playbox") {
+    if (pathParts[1] === "items" && pathParts[2]) return baseRoute({ view: "playbox", itemId: pathParts[2] })
+    return baseRoute({ view: "playbox" })
+  }
   if (firstPart === "create") return baseRoute({ createOpen: true })
   if (firstPart === "items" && pathParts[1]) return baseRoute({ itemId: pathParts[1] })
   if (firstPart === "settings") {

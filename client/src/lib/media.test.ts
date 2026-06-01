@@ -15,6 +15,18 @@ describe("media helpers", () => {
     expect(mediaUrlForItem(null)).toBeNull()
   })
 
+  it("never falls back to remote Playbox media URLs", () => {
+    expect(
+      mediaUrlForItem({
+        id: "playbox-local",
+        provider: "playbox",
+        localFile: "playbox/clip.mp4",
+        outputUrl: "https://cdn.example/clip.mp4",
+      }),
+    ).toBe("/media/playbox/clip.mp4")
+    expect(mediaUrlForItem({ id: "playbox-remote", provider: "playbox", outputUrl: "https://cdn.example/clip.mp4" })).toBeNull()
+  })
+
   it("detects image and video URLs with query strings and data URLs", () => {
     expect(isImageUrl("https://example.com/a.JPG?token=1")).toBe(true)
     expect(isImageUrl("data:image/png;base64,abc")).toBe(true)

@@ -16,6 +16,8 @@ import {
   downloadedJobIds,
   mediaItems,
   orphanFiles,
+  playboxAssets,
+  playboxCollections,
   type CatalogDbSchema,
 } from "./db-schema.ts"
 import { redactDataUrlFields } from "./redaction.ts"
@@ -44,6 +46,9 @@ type CreationInput = {
   accountEmail?: string | null
   jobId?: string | null
   status?: string | null
+  queueNotBefore?: string | null
+  queueAttempt?: number | string | null
+  lastRateLimitedAt?: string | null
   modeId?: string | null
   modeLabel?: string | null
   mediaType?: string | null
@@ -84,10 +89,45 @@ type CreationInput = {
   finished_at?: string | null
   downloaded_item_id?: string | null
   account_email?: string | null
+  queue_not_before?: string | null
+  queue_attempt?: number | string | null
+  last_rate_limited_at?: string | null
   [key: string]: unknown
 }
 
 type CatalogOrm = NodeSQLiteDatabase<CatalogDbSchema>
+type PlayboxCollectionRow = typeof playboxCollections.$inferSelect
+type PlayboxAssetRow = typeof playboxAssets.$inferSelect
+type PlayboxCollectionInsert = typeof playboxCollections.$inferInsert
+type PlayboxAssetInsert = typeof playboxAssets.$inferInsert
+
+export type PlayboxCollectionRecord = {
+  id: string
+  accountId: string | null
+  name: string | null
+  status: string | null
+  modelId: string | null
+  modelName: string | null
+  modelType: string | null
+  outputType: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  collection: Record<string, unknown>
+}
+
+export type PlayboxAssetRecord = {
+  id: string
+  collectionId: string
+  kind: string
+  remoteUrlBase: string | null
+  remoteUrlExpiresAt: string | null
+  contentType: string | null
+  localFile: string | null
+  size: number | null
+  sha256: string | null
+  downloadedAt: string | null
+  downloadError: string | null
+}
 
 let catalogDb: DatabaseSync | null = null
 let catalogOrm: CatalogOrm | null = null
@@ -146,6 +186,9 @@ function ensureCatalogSchema(db: DatabaseSync): void {
       id TEXT PRIMARY KEY,
       job_id TEXT UNIQUE,
       status TEXT NOT NULL,
+      queue_not_before TEXT,
+      queue_attempt INTEGER,
+      last_rate_limited_at TEXT,
       mode_id TEXT,
       mode_label TEXT,
       media_type TEXT,
@@ -184,11 +227,131 @@ function ensureCatalogSchema(db: DatabaseSync): void {
     );
 
     CREATE INDEX IF NOT EXISTS creation_events_creation_id_idx ON creation_events(creation_id, id ASC);
+
+    CREATE TABLE IF NOT EXISTS playbox_collections (
+      id TEXT PRIMARY KEY,
+      account_id TEXT,
+      name TEXT,
+      status TEXT,
+      model_id TEXT,
+      model_name TEXT,
+      model_type TEXT,
+      output_type TEXT,
+      created_at TEXT,
+      updated_at TEXT,
+      collection_json TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS playbox_collections_created_at_idx ON playbox_collections(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS playbox_assets (
+      id TEXT PRIMARY KEY,
+      collection_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      remote_url_base TEXT,
+      remote_url_expires_at TEXT,
+      content_type TEXT,
+      local_file TEXT,
+      size INTEGER,
+      sha256 TEXT,
+      downloaded_at TEXT,
+      download_error TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS playbox_assets_collection_id_idx ON playbox_assets(collection_id);
+    CREATE INDEX IF NOT EXISTS playbox_assets_kind_idx ON playbox_assets(kind);
   `)
   ensureCatalogColumn(db, "creation_jobs", "template_id", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "template_label", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "workflow_json", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "account_email", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "queue_not_before", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "queue_attempt", "INTEGER")
+  ensureCatalogColumn(db, "creation_jobs", "last_rate_limited_at", "TEXT")
+}
+
+export function savePlayboxCollection(collection: PlayboxCollectionRecord): PlayboxCollectionRecord {
+  const row: PlayboxCollectionInsert = {
+    id: collection.id,
+    accountId: collection.accountId,
+    name: collection.name,
+    status: collection.status,
+    modelId: collection.modelId,
+    modelName: collection.modelName,
+    modelType: collection.modelType,
+    outputType: collection.outputType,
+    createdAt: collection.createdAt,
+    updatedAt: collection.updatedAt,
+    collectionJson: JSON.stringify(collection.collection),
+  }
+  const { id: _id, ...updateRow } = row
+
+  getCatalogOrm()
+    .insert(playboxCollections)
+    .values(row)
+    .onConflictDoUpdate({
+      target: playboxCollections.id,
+      set: updateRow,
+    })
+    .run()
+
+  return collection
+}
+
+export function savePlayboxAsset(asset: PlayboxAssetRecord): PlayboxAssetRecord {
+  const row: PlayboxAssetInsert = {
+    id: asset.id,
+    collectionId: asset.collectionId,
+    kind: asset.kind,
+    remoteUrlBase: asset.remoteUrlBase,
+    remoteUrlExpiresAt: asset.remoteUrlExpiresAt,
+    contentType: asset.contentType,
+    localFile: asset.localFile,
+    size: asset.size,
+    sha256: asset.sha256,
+    downloadedAt: asset.downloadedAt,
+    downloadError: asset.downloadError,
+  }
+  const { id: _id, ...updateRow } = row
+
+  getCatalogOrm()
+    .insert(playboxAssets)
+    .values(row)
+    .onConflictDoUpdate({
+      target: playboxAssets.id,
+      set: updateRow,
+    })
+    .run()
+
+  return asset
+}
+
+export function findPlayboxAsset(id: string | null | undefined): PlayboxAssetRecord | null {
+  if (!id) {
+    return null
+  }
+
+  const row = getCatalogOrm().select().from(playboxAssets).where(eq(playboxAssets.id, id)).limit(1).get()
+  return row ? playboxAssetFromRow(row) : null
+}
+
+export function listPlayboxCollections(): PlayboxCollectionRecord[] {
+  return getCatalogOrm()
+    .select()
+    .from(playboxCollections)
+    .orderBy(desc(playboxCollections.createdAt), playboxCollections.id)
+    .all()
+    .map(playboxCollectionFromRow)
+}
+
+export function listPlayboxAssetsForCollection(collectionId: string): PlayboxAssetRecord[] {
+  return getCatalogOrm()
+    .select()
+    .from(playboxAssets)
+    .where(eq(playboxAssets.collectionId, collectionId))
+    .orderBy(asc(playboxAssets.kind), playboxAssets.id)
+    .all()
+    .map(playboxAssetFromRow)
 }
 
 function ensureCatalogColumn(db: DatabaseSync, table: string, column: string, type: string): void {
@@ -421,6 +584,9 @@ export function normalizeCreationJob(creation: CreationInput = {}): CreationJob 
     accountEmail: stringOrNull(creation.accountEmail) || stringOrNull(creation.account_email),
     jobId: stringOrNull(creation.jobId) || stringOrNull(creation.job_id),
     status: stringOrNull(creation.status) || "draft",
+    queueNotBefore: stringOrNull(creation.queueNotBefore) || stringOrNull(creation.queue_not_before),
+    queueAttempt: nonNegativeInteger(creation.queueAttempt ?? creation.queue_attempt),
+    lastRateLimitedAt: stringOrNull(creation.lastRateLimitedAt) || stringOrNull(creation.last_rate_limited_at),
     modeId: stringOrNull(creation.modeId) || stringOrNull(creation.mode_id),
     modeLabel: stringOrNull(creation.modeLabel) || stringOrNull(creation.mode_label),
     mediaType: stringOrNull(creation.mediaType) || stringOrNull(creation.media_type),
@@ -453,6 +619,9 @@ function creationJobToInsert(creation: CreationJob): CreationJobInsert {
     accountEmail: creation.accountEmail,
     jobId: creation.jobId,
     status: creation.status,
+    queueNotBefore: creation.queueNotBefore,
+    queueAttempt: creation.queueAttempt,
+    lastRateLimitedAt: creation.lastRateLimitedAt,
     modeId: creation.modeId,
     modeLabel: creation.modeLabel,
     mediaType: creation.mediaType,
@@ -485,6 +654,9 @@ function creationJobFromRow(row: CreationJobRow): CreationJob {
     accountEmail: row.accountEmail,
     jobId: row.jobId,
     status: row.status,
+    queueNotBefore: row.queueNotBefore,
+    queueAttempt: row.queueAttempt,
+    lastRateLimitedAt: row.lastRateLimitedAt,
     modeId: row.modeId,
     modeLabel: row.modeLabel,
     mediaType: row.mediaType,
@@ -511,12 +683,47 @@ function creationJobFromRow(row: CreationJobRow): CreationJob {
   })
 }
 
+function playboxCollectionFromRow(row: PlayboxCollectionRow): PlayboxCollectionRecord {
+  return {
+    id: row.id,
+    accountId: row.accountId,
+    name: row.name,
+    status: row.status,
+    modelId: row.modelId,
+    modelName: row.modelName,
+    modelType: row.modelType,
+    outputType: row.outputType,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    collection: recordOrNull(parseJson(row.collectionJson, null)) || {},
+  }
+}
+
+function playboxAssetFromRow(row: PlayboxAssetRow): PlayboxAssetRecord {
+  return {
+    id: row.id,
+    collectionId: row.collectionId,
+    kind: row.kind,
+    remoteUrlBase: row.remoteUrlBase,
+    remoteUrlExpiresAt: row.remoteUrlExpiresAt,
+    contentType: row.contentType,
+    localFile: row.localFile,
+    size: row.size,
+    sha256: row.sha256,
+    downloadedAt: row.downloadedAt,
+    downloadError: row.downloadError,
+  }
+}
+
 export function toPublicCreation(creation: CreationJob, { details = false }: { details?: boolean } = {}): PublicCreation {
   const publicCreation: PublicCreation = {
     id: creation.id,
     accountEmail: creation.accountEmail,
     jobId: creation.jobId,
     status: creation.status,
+    queueNotBefore: creation.queueNotBefore,
+    queueAttempt: creation.queueAttempt,
+    lastRateLimitedAt: creation.lastRateLimitedAt,
     modeId: creation.modeId,
     modeLabel: creation.modeLabel,
     mediaType: creation.mediaType,
@@ -630,6 +837,11 @@ function workflowOrNull(value: unknown): CreationWorkflow | null {
 
 function paramsOrEmpty(value: unknown): CreateParams {
   return paramsFromUnknown(value)
+}
+
+function nonNegativeInteger(value: unknown): number {
+  const numeric = Number(value)
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : 0
 }
 
 function isOrphanFile(value: unknown): value is OrphanFile {

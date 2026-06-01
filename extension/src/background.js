@@ -1,8 +1,17 @@
-const LOCAL_AUTH_URL = "http://localhost:5177/api/auth/token";
+const PROVIDERS = {
+  generateporn: {
+    label: "GP",
+    localAuthUrl: "http://localhost:5177/api/auth/token"
+  },
+  playbox: {
+    label: "Playbox",
+    localAuthUrl: "http://localhost:5177/api/playbox/auth/token"
+  }
+};
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type === "gp-auth:sendAuthToLocal") {
-    sendAuthToLocal(sender.tab?.id)
+  if (message?.type === "auth-helper:sendAuthToLocal") {
+    sendAuthToLocal(sender.tab?.id, message.provider)
       .then(sendResponse)
       .catch((error) => sendResponse({
         ok: false,
@@ -14,14 +23,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return false;
 });
 
-async function sendAuthToLocal(tabId) {
+async function sendAuthToLocal(tabId, requestedProvider) {
   if (!tabId) {
     throw new Error("No active tab found.");
   }
 
-  const token = await getClerkTokenFromTab(tabId);
+  const provider = PROVIDERS[requestedProvider] ? requestedProvider : "generateporn";
+  const token = await getTokenFromTab(tabId, provider);
   const expiresAt = getJwtExpiration(token);
-  const response = await fetch(LOCAL_AUTH_URL, {
+  const response = await fetch(PROVIDERS[provider].localAuthUrl, {
     method: "POST",
     headers: {
       "content-type": "application/json"
@@ -39,21 +49,37 @@ async function sendAuthToLocal(tabId) {
 
   return {
     ok: true,
+    provider,
+    label: PROVIDERS[provider].label,
     expiresAt: body.expiresAt || expiresAt
   };
 }
 
-async function getClerkTokenFromTab(tabId) {
+async function getTokenFromTab(tabId, provider) {
   const results = await chrome.scripting.executeScript({
     target: {
       tabId
     },
     world: "MAIN",
-    func: async () => {
+    args: [provider],
+    func: async (providerName) => {
       const deadline = Date.now() + 5000;
 
       while (Date.now() < deadline) {
-        const token = await window.Clerk?.session?.getToken?.();
+        let token = null;
+
+        if (providerName === "playbox") {
+          const response = await fetch("https://api.playbox.com/api/users/me-new", {
+            credentials: "include",
+            headers: {
+              accept: "application/json"
+            }
+          }).catch(() => null);
+          const body = response?.ok ? await response.json().catch(() => null) : null;
+          token = body?.data?.accessToken || null;
+        } else {
+          token = await window.Clerk?.session?.getToken?.();
+        }
 
         if (token) {
           return token;
@@ -62,14 +88,16 @@ async function getClerkTokenFromTab(tabId) {
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
 
-      throw new Error("window.Clerk.session.getToken() did not return a token.");
+      throw new Error(providerName === "playbox"
+        ? "Playbox /api/users/me-new did not return an access token."
+        : "window.Clerk.session.getToken() did not return a token.");
     }
   });
 
   const token = results?.[0]?.result;
 
   if (!token) {
-    throw new Error("Unable to read Clerk token from the page.");
+    throw new Error("Unable to read auth token from the page.");
   }
 
   return token;

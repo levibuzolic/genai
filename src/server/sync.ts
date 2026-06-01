@@ -20,12 +20,28 @@ import {
   sortItems,
   toCatalogItem,
 } from "./catalog.ts"
-import { AUTO_SYNC_ENABLED, AUTO_SYNC_INTERVAL_MS, AUTO_SYNC_STARTUP_DELAY_MS, MEDIA_DIR, PAGE_LIMIT, SYNC_DELAY_MS } from "./config.ts"
+import {
+  AUTO_SYNC_ENABLED,
+  AUTO_SYNC_INTERVAL_MS,
+  AUTO_SYNC_STARTUP_DELAY_MS,
+  BACKGROUND_THUMBNAIL_BATCH_SIZE,
+  MEDIA_DIR,
+  PAGE_LIMIT,
+  SYNC_DELAY_MS,
+} from "./config.ts"
 import { isActiveCreationStatus } from "./create-shared.ts"
 import type { Catalog, CatalogItem, GeneratePornJob, OrphanFile, SyncError } from "./types.ts"
 import { fileExists, hashFile, sleep } from "./utils.ts"
 
-type SyncMode = "incremental" | "full" | "download-missing" | "retry-errors" | "generate-thumbnails" | "verify-library" | null
+type SyncMode =
+  | "incremental"
+  | "full"
+  | "download-missing"
+  | "retry-errors"
+  | "generate-thumbnails"
+  | "verify-library"
+  | "playbox-sync"
+  | null
 type SyncStatus = "idle" | "running" | "cancelling" | "cancelled" | "error"
 
 type SyncState = {
@@ -145,7 +161,7 @@ export async function startSync({
   const downloadedJobIds = new Set(catalog.downloadedJobIds || [])
   const downloadQueue: GeneratePornJob[] = []
   const queuedJobIds = new Set<string>()
-  const lastSeenJobIdsByAccount = { ...(catalog.lastSeenJobIdsByAccount || {}) }
+  const lastSeenJobIdsByAccount = { ...catalog.lastSeenJobIdsByAccount }
   const pendingKnownJobIds = incremental && !fullCoverageScan ? getPendingKnownJobIds(catalog) : new Set<string>()
   const seenApiJobIdsByAccount = new Map<string, Set<string>>()
   const completedFullCoverageAccounts = new Set<string>()
@@ -166,7 +182,9 @@ export async function startSync({
       const seenApiJobIds = new Set<string>()
       seenApiJobIdsByAccount.set(accountKey, seenApiJobIds)
       const previousLastSeenJobId =
-        incremental && !fullCoverageScan ? lastSeenJobIdsByAccount[accountKey] || (accountEmail ? null : catalog.lastSeenJobId) || null : null
+        incremental && !fullCoverageScan
+          ? lastSeenJobIdsByAccount[accountKey] || (accountEmail ? null : catalog.lastSeenJobId) || null
+          : null
       let accountReachedApiEnd = false
       let accountNewestBoundaryJobId: string | null = null
       softStopAfterBoundaryPage = null
@@ -176,101 +194,101 @@ export async function startSync({
           break
         }
 
-      syncState.currentPage = page
-      syncState.message = `Fetching ${accountLabel(accountEmail)} page ${page}...`
+        syncState.currentPage = page
+        syncState.message = `Fetching ${accountLabel(accountEmail)} page ${page}...`
 
-      const jobs = await fetchJobsPage(page, { accountEmail })
+        const jobs = await fetchJobsPage(page, { accountEmail })
 
-      if (jobs.length === 0) {
-        syncState.message = `Reached the end of ${accountLabel(accountEmail)}.`
-        reachedApiEnd = true
-        accountReachedApiEnd = true
-        break
-      }
-
-      for (const job of jobs) {
-        syncState.scanned += 1
-        seenApiJobIds.add(job.id)
-        pendingKnownJobIds.delete(job.id)
-
-        const existing = itemById.get(job.id)
-        const merged = toCatalogItem(job, existing)
-        if (isExpiredNoMediaItem(merged, startedAtMs)) {
-          itemById.delete(job.id)
-          downloadedJobIds.delete(job.id)
-          syncState.skipped += 1
-          continue
-        }
-        itemById.set(job.id, merged)
-        const isBoundaryJob = isIncrementalBoundaryJob(job)
-        const reachedPreviousBoundary = Boolean(
-          previousLastSeenJobId && job.id === previousLastSeenJobId && isBoundaryJob && pendingKnownJobIds.size === 0,
-        )
-
-        if (!accountNewestBoundaryJobId && isBoundaryJob) {
-          accountNewestBoundaryJobId = job.id
-          newestBoundaryJobId ||= job.id
-          lastSeenJobIdsByAccount[accountKey] = job.id
+        if (jobs.length === 0) {
+          syncState.message = `Reached the end of ${accountLabel(accountEmail)}.`
+          reachedApiEnd = true
+          accountReachedApiEnd = true
+          break
         }
 
-        if (!isDownloadableJob(job)) {
-          syncState.skipped += 1
+        for (const job of jobs) {
+          syncState.scanned += 1
+          seenApiJobIds.add(job.id)
+          pendingKnownJobIds.delete(job.id)
+
+          const existing = itemById.get(job.id)
+          const merged = toCatalogItem(job, existing)
+          if (isExpiredNoMediaItem(merged, startedAtMs)) {
+            itemById.delete(job.id)
+            downloadedJobIds.delete(job.id)
+            syncState.skipped += 1
+            continue
+          }
+          itemById.set(job.id, merged)
+          const isBoundaryJob = isIncrementalBoundaryJob(job)
+          const reachedPreviousBoundary = Boolean(
+            previousLastSeenJobId && job.id === previousLastSeenJobId && isBoundaryJob && pendingKnownJobIds.size === 0,
+          )
+
+          if (!accountNewestBoundaryJobId && isBoundaryJob) {
+            accountNewestBoundaryJobId = job.id
+            newestBoundaryJobId ||= job.id
+            lastSeenJobIdsByAccount[accountKey] = job.id
+          }
+
+          if (!isDownloadableJob(job)) {
+            syncState.skipped += 1
+            if (reachedPreviousBoundary) {
+              stoppedAtPrevious = true
+              syncState.message = "Reached the previously saved latest settled job."
+              if (softStopAfterBoundaryPage === null) {
+                softStopAfterBoundaryPage = syncState.currentPage
+              }
+              continue
+            }
+            continue
+          }
+
+          if (existing?.localFile && (await fileExists(path.join(MEDIA_DIR, existing.localFile)))) {
+            downloadedJobIds.add(job.id)
+            syncState.skipped += 1
+            if (reachedPreviousBoundary) {
+              stoppedAtPrevious = true
+              syncState.message = "Reached the previously saved latest settled job."
+              if (softStopAfterBoundaryPage === null) {
+                softStopAfterBoundaryPage = syncState.currentPage
+              }
+              continue
+            }
+            continue
+          }
+
+          enqueueDownload(downloadQueue, queuedJobIds, job)
+
           if (reachedPreviousBoundary) {
             stoppedAtPrevious = true
             syncState.message = "Reached the previously saved latest settled job."
             if (softStopAfterBoundaryPage === null) {
               softStopAfterBoundaryPage = syncState.currentPage
             }
-            continue
           }
-          continue
         }
 
-        if (existing?.localFile && (await fileExists(path.join(MEDIA_DIR, existing.localFile)))) {
-          downloadedJobIds.add(job.id)
-          syncState.skipped += 1
-          if (reachedPreviousBoundary) {
-            stoppedAtPrevious = true
-            syncState.message = "Reached the previously saved latest settled job."
-            if (softStopAfterBoundaryPage === null) {
-              softStopAfterBoundaryPage = syncState.currentPage
-            }
-            continue
-          }
-          continue
-        }
+        catalog.items = sortItems(Array.from(itemById.values()))
+        catalog.downloadedJobIds = Array.from(downloadedJobIds).slice(-10000)
+        catalog.lastSeenJobId = newestBoundaryJobId || catalog.lastSeenJobId
+        catalog.lastSeenJobIdsByAccount = lastSeenJobIdsByAccount
+        catalog.updatedAt = new Date().toISOString()
+        await saveCatalog(catalog)
 
-        enqueueDownload(downloadQueue, queuedJobIds, job)
+        await drainDownloadQueue({
+          catalog,
+          itemById,
+          downloadedJobIds,
+          downloadQueue,
+          lastSeenJobId: newestBoundaryJobId || catalog.lastSeenJobId,
+          startMessage: `Downloading media found through page ${page}...`,
+        })
 
-        if (reachedPreviousBoundary) {
-          stoppedAtPrevious = true
-          syncState.message = "Reached the previously saved latest settled job."
-          if (softStopAfterBoundaryPage === null) {
-            softStopAfterBoundaryPage = syncState.currentPage
-          }
+        if (softStopAfterBoundaryPage !== null && syncState.currentPage >= softStopAfterBoundaryPage) {
+          break
         }
       }
-
-      catalog.items = sortItems(Array.from(itemById.values()))
-      catalog.downloadedJobIds = Array.from(downloadedJobIds).slice(-10000)
-      catalog.lastSeenJobId = newestBoundaryJobId || catalog.lastSeenJobId
-      catalog.lastSeenJobIdsByAccount = lastSeenJobIdsByAccount
-      catalog.updatedAt = new Date().toISOString()
-      await saveCatalog(catalog)
-
-      await drainDownloadQueue({
-        catalog,
-        itemById,
-        downloadedJobIds,
-        downloadQueue,
-        lastSeenJobId: newestBoundaryJobId || catalog.lastSeenJobId,
-        startMessage: `Downloading media found through page ${page}...`,
-      })
-
-      if (softStopAfterBoundaryPage !== null && syncState.currentPage >= softStopAfterBoundaryPage) {
-        break
-      }
-    }
 
       if (accountReachedApiEnd) {
         completedFullCoverageAccounts.add(accountKey)
@@ -432,13 +450,7 @@ function markMissingApiItemsDeleted(
   let deleted = 0
 
   for (const item of itemById.values()) {
-    if (
-      !item.id ||
-      itemAccountSyncKey(item) !== accountKey ||
-      seenApiJobIds.has(item.id) ||
-      item.remoteDeletedAt ||
-      !hasMediaResult(item)
-    )
+    if (!item.id || itemAccountSyncKey(item) !== accountKey || seenApiJobIds.has(item.id) || item.remoteDeletedAt || !hasMediaResult(item))
       continue
 
     item.remoteDeletedAt = deletedAt
@@ -540,7 +552,7 @@ export async function startCatalogDownload({ mode }: { mode: CatalogDownloadMode
   })
 }
 
-function finishSyncRun({
+export function finishSyncRun({
   cancelled,
   finishedAt,
   completeMessage,
@@ -564,7 +576,7 @@ export function requestSyncCancellation(): void {
   syncState.message = "Cancellation requested. Stopping after the current step..."
 }
 
-function shouldStopForCancellation(): boolean {
+export function shouldStopForCancellation(): boolean {
   if (!syncState.cancelRequested) {
     return false
   }
@@ -681,6 +693,51 @@ export async function startThumbnailGeneration(): Promise<void> {
     finishedAt,
     completeMessage: `Finished. Generated ${syncState.downloaded} thumbnail${syncState.downloaded === 1 ? "" : "s"}.`,
   })
+}
+
+export async function runMissingThumbnailBackgroundJob({
+  limit = BACKGROUND_THUMBNAIL_BATCH_SIZE,
+}: {
+  limit?: number
+} = {}): Promise<Record<string, unknown>> {
+  if (syncState.running) {
+    return {
+      skipped: true,
+      reason: "sync-running",
+    }
+  }
+
+  const catalog = await loadCatalog()
+  const queue = getThumbnailGenerationQueue(catalog.items).slice(0, Math.max(1, Number(limit) || BACKGROUND_THUMBNAIL_BATCH_SIZE))
+  let generated = 0
+  const errors: SyncError[] = []
+
+  for (const item of queue) {
+    try {
+      const thumbnail = await ensureCatalogThumbnail(item.localFile || "")
+      if (applyCatalogThumbnail(item, thumbnail)) {
+        generated += thumbnail.thumbnailFile ? 1 : 0
+        catalog.updatedAt = new Date().toISOString()
+        await saveCatalog(catalog)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      errors.push({ id: item.id, message })
+      item.thumbnailError = message
+      item.updatedAt = new Date().toISOString()
+      catalog.updatedAt = item.updatedAt
+      await saveCatalog(catalog)
+    }
+
+    await sleep(SYNC_DELAY_MS)
+  }
+
+  return {
+    scanned: catalog.items.length,
+    queued: queue.length,
+    generated,
+    errors: errors.length,
+  }
 }
 
 export async function startLibraryVerification(): Promise<void> {
@@ -855,7 +912,7 @@ async function runDownloadQueue({
   }
 }
 
-function resetSyncState({ mode, message }: { mode: Exclude<SyncMode, null>; message: string }): void {
+export function resetSyncState({ mode, message }: { mode: Exclude<SyncMode, null>; message: string }): void {
   Object.assign(syncState, {
     running: true,
     status: "running",

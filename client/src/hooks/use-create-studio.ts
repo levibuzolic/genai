@@ -226,23 +226,27 @@ export function useCreateStudio(onOpen?: () => void) {
     }
   }, [acceptUploadFile, openCreator])
 
-  async function submitCreateJob() {
+  async function submitCreateJob({ queue = false }: { queue?: boolean } = {}) {
     setSubmitting(true)
-    setStatus("Submitting creation job...")
+    setStatus(queue ? "Adding creation to queue..." : "Submitting creation job...")
     try {
       const request: CreateJobSubmitRequest = {
-        accountEmail: selectedAccountEmail || null,
         modeId,
         source: buildCreateSourcePayload(),
         params: buildCreateParamsPayload(),
       }
+      if (selectedAccountEmail) request.accountEmail = selectedAccountEmail
+      if (queue) request.queue = true
       if (selectedTemplateId) request.templateId = selectedTemplateId
       const response = await fetchJson<CreateJobSubmitResponse>("/api/create/jobs", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(request),
       })
-      setStatus("Submitted. Waiting for output...")
+      if (response.rateLimited) {
+        dispatchCreateToast(response.error || "Upstream rate limit exceeded; retry queued.")
+      }
+      setStatus(response.rateLimited ? "Rate limited. Retry queued." : response.queued ? "Queued. Waiting for an account slot..." : "Submitted. Waiting for output...")
       await pollCreateJob(response.jobId, response.pollMs || 2000)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
@@ -456,6 +460,16 @@ export function useCreateStudio(onOpen?: () => void) {
     buildTemplateDraft,
     resetCreateForm,
   }
+}
+
+function dispatchCreateToast(message: string): void {
+  window.dispatchEvent(
+    new CustomEvent("genai:toast", {
+      detail: {
+        message,
+      },
+    }),
+  )
 }
 
 function paramAsString(value: CreateParams[string]): string | undefined {

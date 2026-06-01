@@ -8,11 +8,12 @@ import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { formatDate, formatTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Backup, Config, SyncStatus } from "@/types/domain"
 
-export type SettingsSection = "library" | "account" | "backups"
+export type SettingsSection = "library" | "account" | "playbox-auth" | "backups"
 
 export function SettingsDialog({
   open,
@@ -26,15 +27,24 @@ export function SettingsDialog({
   selectedBackup,
   setSelectedBackup,
   onStartSync,
+  onStartPlayboxSync,
   onStartDownload,
   onGenerateThumbnails,
   onVerifyLibrary,
   onAuthConnect,
   onAuthRefresh,
   onAuthDisconnect,
+  onPlayboxAuthConnect,
+  onPlayboxAuthRefresh,
+  onPlayboxAuthDisconnect,
+  onImportPlayboxCurl,
+  onRefreshPlayboxImport,
+  onClearPlayboxImport,
   onAuthAccountConnect,
   onAuthAccountRefresh,
   onAuthAccountRemove,
+  settingsActionPending,
+  onSaveMediaGenerationConcurrencyLimit,
   onCreateBackup,
   onRestoreBackup,
 }: {
@@ -49,15 +59,24 @@ export function SettingsDialog({
   selectedBackup: string
   setSelectedBackup: (value: string) => void
   onStartSync: (incremental: boolean) => void
+  onStartPlayboxSync: () => void
   onStartDownload: (mode: "missing" | "retry-errors") => void
   onGenerateThumbnails: () => void
   onVerifyLibrary: () => void
   onAuthConnect: () => void
   onAuthRefresh: () => void
   onAuthDisconnect: () => void
+  onPlayboxAuthConnect: () => void
+  onPlayboxAuthRefresh: () => void
+  onPlayboxAuthDisconnect: () => void
+  onImportPlayboxCurl: (curl: string) => void
+  onRefreshPlayboxImport: () => void
+  onClearPlayboxImport: () => void
   onAuthAccountConnect: (email: string) => void
   onAuthAccountRefresh: (email: string) => void
   onAuthAccountRemove: (email: string) => void
+  settingsActionPending: boolean
+  onSaveMediaGenerationConcurrencyLimit: (limit: number) => void
   onCreateBackup: () => void
   onRestoreBackup: () => void
 }) {
@@ -68,8 +87,26 @@ export function SettingsDialog({
   const connectLabel = hasAuthorization || authBrowser?.hasProfile || authBrowser?.lastError ? "Reconnect account" : "Connect account"
   const authorizationExpiry = config?.authorizationExpiresAt || authBrowser?.expiresAt
   const accounts = config?.authAccounts || []
+  const playbox = config?.playbox
+  const playboxAuthBrowser = playbox?.authBrowser
+  const playboxImportedSession = playbox?.importedSession
+  const hasPlayboxAuthorization = Boolean(playbox?.hasAuthorization)
+  const playboxAuthStatus = playboxAuthBrowser?.status || (hasPlayboxAuthorization ? "connected" : "missing")
+  const playboxAuthMessage =
+    playboxAuthBrowser?.message || (hasPlayboxAuthorization ? "Playbox token is active." : "Connect Playbox to sync.")
+  const playboxAuthorizationExpiry = playbox?.authorizationExpiresAt || playboxAuthBrowser?.expiresAt
+  const playboxConnectLabel =
+    hasPlayboxAuthorization || playboxAuthBrowser?.hasProfile || playboxAuthBrowser?.lastError ? "Reconnect Playbox" : "Connect Playbox"
   const [accountEmailDraft, setAccountEmailDraft] = React.useState("")
+  const [playboxCurlDraft, setPlayboxCurlDraft] = React.useState("")
+  const [generationLimitDraft, setGenerationLimitDraft] = React.useState(() => String(config?.mediaGenerationConcurrencyLimit || 2))
   const trimmedAccountEmail = accountEmailDraft.trim()
+  const trimmedPlayboxCurl = playboxCurlDraft.trim()
+  const generationLimit = Math.max(1, Math.floor(Number(generationLimitDraft) || 2))
+
+  React.useEffect(() => {
+    setGenerationLimitDraft(String(config?.mediaGenerationConcurrencyLimit || 2))
+  }, [config?.mediaGenerationConcurrencyLimit])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -83,6 +120,12 @@ export function SettingsDialog({
           </div>
           <SettingsNavButton icon={Database} label="Library" active={section === "library"} onClick={() => onSectionChange("library")} />
           <SettingsNavButton icon={KeyRound} label="Account" active={section === "account"} onClick={() => onSectionChange("account")} />
+          <SettingsNavButton
+            icon={ShieldCheck}
+            label="Playbox Auth"
+            active={section === "playbox-auth"}
+            onClick={() => onSectionChange("playbox-auth")}
+          />
           <SettingsNavButton icon={Archive} label="Backups" active={section === "backups"} onClick={() => onSectionChange("backups")} />
         </aside>
 
@@ -108,6 +151,10 @@ export function SettingsDialog({
                   <RefreshCw />
                   Retry errors
                 </Button>
+                <Button variant="outline" onClick={onStartPlayboxSync} disabled={syncStatus.running}>
+                  <Download />
+                  Sync Playbox
+                </Button>
                 <Button variant="outline" onClick={onGenerateThumbnails} disabled={syncStatus.running}>
                   <Archive />
                   Thumbnails
@@ -127,54 +174,156 @@ export function SettingsDialog({
             </SettingsPane>
           )}
 
-          {section === "account" && (
-            <SettingsPane title="Account" description="Connection state for the browser-backed API session.">
+          {section === "playbox-auth" && (
+            <SettingsPane title="Playbox Auth" description="Import a browser-authenticated API request for server-side refresh.">
               <div className="settingsAccountStatus">
                 <div className="min-w-0">
                   <div className="settingsStatusHeading">
-                    <span>Auth browser</span>
-                    <Badge variant={getAuthBadgeVariant(authStatus, hasAuthorization, authBrowser?.lastError)}>
-                      {authActionPending ? "working" : authStatus.replaceAll("-", " ")}
+                    <span>Playbox browser</span>
+                    <Badge variant={getAuthBadgeVariant(playboxAuthStatus, hasPlayboxAuthorization, playboxAuthBrowser?.lastError)}>
+                      {authActionPending ? "working" : playboxAuthStatus.replaceAll("-", " ")}
                     </Badge>
                   </div>
-                  <p>{authMessage}</p>
+                  <p>{playboxAuthMessage}</p>
                   <p>
-                    {authorizationExpiry ? `Token until ${formatTime(authorizationExpiry)}` : "No active token"}
-                    {authBrowser?.lastRefreshAt ? ` · refreshed ${formatTime(authBrowser.lastRefreshAt)}` : ""}
+                    {playboxAuthorizationExpiry ? `Token until ${formatTime(playboxAuthorizationExpiry)}` : "No active token"}
+                    {playboxAuthBrowser?.lastRefreshAt ? ` · refreshed ${formatTime(playboxAuthBrowser.lastRefreshAt)}` : ""}
                   </p>
-                  {authBrowser?.lastError && <p className="text-red-300">{authBrowser.lastError}</p>}
+                  {playboxAuthBrowser?.lastError && <p className="text-red-300">{playboxAuthBrowser.lastError}</p>}
                 </div>
               </div>
               <ButtonGroup className="settingsActionGrid">
-                <Button variant="outline" disabled={authActionPending} onClick={onAuthConnect}>
+                <Button variant="outline" disabled={authActionPending} onClick={onPlayboxAuthConnect}>
                   <KeyRound />
-                  {connectLabel}
+                  {playboxConnectLabel}
                 </Button>
-                <Button variant="outline" disabled={authActionPending || !authBrowser?.hasProfile} onClick={onAuthRefresh}>
+                <Button variant="outline" disabled={authActionPending || !playboxAuthBrowser?.hasProfile} onClick={onPlayboxAuthRefresh}>
                   <RefreshCw />
-                  Refresh token
+                  Refresh Playbox
                 </Button>
-                <Button variant="outline" disabled={authActionPending || !authBrowser?.browserOpen} onClick={onAuthDisconnect}>
-                  Close browser
+                <Button
+                  variant="outline"
+                  disabled={authActionPending || !playboxAuthBrowser?.browserOpen}
+                  onClick={onPlayboxAuthDisconnect}
+                >
+                  Close Playbox
+                </Button>
+              </ButtonGroup>
+              <div className="settingsAccountStatus">
+                <div className="min-w-0">
+                  <div className="settingsStatusHeading">
+                    <span>Imported session</span>
+                    <Badge
+                      variant={
+                        playboxImportedSession?.lastError ? "destructive" : playboxImportedSession?.hasSession ? "default" : "outline"
+                      }
+                    >
+                      {playboxImportedSession?.hasSession ? "available" : "missing"}
+                    </Badge>
+                  </div>
+                  <p>
+                    {playboxImportedSession?.hasSession
+                      ? `${playboxImportedSession.cookieCount.toLocaleString()} cookies captured`
+                      : "No imported Playbox session."}
+                  </p>
+                  <p>
+                    {playboxImportedSession?.lastRefreshAt
+                      ? `Refreshed ${formatTime(playboxImportedSession.lastRefreshAt)}`
+                      : playboxImportedSession?.lastValidatedAt
+                        ? `Validated ${formatTime(playboxImportedSession.lastValidatedAt)}`
+                        : "Not validated yet"}
+                  </p>
+                  {playboxImportedSession?.email && <p>{playboxImportedSession.email}</p>}
+                  {playboxImportedSession?.lastError && <p className="text-red-300">{playboxImportedSession.lastError}</p>}
+                </div>
+              </div>
+              <div className="settingsPath">
+                <Label>Capture steps</Label>
+                <ol className="grid gap-1 text-sm text-muted-foreground">
+                  <li>1. Open Playbox in your normal Chrome profile and sign in.</li>
+                  <li>2. Open DevTools, then the Network tab.</li>
+                  <li>3. Select a successful request to api.playbox.com, preferably users/me-new or refresh-token.</li>
+                  <li>4. Choose Copy as cURL and paste it below.</li>
+                </ol>
+              </div>
+              <div className="settingsField">
+                <Label htmlFor="playboxCurlInput">Playbox cURL request</Label>
+                <Textarea
+                  id="playboxCurlInput"
+                  className="min-h-40 resize-y font-mono text-xs"
+                  value={playboxCurlDraft}
+                  placeholder="curl 'https://api.playbox.com/api/users/me-new' -H 'Cookie: ...'"
+                  onChange={(event) => setPlayboxCurlDraft(event.currentTarget.value)}
+                />
+              </div>
+              <ButtonGroup className="settingsActionGrid">
+                <Button
+                  variant="outline"
+                  disabled={settingsActionPending || !trimmedPlayboxCurl}
+                  onClick={() => onImportPlayboxCurl(trimmedPlayboxCurl)}
+                >
+                  <KeyRound />
+                  Import cURL
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={settingsActionPending || !playboxImportedSession?.hasSession}
+                  onClick={onRefreshPlayboxImport}
+                >
+                  <RefreshCw />
+                  Test refresh
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={settingsActionPending || !playboxImportedSession?.hasSession}
+                  onClick={onClearPlayboxImport}
+                >
+                  <Trash2 />
+                  Clear session
                 </Button>
               </ButtonGroup>
               <div className="settingsPath">
-                <Label htmlFor="accountEmailInput">Add account</Label>
-                <div className="flex gap-2">
-                  <input
-                    id="accountEmailInput"
-                    className="min-h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
-                    value={accountEmailDraft}
-                    type="email"
-                    placeholder="email@example.com"
-                    onChange={(event) => setAccountEmailDraft(event.currentTarget.value)}
-                  />
-                  <Button variant="outline" disabled={authActionPending || !trimmedAccountEmail} onClick={() => onAuthAccountConnect(trimmedAccountEmail)}>
-                    <KeyRound />
-                    Add
-                  </Button>
-                </div>
+                <Label>Stored session file</Label>
+                <code className="break-all text-xs text-muted-foreground">{playboxImportedSession?.path || "Unavailable"}</code>
               </div>
+            </SettingsPane>
+          )}
+
+          {section === "account" && (
+            <SettingsPane title="Account" description="Connection state for the browser-backed API session.">
+              {accounts.length === 0 && (
+                <>
+                  <div className="settingsAccountStatus">
+                    <div className="min-w-0">
+                      <div className="settingsStatusHeading">
+                        <span>Account</span>
+                        <Badge variant={getAuthBadgeVariant(authStatus, hasAuthorization, authBrowser?.lastError)}>
+                          {authActionPending ? "working" : authStatus.replaceAll("-", " ")}
+                        </Badge>
+                      </div>
+                      <p>{authMessage}</p>
+                      <p>
+                        {authorizationExpiry ? `Token until ${formatTime(authorizationExpiry)}` : "No active token"}
+                        {authBrowser?.lastRefreshAt ? ` · refreshed ${formatTime(authBrowser.lastRefreshAt)}` : ""}
+                      </p>
+                      {authBrowser?.lastError && <p className="text-red-300">{authBrowser.lastError}</p>}
+                    </div>
+                  </div>
+                  <ButtonGroup className="settingsActionGrid">
+                    <Button variant="outline" disabled={authActionPending} onClick={onAuthConnect}>
+                      <KeyRound />
+                      {connectLabel}
+                    </Button>
+                    <Button variant="outline" disabled={authActionPending || !authBrowser?.hasProfile} onClick={onAuthRefresh}>
+                      <RefreshCw />
+                      Refresh token
+                    </Button>
+                    <Button variant="outline" disabled={authActionPending || !authBrowser?.browserOpen} onClick={onAuthDisconnect}>
+                      Close browser
+                    </Button>
+                  </ButtonGroup>
+                </>
+              )}
               {accounts.length > 0 && (
                 <div className="grid gap-2">
                   {accounts.map((account) => (
@@ -182,7 +331,13 @@ export function SettingsDialog({
                       <div className="min-w-0">
                         <div className="settingsStatusHeading">
                           <span className="truncate">{account.email}</span>
-                          <Badge variant={getAuthBadgeVariant(account.authBrowser.status, account.hasAuthorization, account.authBrowser.lastError)}>
+                          <Badge
+                            variant={getAuthBadgeVariant(
+                              account.authBrowser.status,
+                              account.hasAuthorization,
+                              account.authBrowser.lastError,
+                            )}
+                          >
                             {account.authBrowser.status.replaceAll("-", " ")}
                           </Badge>
                         </div>
@@ -193,28 +348,77 @@ export function SettingsDialog({
                         {account.authBrowser.lastError && <p className="text-red-300">{account.authBrowser.lastError}</p>}
                       </div>
                       <ButtonGroup>
-                        <Button variant="outline" size="icon" disabled={authActionPending} onClick={() => onAuthAccountConnect(account.email)}>
+                        <Button
+                          variant="outline"
+                          disabled={authActionPending}
+                          onClick={() => (account.isDefault ? onAuthConnect() : onAuthAccountConnect(account.email))}
+                        >
                           <KeyRound />
-                          <span className="sr-only">Reconnect account</span>
+                          Reconnect
                         </Button>
                         <Button
                           variant="outline"
-                          size="icon"
                           disabled={authActionPending || !account.authBrowser.hasProfile}
-                          onClick={() => onAuthAccountRefresh(account.email)}
+                          onClick={() => (account.isDefault ? onAuthRefresh() : onAuthAccountRefresh(account.email))}
                         >
                           <RefreshCw />
-                          <span className="sr-only">Refresh token</span>
+                          Refresh
                         </Button>
-                        <Button variant="outline" size="icon" disabled={authActionPending} onClick={() => onAuthAccountRemove(account.email)}>
-                          <Trash2 />
-                          <span className="sr-only">Remove account</span>
-                        </Button>
+                        {!account.isDefault && (
+                          <Button variant="outline" disabled={authActionPending} onClick={() => onAuthAccountRemove(account.email)}>
+                            <Trash2 />
+                            Remove
+                          </Button>
+                        )}
                       </ButtonGroup>
                     </div>
                   ))}
                 </div>
               )}
+              <div className="settingsPath">
+                <Label htmlFor="accountEmailInput">Add account</Label>
+                <div className="flex gap-2">
+                  <input
+                    id="accountEmailInput"
+                    className="min-h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
+                    value={accountEmailDraft}
+                    type="email"
+                    aria-label="Add account email"
+                    placeholder="email@example.com"
+                    onChange={(event) => setAccountEmailDraft(event.currentTarget.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={authActionPending || !trimmedAccountEmail}
+                    onClick={() => onAuthAccountConnect(trimmedAccountEmail)}
+                  >
+                    <KeyRound />
+                    Add
+                  </Button>
+                </div>
+              </div>
+              <div className="settingsField">
+                <Label htmlFor="generationLimitInput">Concurrent generations per account</Label>
+                <div className="flex gap-2">
+                  <input
+                    id="generationLimitInput"
+                    className="min-h-9 w-24 rounded-md border bg-background px-3 text-sm"
+                    type="number"
+                    min={1}
+                    max={20}
+                    aria-label="Concurrent generations per account"
+                    value={generationLimitDraft}
+                    onChange={(event) => setGenerationLimitDraft(event.currentTarget.value)}
+                  />
+                  <Button
+                    variant="outline"
+                    disabled={settingsActionPending || generationLimit === (config?.mediaGenerationConcurrencyLimit || 2)}
+                    onClick={() => onSaveMediaGenerationConcurrencyLimit(generationLimit)}
+                  >
+                    Save
+                  </Button>
+                </div>
+              </div>
               {config?.mediaDir && (
                 <div className="settingsPath">
                   <Label>Media directory</Label>

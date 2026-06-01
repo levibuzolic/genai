@@ -316,6 +316,112 @@ test("item delete endpoint deletes upstream job and keeps local files by default
   }
 })
 
+test("item index hides failed generations from the default view and shows them with deleted items", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-failed-index-"))
+  const doneId = "45454545-4545-4454-8454-454545454545"
+  const failedId = "46464646-4646-4464-8464-464646464646"
+  const deletedId = "47474747-4747-4474-8474-474747474747"
+  const doneFile = `2026-05-26/2026-05-26_edit_${doneId}.jpg`
+  await mkdir(path.dirname(path.join(mediaDir, doneFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, doneFile), PNG_BYTES)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: doneId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/done.png",
+        localFile: doneFile,
+        createdAt: 1779769825,
+      },
+      {
+        id: failedId,
+        type: "edit",
+        status: "failed",
+        prompt: "failed generation",
+        error: "upstream failure",
+        createdAt: 1779769824,
+      },
+      {
+        id: deletedId,
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/deleted.mp4",
+        localFile: `2026-05-26/2026-05-26_video_${deletedId}.mp4`,
+        remoteDeletedAt: "2026-05-27T01:00:00.000Z",
+        remoteDeleteStatus: "deleted",
+        createdAt: 1779769823,
+      },
+    ],
+    downloadedJobIds: [doneId, deletedId],
+    lastSeenJobId: doneId,
+  })
+
+  const server = await importServer(mediaDir)
+
+  const defaultView = await server.getItems(new URLSearchParams())
+  const missingView = await server.getItems(new URLSearchParams("status=missing"))
+  const deletedView = await server.getItems(new URLSearchParams("status=deleted"))
+
+  assert.deepEqual(
+    defaultView.items.map((item) => item.id),
+    [doneId],
+  )
+  assert.equal(defaultView.total, 1)
+  assert.equal(defaultView.facets.status?.all, 1)
+  assert.equal(defaultView.facets.status?.deleted, 2)
+  assert.equal(missingView.total, 0)
+  assert.deepEqual(
+    deletedView.items.map((item) => item.id),
+    [failedId, deletedId],
+  )
+  assert.equal(deletedView.total, 2)
+})
+
+test("item index can be filtered by media provider", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-provider-filter-"))
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: "generateporn-item",
+        type: "edit",
+        status: "done",
+        prompt: "studio portrait",
+        localFile: "2026-05-26/generateporn-item.jpg",
+        createdAt: 1779769825,
+      },
+      {
+        id: "playbox-collection-1",
+        provider: "playbox",
+        collectionId: "collection-1",
+        assetId: "asset-1",
+        assetKind: "image",
+        type: "image",
+        status: "done",
+        prompt: "playbox capture",
+        localFile: "playbox/2026-05-26/playbox-collection-1.jpg",
+        createdAt: 1779769824,
+      },
+    ],
+  })
+
+  const server = await importServer(mediaDir)
+
+  const generatePornView = await server.getItems(new URLSearchParams("provider=generateporn"))
+  const playboxView = await server.getItems(new URLSearchParams("provider=playbox&q=collection-1"))
+
+  assert.deepEqual(
+    generatePornView.items.map((item) => item.id),
+    ["generateporn-item"],
+  )
+  assert.deepEqual(
+    playboxView.items.map((item) => item.id),
+    ["playbox-collection-1"],
+  )
+  assert.equal(playboxView.facets.status?.all, 1)
+  assert.equal(playboxView.facets.orphanFiles, 0)
+})
+
 test("item delete endpoint can remove local files and catalog entry", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-remote-delete-local-"))
   const id = "34343434-3434-4343-8343-343434343434"

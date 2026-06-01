@@ -18,6 +18,13 @@ import {
   resetAuthRuntimeState,
   startAuthAccountAutoRefresh,
 } from "./server/auth-state.ts"
+import {
+  getBackgroundWorkerStatus,
+  registerBackgroundJob,
+  resetBackgroundWorkers,
+  startBackgroundWorkers,
+  triggerBackgroundJob,
+} from "./server/background-worker.ts"
 import { closeCatalogDb } from "./server/catalog-db.ts"
 import {
   applyDuplicateMetadata,
@@ -39,12 +46,23 @@ import {
 } from "./server/catalog.ts"
 import {
   CREATE_HISTORY_PAGE_LIMIT,
+  AUTO_SYNC_ENABLED,
+  AUTO_SYNC_INTERVAL_MS,
+  AUTO_SYNC_STARTUP_DELAY_MS,
+  BACKGROUND_THUMBNAIL_BATCH_SIZE,
+  BACKGROUND_THUMBNAIL_ENABLED,
+  BACKGROUND_THUMBNAIL_INTERVAL_MS,
+  BACKGROUND_THUMBNAIL_STARTUP_DELAY_MS,
+  BACKGROUND_WORKERS_ENABLED,
   MEDIA_DIR,
+  LOCAL_APP_URL,
   PAGE_LIMIT,
   PORT,
+  REDIRECT_STATIC_TO_VITE,
   ROOT_DIR,
   SERVER_ENTRY_FILE,
   THUMBNAIL_DIR,
+  VITE_PORT,
   reloadConfigFromEnv,
 } from "./server/config.ts"
 import {
@@ -54,9 +72,15 @@ import {
   duplicateCreation,
   getCreationDetails,
   getCreations,
+  getMediaGenerationConcurrencyLimit,
+  getPendingGenerationCountsByAccount,
   pollCreateJob,
   refreshCreations,
   resolveCreateSource,
+  setMediaGenerationConcurrencyLimit,
+  startCreationQueueProcessing,
+  CREATION_QUEUE_BACKGROUND_JOB_ID,
+  runCreationQueueBackgroundJob,
 } from "./server/create-jobs.ts"
 import {
   getCreateModes,
@@ -70,6 +94,20 @@ import {
   saveCreateTemplateRegistry,
 } from "./server/create-templates.ts"
 import { getErrorStatusCode } from "./server/errors.ts"
+import {
+  clearPlayboxImportedAuthSession,
+  getPlayboxImportedAuthStatus,
+  importPlayboxCurl,
+  refreshPlayboxImportedAuthorization,
+  resetPlayboxImportedAuthRuntimeState,
+} from "./server/playbox-auth-import.ts"
+import {
+  acceptPlayboxAuthorization,
+  getPlayboxAuthStatus,
+  playboxAuthBrowser,
+  resetPlayboxAuthRuntimeState,
+} from "./server/playbox-auth-state.ts"
+import { startPlayboxSync } from "./server/playbox-sync.ts"
 import { logHttpNotFound, readJsonBody, sendJson, serveMedia, serveStatic } from "./server/static.ts"
 import {
   autoSyncState,
@@ -82,6 +120,7 @@ import {
   startAutoSyncLoop,
   startCatalogDownload,
   startLibraryVerification,
+  runMissingThumbnailBackgroundJob,
   startSync,
   startThumbnailGeneration,
   syncState,
@@ -98,17 +137,35 @@ const AuthTokenBodySchema = z
   })
   .passthrough()
 const AuthAccountBodySchema = z.object({ email: z.string(), deleteProfile: z.boolean().catch(false) }).passthrough()
+const PlayboxAuthTokenBodySchema = z
+  .object({
+    authorization: z.unknown().optional(),
+    email: z.string().optional(),
+    source: z.string().catch("browser"),
+    token: z.unknown().optional(),
+  })
+  .passthrough()
+const PlayboxCurlImportBodySchema = z.object({ curl: z.string().min(1) }).passthrough()
 const CatalogBackupBodySchema = z.object({ reason: z.string().catch("manual") }).passthrough()
 const CatalogRestoreBodySchema = z.object({ file: z.string().catch("") }).passthrough()
 const DisconnectBrowserBodySchema = z.object({ deleteProfile: z.boolean().catch(false) }).passthrough()
 const DeleteCatalogItemBodySchema = z.object({ keepLocalFiles: z.boolean().catch(true) }).passthrough()
+const MediaGenerationConcurrencyLimitBodySchema = z.object({ limit: z.coerce.number() }).passthrough()
 const RefreshCreationsBodySchema = z.object({ pageLimit: z.coerce.number().catch(CREATE_HISTORY_PAGE_LIMIT) }).passthrough()
 const SyncStartBodySchema = z.object({ incremental: z.boolean().catch(true) }).passthrough()
+const PLAYBOX_SYNC_STARTUP_OFFSET_MS = 30_000
+const VITE_REDIRECT_CACHE_MS = 5000
+let viteRedirectCache: { checkedAt: number; url: string | null } = { checkedAt: 0, url: null }
+let viteRedirectProbe: Promise<string | null> | null = null
 
 reloadConfigFromEnv()
 closeCatalogDb()
 resetAuthRuntimeState()
+resetPlayboxAuthRuntimeState()
+resetPlayboxImportedAuthRuntimeState()
 resetSyncRuntimeState()
+resetBackgroundWorkers()
+registerBackgroundJobs()
 await mkdir(MEDIA_DIR, { recursive: true })
 
 const server = http.createServer(async (request, response) => {
@@ -117,6 +174,10 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "OPTIONS") {
       return sendJson(response, { ok: true })
+    }
+
+    if (await handleStaticRequestThroughVite(request, response, url)) {
+      return
     }
 
     if (request.method === "GET" && url.pathname === "/api/config") {
@@ -128,8 +189,15 @@ const server = http.createServer(async (request, response) => {
         authorizationExpiresAt: getAuthExpiresAt(),
         authorizationSource: authState.source,
         authBrowser: authBrowser.getStatus(),
+        playbox: {
+          ...getPlayboxAuthStatus(),
+          importedSession: getPlayboxImportedAuthStatus(),
+        },
         authAccounts,
         defaultAccountEmail: getDefaultAccountEmail(),
+        mediaGenerationConcurrencyLimit: getMediaGenerationConcurrencyLimit(),
+        pendingGenerationsByAccount: getPendingGenerationCountsByAccount(),
+        backgroundWorkers: getBackgroundWorkerStatus(),
         autoSync: getAutoSyncStatus(),
         thumbnailDir: THUMBNAIL_DIR,
         pageLimit: PAGE_LIMIT,
@@ -138,6 +206,23 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/create/modes") {
       return sendJson(response, await getCreateModes())
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/background/jobs") {
+      return sendJson(response, { jobs: getBackgroundWorkerStatus() })
+    }
+
+    const backgroundJobMatch = url.pathname.match(/^\/api\/background\/jobs\/([^/]+)$/)
+    if (request.method === "POST" && backgroundJobMatch) {
+      return sendJson(response, await triggerBackgroundJob(decodeURIComponent(backgroundJobMatch[1] || ""), "manual"))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/settings/media-generation-concurrency-limit") {
+      const body = MediaGenerationConcurrencyLimitBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, {
+        ok: true,
+        ...setMediaGenerationConcurrencyLimit(body.limit),
+      })
     }
 
     if (request.method === "GET" && url.pathname === "/api/create/templates") {
@@ -272,6 +357,48 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, await removeAuthAccount(body.email, { deleteProfile: body.deleteProfile }))
     }
 
+    if (request.method === "GET" && url.pathname === "/api/playbox/auth/browser/status") {
+      return sendJson(response, playboxAuthBrowser.getStatus())
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/auth/browser/connect") {
+      return sendJson(response, await playboxAuthBrowser.connectVisible())
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/auth/browser/refresh") {
+      return sendJson(response, await playboxAuthBrowser.refreshHeadless())
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/auth/browser/disconnect") {
+      const body = DisconnectBrowserBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, await playboxAuthBrowser.disconnect({ deleteProfile: body.deleteProfile }))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/auth/token") {
+      const body = PlayboxAuthTokenBodySchema.parse(await readJsonBody(request))
+      const auth = acceptPlayboxAuthorization(body.authorization || body.token, body.source, { email: body.email || null })
+      return sendJson(response, {
+        ok: true,
+        expiresAt: auth.expiresAt,
+        source: auth.source,
+        email: auth.email,
+      })
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/auth/import-curl") {
+      const body = PlayboxCurlImportBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, await importPlayboxCurl(body.curl))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/auth/import/refresh") {
+      const ok = await refreshPlayboxImportedAuthorization()
+      return sendJson(response, { ok, importedSession: getPlayboxImportedAuthStatus(), playbox: getPlayboxAuthStatus() }, ok ? 200 : 400)
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/auth/import/disconnect") {
+      return sendJson(response, await clearPlayboxImportedAuthSession())
+    }
+
     if (request.method === "GET" && url.pathname === "/api/items") {
       return sendJson(response, await getItems(url.searchParams))
     }
@@ -333,6 +460,15 @@ const server = http.createServer(async (request, response) => {
       startSync({ incremental }).catch(handleBackgroundError)
 
       return sendJson(response, { ok: true, incremental })
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/playbox/sync/start") {
+      if (syncState.running) {
+        return sendJson(response, { ok: false, error: "A sync is already running." }, 409)
+      }
+
+      startPlayboxSync().catch(handleBackgroundError)
+      return sendJson(response, { ok: true, provider: "playbox" })
     }
 
     if (request.method === "POST" && url.pathname === "/api/sync/cancel") {
@@ -414,11 +550,141 @@ const server = http.createServer(async (request, response) => {
 
 if (isCliEntry()) {
   server.listen(PORT, () => {
-    console.log(`Media library running at http://localhost:${PORT}`)
-    console.log(`Media directory: ${MEDIA_DIR}`)
+    void resolveStartupAppUrl().then((appUrl) => {
+      console.log(`Media library running at ${appUrl}`)
+      console.log(`API server listening at http://localhost:${PORT}`)
+      console.log(`Media directory: ${MEDIA_DIR}`)
+      return undefined
+    })
     startAuthAccountAutoRefresh()
+    void refreshPlayboxImportedAuthorization().then((ok) => {
+      if (!ok) {
+        console.log("Playbox imported auth session is not active. Open Settings > Playbox Auth to import or refresh it.")
+      }
+      return undefined
+    })
+    startBackgroundWorkers()
     startAutoSyncLoop()
   })
+}
+
+async function resolveStartupAppUrl(): Promise<string> {
+  if (LOCAL_APP_URL) {
+    return LOCAL_APP_URL
+  }
+
+  if (REDIRECT_STATIC_TO_VITE) {
+    return `http://localhost:${VITE_PORT}`
+  }
+
+  const viteUrl = await findMediaLibraryViteUrl({ scanFallbackPorts: true, timeoutMs: 2000 })
+  return viteUrl || `http://localhost:${PORT}`
+}
+
+type ViteProbeOptions = {
+  scanFallbackPorts?: boolean
+  timeoutMs?: number
+}
+
+async function handleStaticRequestThroughVite(request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<boolean> {
+  if (!REDIRECT_STATIC_TO_VITE || (request.method !== "GET" && request.method !== "HEAD") || isApiOrMediaPath(url.pathname)) {
+    return false
+  }
+
+  const viteUrl = await getViteRedirectUrl()
+  if (viteUrl) {
+    const redirectUrl = new URL(`${url.pathname}${url.search}`, withTrailingSlash(viteUrl))
+    response.writeHead(307, {
+      location: redirectUrl.toString(),
+      "cache-control": "no-store",
+    })
+    response.end()
+    return true
+  }
+
+  response.writeHead(503, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+  })
+  if (request.method !== "HEAD") {
+    response.end(
+      [
+        "<!doctype html>",
+        "<html><head><title>Vite dev server unavailable</title></head>",
+        "<body>",
+        `<h1>Vite dev server is not running on port ${VITE_PORT}</h1>`,
+        "<p>Start the app with <code>pnpm start</code>, then open the Vite app URL.</p>",
+        "</body></html>",
+      ].join(""),
+    )
+  } else {
+    response.end()
+  }
+  return true
+}
+
+async function getViteRedirectUrl(): Promise<string | null> {
+  if (LOCAL_APP_URL) {
+    return LOCAL_APP_URL
+  }
+
+  const now = Date.now()
+  if (now - viteRedirectCache.checkedAt < VITE_REDIRECT_CACHE_MS) {
+    return viteRedirectCache.url
+  }
+
+  viteRedirectProbe ??= findMediaLibraryViteUrl({ scanFallbackPorts: false, timeoutMs: 750 }).finally(() => {
+    viteRedirectProbe = null
+  })
+
+  const url = await viteRedirectProbe
+  viteRedirectCache = {
+    checkedAt: Date.now(),
+    url,
+  }
+  return url
+}
+
+async function findMediaLibraryViteUrl({ scanFallbackPorts = true, timeoutMs = 2000 }: ViteProbeOptions = {}): Promise<string | null> {
+  const preferredPort = VITE_PORT
+  const candidatePorts = [preferredPort]
+  if (scanFallbackPorts) {
+    for (let port = 6173; port <= 6183; port += 1) {
+      if (!candidatePorts.includes(port)) {
+        candidatePorts.push(port)
+      }
+    }
+  }
+
+  for (const port of candidatePorts) {
+    if (await isMediaLibraryViteUrl(`http://127.0.0.1:${port}`, timeoutMs)) {
+      return `http://localhost:${port}`
+    }
+  }
+
+  return null
+}
+
+async function isMediaLibraryViteUrl(url: string, timeoutMs: number): Promise<boolean> {
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!response.ok) {
+      return false
+    }
+
+    const html = await response.text()
+    return html.includes("<title>Media Library</title>") && html.includes("/src/main.tsx")
+  } catch {
+    return false
+  }
+}
+
+function isApiOrMediaPath(pathname: string): boolean {
+  return pathname === "/api" || pathname.startsWith("/api/") || pathname === "/media" || pathname.startsWith("/media/")
+}
+
+function withTrailingSlash(value: string): string {
+  return value.endsWith("/") ? value : `${value}/`
 }
 
 function isCliEntry(): boolean {
@@ -429,8 +695,47 @@ function resolveMediaDir(value: unknown): string {
   return resolveMediaDirFromRoot(ROOT_DIR, value)
 }
 
+function registerBackgroundJobs(): void {
+  registerBackgroundJob({
+    id: CREATION_QUEUE_BACKGROUND_JOB_ID,
+    label: "Creation queue",
+    enabled: BACKGROUND_WORKERS_ENABLED,
+    startupDelayMs: 0,
+    handler: runCreationQueueBackgroundJob,
+  })
+  registerBackgroundJob({
+    id: "missing-video-thumbnails",
+    label: "Missing video thumbnails",
+    enabled: BACKGROUND_WORKERS_ENABLED && BACKGROUND_THUMBNAIL_ENABLED,
+    intervalMs: BACKGROUND_THUMBNAIL_INTERVAL_MS,
+    startupDelayMs: BACKGROUND_THUMBNAIL_STARTUP_DELAY_MS,
+    handler: () => runMissingThumbnailBackgroundJob({ limit: BACKGROUND_THUMBNAIL_BATCH_SIZE }),
+  })
+  registerBackgroundJob({
+    id: "playbox-sync",
+    label: "Playbox sync",
+    enabled: BACKGROUND_WORKERS_ENABLED && AUTO_SYNC_ENABLED,
+    intervalMs: AUTO_SYNC_INTERVAL_MS,
+    startupDelayMs: AUTO_SYNC_STARTUP_DELAY_MS + PLAYBOX_SYNC_STARTUP_OFFSET_MS,
+    handler: async () => {
+      if (syncState.running) {
+        return { skipped: true, reason: "sync-running" }
+      }
+
+      await startPlayboxSync()
+      return {
+        scanned: syncState.scanned,
+        downloaded: syncState.downloaded,
+        skipped: syncState.skipped,
+        errors: syncState.errors.length,
+      }
+    },
+  })
+}
+
 export {
   acceptAuthorization,
+  acceptPlayboxAuthorization,
   autoSyncState,
   authBrowser,
   connectAuthAccount,
@@ -445,36 +750,48 @@ export {
   duplicateCreation,
   getCatalogDownloadQueue,
   getAuthAccountStatuses,
+  getBackgroundWorkerStatus,
   getCreateModes,
   getCreateTemplateRegistryResponse,
   getCreationDetails,
   getCreations,
+  getDefaultAccountEmail,
+  getMediaGenerationConcurrencyLimit,
   getThumbnailGenerationQueue,
   getItems,
   hashBuffer,
+  importPlayboxCurl,
   importCreateTemplateFromHistory,
   isDownloadableCatalogItem,
   jobFromCatalogItem,
   listCatalogBackups,
   loadCreateTemplateRegistry,
   normalizeJob,
+  pollCreateJob,
+  playboxAuthBrowser,
   resolveCreateSource,
   saveCreateTemplateRegistry,
+  setMediaGenerationConcurrencyLimit,
   saveCreateTemplateFromCreation,
   saveCreateTemplateFromRequest,
   applyDuplicateMetadata,
   reconcileCatalogWithLocalFiles,
   refreshAuthAccount,
+  refreshPlayboxImportedAuthorization,
   requestSyncCancellation,
   refreshCreations,
   restoreCatalogBackup,
   resolveMediaDir,
   removeAuthAccount,
+  runMissingThumbnailBackgroundJob,
   server,
   setCatalogItemFavoriteRemote,
   startCatalogDownload,
   startAutoSyncLoop,
+  startBackgroundWorkers,
+  startCreationQueueProcessing,
   startLibraryVerification,
+  startPlayboxSync,
   startSync,
   startThumbnailGeneration,
   syncState,

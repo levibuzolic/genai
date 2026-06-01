@@ -38,6 +38,9 @@ export const creationJobs = sqliteTable(
     accountEmail: text("account_email"),
     jobId: text("job_id").unique(),
     status: text("status").notNull(),
+    queueNotBefore: text("queue_not_before"),
+    queueAttempt: looseInteger("queue_attempt"),
+    lastRateLimitedAt: text("last_rate_limited_at"),
     modeId: text("mode_id"),
     modeLabel: text("mode_label"),
     mediaType: text("media_type"),
@@ -82,6 +85,42 @@ export const creationEvents = sqliteTable(
   (table) => [index("creation_events_creation_id_idx").on(table.creationId, asc(table.id))],
 )
 
+export const playboxCollections = sqliteTable(
+  "playbox_collections",
+  ({ text }) => ({
+    id: text("id").primaryKey(),
+    accountId: text("account_id"),
+    name: text("name"),
+    status: text("status"),
+    modelId: text("model_id"),
+    modelName: text("model_name"),
+    modelType: text("model_type"),
+    outputType: text("output_type"),
+    createdAt: text("created_at"),
+    updatedAt: text("updated_at"),
+    collectionJson: text("collection_json").notNull(),
+  }),
+  (table) => [index("playbox_collections_created_at_idx").on(desc(table.createdAt))],
+)
+
+export const playboxAssets = sqliteTable(
+  "playbox_assets",
+  ({ integer, text }) => ({
+    id: text("id").primaryKey(),
+    collectionId: text("collection_id").notNull(),
+    kind: text("kind").notNull(),
+    remoteUrlBase: text("remote_url_base"),
+    remoteUrlExpiresAt: text("remote_url_expires_at"),
+    contentType: text("content_type"),
+    localFile: text("local_file"),
+    size: integer("size"),
+    sha256: text("sha256"),
+    downloadedAt: text("downloaded_at"),
+    downloadError: text("download_error"),
+  }),
+  (table) => [index("playbox_assets_collection_id_idx").on(table.collectionId), index("playbox_assets_kind_idx").on(table.kind)],
+)
+
 export const catalogSchema = {
   catalogMeta,
   creationEvents,
@@ -89,6 +128,8 @@ export const catalogSchema = {
   downloadedJobIds,
   mediaItems,
   orphanFiles,
+  playboxAssets,
+  playboxCollections,
 } as const
 
 export type CatalogDbSchema = typeof catalogSchema

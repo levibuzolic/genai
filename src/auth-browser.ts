@@ -18,7 +18,7 @@ type TokenResult = {
   source: string
 }
 
-type CapturedClerkSession = {
+type CapturedAuthSession = {
   token: string
   email: string | null
 }
@@ -28,6 +28,7 @@ type LaunchOptions = {
 }
 
 type LaunchPersistentContext = (profileDir: string, options: LaunchOptions) => Promise<BrowserContext>
+type AuthSessionReader = (page: Page, timeoutMs: number) => Promise<CapturedAuthSession>
 
 type AuthBrowserLogger = {
   warn?: (error: unknown) => void
@@ -38,6 +39,7 @@ type AuthBrowserOptions = {
   loginUrl: string
   onToken: (token: string, source: string, session: { email?: string | null }) => TokenResult | Promise<TokenResult>
   launchPersistentContext?: LaunchPersistentContext
+  sessionReader?: AuthSessionReader
   loginTimeoutMs?: number
   tokenTimeoutMs?: number
   refreshIntervalMs?: number
@@ -91,6 +93,7 @@ class AuthBrowserService {
   readonly loginUrl: string
   readonly onToken: (token: string, source: string, session: { email?: string | null }) => TokenResult | Promise<TokenResult>
   readonly launchPersistentContext: LaunchPersistentContext
+  readonly sessionReader: AuthSessionReader
   readonly loginTimeoutMs: number
   readonly tokenTimeoutMs: number
   readonly refreshIntervalMs: number
@@ -107,6 +110,7 @@ class AuthBrowserService {
     loginUrl,
     onToken,
     launchPersistentContext = launchPlaywrightPersistentContext,
+    sessionReader = readClerkSession,
     loginTimeoutMs = DEFAULT_LOGIN_TIMEOUT_MS,
     tokenTimeoutMs = DEFAULT_TOKEN_TIMEOUT_MS,
     refreshIntervalMs = DEFAULT_REFRESH_INTERVAL_MS,
@@ -116,6 +120,7 @@ class AuthBrowserService {
     this.loginUrl = loginUrl
     this.onToken = onToken
     this.launchPersistentContext = launchPersistentContext
+    this.sessionReader = sessionReader
     this.loginTimeoutMs = loginTimeoutMs
     this.tokenTimeoutMs = tokenTimeoutMs
     this.refreshIntervalMs = refreshIntervalMs
@@ -224,7 +229,7 @@ class AuthBrowserService {
       this.context = await this.launchPersistentContext(this.profileDir, { headless: true })
       const page = await getOrCreatePage(this.context)
       await page.goto(this.loginUrl, { waitUntil: "domcontentloaded" })
-      const session = await readClerkSession(page, this.tokenTimeoutMs)
+      const session = await this.sessionReader(page, this.tokenTimeoutMs)
       await this.acceptToken(session)
       await this.closeContext()
       return this.getStatus()
@@ -276,7 +281,7 @@ class AuthBrowserService {
     const deadline = Date.now() + this.loginTimeoutMs
 
     while (Date.now() < deadline && this.context) {
-      const session = await readClerkSession(page, 1000).catch(() => null)
+      const session = await this.sessionReader(page, 1000).catch(() => null)
 
       if (session) {
         await this.acceptToken(session)
@@ -291,7 +296,7 @@ class AuthBrowserService {
     throw new Error("Timed out waiting for login to complete.")
   }
 
-  async acceptToken(session: CapturedClerkSession): Promise<void> {
+  async acceptToken(session: CapturedAuthSession): Promise<void> {
     const result = await this.onToken(session.token, "auth-browser", { email: session.email })
     const nextRefreshAt = calculateNextRefreshAt(result.expiresAt, this.refreshIntervalMs)
     this.setState({
@@ -356,7 +361,7 @@ async function getOrCreatePage(context: BrowserContext): Promise<Page> {
   return context.pages()[0] ?? context.newPage()
 }
 
-async function readClerkSession(page: Page, timeoutMs: number): Promise<CapturedClerkSession> {
+async function readClerkSession(page: Page, timeoutMs: number): Promise<CapturedAuthSession> {
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {

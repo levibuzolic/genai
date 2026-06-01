@@ -118,13 +118,13 @@ describe("MediaCard", () => {
     })
 
     expect(container.querySelector(".media-card")?.classList.contains("is-failed")).toBe(true)
-    expect(screen.getByText("failed")).toBeTruthy()
+    expect(screen.getByText(/May 28 · failed/)).toBeTruthy()
     expect(screen.getByText("Server returned an error")).toBeTruthy()
-    expect(screen.getByRole("button", { name: /open media details/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /open image details/i })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /favorite|unfavorite/i })).toBeNull()
     expect(screen.getByRole("button", { name: /delete remote/i })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: /open media details/i }))
+    fireEvent.click(screen.getByRole("button", { name: /open image details/i }))
     expect(onDetails).toHaveBeenCalledTimes(1)
   })
 })

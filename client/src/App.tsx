@@ -25,9 +25,11 @@ const PENDING_GALLERY_POLL_MS = 15_000
 const PENDING_GALLERY_INITIAL_POLL_MS = 2_500
 
 function App() {
-  const { route, navigateToCreate, navigateToItem, navigateToLibrary, navigateToSettings, navigateToTemplates } = useAppNavigation()
+  const { route, navigateToCreate, navigateToItem, navigateToLibrary, navigateToPlaybox, navigateToSettings, navigateToTemplates } =
+    useAppNavigation()
   const { config, reloadConfig } = useConfig()
-  const library = useLibrary()
+  const activeView = route.view
+  const library = useLibrary({ provider: activeView === "playbox" ? "playbox" : "generateporn" })
   const backups = useBackups(async () => {
     await library.loadItems()
   })
@@ -57,6 +59,7 @@ function App() {
   const [selectedItem, setSelectedItem] = React.useState<CatalogItem | null>(null)
   const [copyFlash, setCopyFlash] = React.useState("")
   const [authActionPending, setAuthActionPending] = React.useState(false)
+  const [settingsActionPending, setSettingsActionPending] = React.useState(false)
   const [deleteTarget, setDeleteTarget] = React.useState<CatalogItem | null>(null)
   const [deletePending, setDeletePending] = React.useState(false)
   const [keepLocalFiles, setKeepLocalFiles] = React.useState(true)
@@ -66,7 +69,6 @@ function App() {
   )
   const [detailVideoMuted, setDetailVideoMuted] = React.useState(() => window.localStorage.getItem("detailVideoMuted") !== "false")
   const toggleMediaBlur = React.useCallback(() => setMediaBlurred((current) => !current), [])
-  const activeView = route.view
   const createOpen = create.open
   const setCreateOpen = create.setOpen
   const setSelectedCreateAccountEmail = create.setSelectedAccountEmail
@@ -261,6 +263,89 @@ function App() {
     }
   }
 
+  async function runPlayboxAuthBrowserAction(action: "connect" | "refresh" | "disconnect") {
+    if (authActionPending) return
+    setAuthActionPending(true)
+    const path =
+      action === "connect"
+        ? "/api/playbox/auth/browser/connect"
+        : action === "refresh"
+          ? "/api/playbox/auth/browser/refresh"
+          : "/api/playbox/auth/browser/disconnect"
+    try {
+      const status = await fetchJson<{ message: string }>(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(action === "disconnect" ? { deleteProfile: false } : {}),
+      })
+      setCopyFlash(status.message)
+      window.setTimeout(() => setCopyFlash(""), 1800)
+      await reloadConfig()
+    } finally {
+      setAuthActionPending(false)
+    }
+  }
+
+  async function importPlayboxCurl(curl: string) {
+    if (settingsActionPending) return
+    setSettingsActionPending(true)
+    try {
+      const status = await fetchJson<{ hasSession: boolean; cookieCount: number }>("/api/playbox/auth/import-curl", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ curl }),
+      })
+      setCopyFlash(status.hasSession ? `Imported ${status.cookieCount} Playbox cookies` : "Playbox import did not save a session")
+      window.setTimeout(() => setCopyFlash(""), 1800)
+      await reloadConfig()
+    } finally {
+      setSettingsActionPending(false)
+    }
+  }
+
+  async function refreshPlayboxImport() {
+    if (settingsActionPending) return
+    setSettingsActionPending(true)
+    try {
+      const result = await fetchJson<{ ok: boolean }>("/api/playbox/auth/import/refresh", { method: "POST" })
+      setCopyFlash(result.ok ? "Playbox imported session refreshed" : "Playbox imported session did not refresh")
+      window.setTimeout(() => setCopyFlash(""), 1800)
+      await reloadConfig()
+    } finally {
+      setSettingsActionPending(false)
+    }
+  }
+
+  async function clearPlayboxImport() {
+    if (settingsActionPending) return
+    setSettingsActionPending(true)
+    try {
+      await fetchJson("/api/playbox/auth/import/disconnect", { method: "POST" })
+      setCopyFlash("Playbox imported session cleared")
+      window.setTimeout(() => setCopyFlash(""), 1800)
+      await reloadConfig()
+    } finally {
+      setSettingsActionPending(false)
+    }
+  }
+
+  async function saveMediaGenerationConcurrencyLimit(limit: number) {
+    if (settingsActionPending) return
+    setSettingsActionPending(true)
+    try {
+      const result = await fetchJson<{ limit: number }>("/api/settings/media-generation-concurrency-limit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ limit }),
+      })
+      setCopyFlash(`Generation limit set to ${result.limit}`)
+      window.setTimeout(() => setCopyFlash(""), 1800)
+      await reloadConfig()
+    } finally {
+      setSettingsActionPending(false)
+    }
+  }
+
   async function deleteRemoteItem() {
     if (!deleteTarget || deletePending) return
 
@@ -311,6 +396,9 @@ function App() {
       onOpenLibrary={() => {
         navigateToLibrary()
       }}
+      onOpenPlaybox={() => {
+        navigateToPlaybox()
+      }}
       onOpenCreate={() => {
         void create.openCreator()
       }}
@@ -318,6 +406,7 @@ function App() {
         navigateToTemplates()
       }}
       onStartSync={(incremental) => void sync.startSync(incremental)}
+      onStartPlayboxSync={() => void sync.startPlayboxSync()}
       onStartDownload={(mode) => void sync.startDownload(mode)}
       onGenerateThumbnails={() => void sync.startThumbnailGeneration()}
       onVerifyLibrary={() => void sync.startLibraryVerification()}
@@ -325,10 +414,18 @@ function App() {
       onAuthConnect={() => void runAuthBrowserAction("connect")}
       onAuthRefresh={() => void runAuthBrowserAction("refresh")}
       onAuthDisconnect={() => void runAuthBrowserAction("disconnect")}
+      onPlayboxAuthConnect={() => void runPlayboxAuthBrowserAction("connect")}
+      onPlayboxAuthRefresh={() => void runPlayboxAuthBrowserAction("refresh")}
+      onPlayboxAuthDisconnect={() => void runPlayboxAuthBrowserAction("disconnect")}
+      onImportPlayboxCurl={(curl) => void importPlayboxCurl(curl)}
+      onRefreshPlayboxImport={() => void refreshPlayboxImport()}
+      onClearPlayboxImport={() => void clearPlayboxImport()}
       onAuthAccountConnect={(email) => void runAuthBrowserAction("connect", email)}
       onAuthAccountRefresh={(email) => void runAuthBrowserAction("refresh", email)}
       onAuthAccountRemove={(email) => void runAuthBrowserAction("remove", email)}
       authActionPending={authActionPending}
+      settingsActionPending={settingsActionPending}
+      onSaveMediaGenerationConcurrencyLimit={(limit) => void saveMediaGenerationConcurrencyLimit(limit)}
       mediaBlurred={mediaBlurred}
       onToggleMediaBlur={toggleMediaBlur}
       mediaFitMode={mediaFitMode}
@@ -378,10 +475,12 @@ function App() {
           setSort={library.setSort}
           view={library.view}
           setView={library.setView}
+          emptyTitle={activeView === "playbox" ? "No Playbox media found" : undefined}
+          emptyDescription={activeView === "playbox" ? "Sync Playbox or adjust filters to browse downloaded Playbox creations." : undefined}
           clearFilters={library.clearFilters}
           onLoadMore={() => void library.loadNextPage()}
           onOpenCreate={(options) => void create.openCreator(options)}
-          onDetails={(item) => navigateToItem(item.id)}
+          onDetails={(item) => navigateToItem(item.id, { view: activeView })}
           onCopyPrompt={(item) => void copyValue(item.prompt, "Prompt copied")}
           onDeleteRemote={requestRemoteDelete}
           onToggleFavorite={(item) => void toggleFavorite(item)}
@@ -391,7 +490,9 @@ function App() {
       <MediaDialog
         item={selectedItem}
         open={Boolean(selectedItem)}
-        onOpenChange={(open) => !open && navigateToLibrary({ replace: true })}
+        onOpenChange={(open) =>
+          !open && (activeView === "playbox" ? navigateToPlaybox({ replace: true }) : navigateToLibrary({ replace: true }))
+        }
         onCopy={(value, label) => void copyValue(value, label)}
         onCreate={(item) => {
           void create.openCreator({ sourceItem: item, prompt: "", modeId: "custom-video" })
@@ -409,10 +510,10 @@ function App() {
         videoMuted={detailVideoMuted}
         onVideoMutedChange={setDetailVideoMuted}
         onPrevious={() => {
-          if (previousDetailItem) navigateToItem(previousDetailItem.id)
+          if (previousDetailItem) navigateToItem(previousDetailItem.id, { view: activeView })
         }}
         onNext={() => {
-          if (nextDetailItem) navigateToItem(nextDetailItem.id)
+          if (nextDetailItem) navigateToItem(nextDetailItem.id, { view: activeView })
         }}
       />
 
@@ -472,6 +573,9 @@ function App() {
             accountOptions={accountOptions}
             selectedAccountEmail={create.selectedAccountEmail}
             setSelectedAccountEmail={create.setSelectedAccountEmail}
+            pendingGenerationCount={getPendingGenerationCount(creationHistory.creations, create.selectedAccountEmail)}
+            queuedGenerationCount={getQueuedGenerationCount(creationHistory.creations, create.selectedAccountEmail)}
+            generationConcurrencyLimit={config?.mediaGenerationConcurrencyLimit || 2}
             prompt={create.prompt}
             setPrompt={create.setPrompt}
             negativePrompt={create.negativePrompt}
@@ -490,8 +594,8 @@ function App() {
             fileInputRef={create.fileInputRef}
             onUploadFile={create.acceptUploadFile}
             onClearSource={create.clearSource}
-            onSubmit={async () => {
-              await create.submitCreateJob()
+            onSubmit={async (options) => {
+              await create.submitCreateJob(options)
               await creationHistory.loadCreations()
             }}
             onReset={create.resetCreateForm}
@@ -536,9 +640,38 @@ function App() {
         </dialog>
       )}
 
-      {copyFlash && <div className="copy-toast">{copyFlash}</div>}
+      {copyFlash && (
+        <output className="copy-toast" aria-live="polite">
+          {copyFlash}
+        </output>
+      )}
     </AppShell>
   )
 }
 
 export default App
+
+function getPendingGenerationCount(
+  creations: { accountEmail?: string | null; jobId?: string | null; status: string }[],
+  accountEmail: string,
+): number {
+  return creations.filter(
+    (creation) =>
+      accountKey(creation.accountEmail) === accountKey(accountEmail) && Boolean(creation.jobId) && isActiveCreationStatus(creation.status),
+  ).length
+}
+
+function getQueuedGenerationCount(creations: { accountEmail?: string | null; status: string }[], accountEmail: string): number {
+  return creations.filter(
+    (creation) => accountKey(creation.accountEmail) === accountKey(accountEmail) && creation.status.toLowerCase() === "queued",
+  ).length
+}
+
+function isActiveCreationStatus(status: string): boolean {
+  const normalized = status.toLowerCase()
+  return !["done", "failed", "error", "cancelled", "canceled", "draft"].includes(normalized)
+}
+
+function accountKey(accountEmail: string | null | undefined): string {
+  return accountEmail || "__default__"
+}

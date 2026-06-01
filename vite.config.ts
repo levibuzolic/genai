@@ -5,6 +5,9 @@ import tailwindcss from "@tailwindcss/vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
+const apiPort = Number(process.env["PORT"] || 6177)
+const vitePort = Number(process.env["VITE_PORT"] || 6173)
+
 export default defineConfig({
   root: "client",
   plugins: [
@@ -19,9 +22,11 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    port: vitePort,
+    strictPort: true,
     proxy: {
-      "/api": "http://127.0.0.1:5177",
-      "/media": "http://127.0.0.1:5177",
+      "/api": `http://127.0.0.1:${apiPort}`,
+      "/media": `http://127.0.0.1:${apiPort}`,
     },
   },
   resolve: {

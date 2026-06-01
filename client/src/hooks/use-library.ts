@@ -7,6 +7,7 @@ import type { ItemsResponse } from "@/types/routes"
 
 const SEARCH_DEBOUNCE_MS = 260
 const VIRTUAL_PAGE_SIZE = "48"
+export type LibraryProviderFilter = "all" | "generateporn" | "playbox"
 
 export const sortOptions = [
   ["newest", "Newest"],
@@ -15,7 +16,7 @@ export const sortOptions = [
   ["smallest", "Smallest"],
 ] as const
 
-export function useLibrary() {
+export function useLibrary({ provider = "generateporn" }: { provider?: LibraryProviderFilter } = {}) {
   const initial = readLibraryStateFromUrl()
   const [itemsData, setItemsData] = React.useState<ItemsResponse | null>(null)
   const [itemsLoading, setItemsLoading] = React.useState(true)
@@ -30,7 +31,7 @@ export function useLibrary() {
   const deferredItems = React.useDeferredValue(itemsData?.items || [])
   const requestIdRef = React.useRef(0)
   const loadingMoreRef = React.useRef(false)
-  const querySignature = React.useMemo(() => JSON.stringify([query, media, status, sort]), [media, query, sort, status])
+  const querySignature = React.useMemo(() => JSON.stringify([provider, query, media, status, sort]), [media, provider, query, sort, status])
   const querySignatureRef = React.useRef(querySignature)
 
   React.useEffect(() => {
@@ -60,6 +61,7 @@ export function useLibrary() {
         media,
         status,
         sort,
+        provider,
         pageSize: VIRTUAL_PAGE_SIZE,
         page: String(pageToLoad),
       })
@@ -83,7 +85,7 @@ export function useLibrary() {
         }
       }
     },
-    [media, query, sort, status],
+    [media, provider, query, sort, status],
   )
 
   const loadItems = React.useCallback(

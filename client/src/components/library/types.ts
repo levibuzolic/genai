@@ -25,6 +25,8 @@ export type LibraryViewProps = {
   setSort: (value: string) => void
   view: ViewMode
   setView: (value: ViewMode) => void
+  emptyTitle?: string | undefined
+  emptyDescription?: string | undefined
   clearFilters: () => void
   onLoadMore: () => void
   onOpenCreate: (options?: OpenCreateOptions) => void

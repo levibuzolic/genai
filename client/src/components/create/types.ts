@@ -27,6 +27,9 @@ export type CreateStudioProps = {
   accountOptions: string[]
   selectedAccountEmail: string
   setSelectedAccountEmail: (email: string) => void
+  pendingGenerationCount: number
+  queuedGenerationCount: number
+  generationConcurrencyLimit: number
   prompt: string
   setPrompt: (value: string) => void
   negativePrompt: string
@@ -45,7 +48,7 @@ export type CreateStudioProps = {
   fileInputRef: React.RefObject<HTMLInputElement | null>
   onUploadFile: (file: File | null, source: UploadSource) => Promise<void>
   onClearSource: () => void
-  onSubmit: () => Promise<void>
+  onSubmit: (options?: { queue?: boolean }) => Promise<void>
   onReset: () => void
   onClose: () => void
   templates: CreateTemplate[]

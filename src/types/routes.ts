@@ -16,6 +16,10 @@ export type AppRouteResponse<T> = AppDomainResponse<T>
 export type PublicCatalogItem = {
   id: string
   accountEmail?: string | null
+  provider?: string | null
+  collectionId?: string | null
+  assetId?: string | null
+  assetKind?: string | null
   userId?: string | null
   type?: string | null
   prompt?: string | null
@@ -149,6 +153,7 @@ export type CreateJobSubmitRequest = {
   accountEmail?: string | null
   modeId?: string
   params?: CreateParams
+  queue?: boolean
   source?: CreateSource | null
   templateId?: string
 }
@@ -156,6 +161,10 @@ export type CreateJobSubmitRequest = {
 export type CreateJobSubmitResponse = OkResponse & {
   jobId: string
   accountEmail?: string | null
+  error?: string | null
+  queueNotBefore?: string | null
+  queued?: boolean
+  rateLimited?: boolean
   modeId: string
   modeLabel: string
   pollMs: number

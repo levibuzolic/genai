@@ -6,10 +6,14 @@ const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
 
 export function mediaUrlForItem(item?: CatalogItem | null) {
   if (!item) return null
+  if (item.provider === "playbox") {
+    return item.localFile ? `/media/${encodeURIPath(item.localFile)}` : null
+  }
   return item.localFile ? `/media/${encodeURIPath(item.localFile)}` : item.outputUrl || null
 }
 
 export function isImageItem(item?: CatalogItem | null) {
+  if (item?.type === "image") return true
   const value = item?.localFile || item?.outputUrl || ""
   return isImageUrl(value)
 }
@@ -27,7 +31,13 @@ export function isPendingMediaItem(item?: CatalogItem | null) {
 }
 
 export function isFailedMediaItem(item?: CatalogItem | null): boolean {
-  return item ? FAILED_MEDIA_STATUSES.has(String(item.status || "").trim().toLowerCase()) : false
+  return item
+    ? FAILED_MEDIA_STATUSES.has(
+        String(item.status || "")
+          .trim()
+          .toLowerCase(),
+      )
+    : false
 }
 
 export function isImageUrl(value = "") {
