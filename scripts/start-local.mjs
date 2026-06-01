@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url"
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const port = process.env["PORT"] || "6177"
 const vitePort = process.env["VITE_PORT"] || "6173"
+const host = process.env["HOST"] || "127.0.0.1"
 const env = {
   ...process.env,
   PORT: port,
@@ -17,7 +18,7 @@ const children = [
     env,
     stdio: "inherit",
   }),
-  spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", "127.0.0.1"], {
+  spawn(process.execPath, ["node_modules/vite/bin/vite.js", "--host", host], {
     cwd: rootDir,
     env,
     stdio: "inherit",

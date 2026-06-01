@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:wifi": "vite --host 0.0.0.0",
     "start:api": "REDIRECT_STATIC_TO_VITE=false node src/server.ts",
     "typecheck": "tsc -b",
     "lint": "oxlint .",
@@ -15,6 +16,7 @@
     "test:unit": "vitest run --config vitest.config.ts",
     "build": "pnpm typecheck && vite build",
     "start": "node scripts/start-local.mjs",
+    "start:wifi": "HOST=0.0.0.0 node scripts/start-local.mjs",
     "tailscale:funnel": "tailscale --socket=/opt/homebrew/var/run/tailscale/tailscaled.sock funnel --bg --https=443 localhost:${PORT:-6177}",
     "tailscale:funnel:off": "tailscale --socket=/opt/homebrew/var/run/tailscale/tailscaled.sock funnel --https=443 off",
     "tailscale:funnel:status": "tailscale --socket=/opt/homebrew/var/run/tailscale/tailscaled.sock funnel status",
