@@ -1,4 +1,4 @@
-import { Archive, Database, Download, KeyRound, RefreshCw, RotateCcw, Settings, ShieldCheck } from "lucide-react"
+import { Archive, Database, Download, KeyRound, RefreshCw, RotateCcw, Settings, ShieldCheck, Trash2 } from "lucide-react"
 import * as React from "react"
 
 import { AutoSyncStatus } from "@/components/app/AutoSyncStatus"
@@ -32,6 +32,9 @@ export function SettingsDialog({
   onAuthConnect,
   onAuthRefresh,
   onAuthDisconnect,
+  onAuthAccountConnect,
+  onAuthAccountRefresh,
+  onAuthAccountRemove,
   onCreateBackup,
   onRestoreBackup,
 }: {
@@ -52,6 +55,9 @@ export function SettingsDialog({
   onAuthConnect: () => void
   onAuthRefresh: () => void
   onAuthDisconnect: () => void
+  onAuthAccountConnect: (email: string) => void
+  onAuthAccountRefresh: (email: string) => void
+  onAuthAccountRemove: (email: string) => void
   onCreateBackup: () => void
   onRestoreBackup: () => void
 }) {
@@ -61,6 +67,9 @@ export function SettingsDialog({
   const authMessage = authBrowser?.message || (hasAuthorization ? "API token is active." : "Connect the auth browser to sync.")
   const connectLabel = hasAuthorization || authBrowser?.hasProfile || authBrowser?.lastError ? "Reconnect account" : "Connect account"
   const authorizationExpiry = config?.authorizationExpiresAt || authBrowser?.expiresAt
+  const accounts = config?.authAccounts || []
+  const [accountEmailDraft, setAccountEmailDraft] = React.useState("")
+  const trimmedAccountEmail = accountEmailDraft.trim()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -149,6 +158,63 @@ export function SettingsDialog({
                   Close browser
                 </Button>
               </ButtonGroup>
+              <div className="settingsPath">
+                <Label htmlFor="accountEmailInput">Add account</Label>
+                <div className="flex gap-2">
+                  <input
+                    id="accountEmailInput"
+                    className="min-h-9 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm"
+                    value={accountEmailDraft}
+                    type="email"
+                    placeholder="email@example.com"
+                    onChange={(event) => setAccountEmailDraft(event.currentTarget.value)}
+                  />
+                  <Button variant="outline" disabled={authActionPending || !trimmedAccountEmail} onClick={() => onAuthAccountConnect(trimmedAccountEmail)}>
+                    <KeyRound />
+                    Add
+                  </Button>
+                </div>
+              </div>
+              {accounts.length > 0 && (
+                <div className="grid gap-2">
+                  {accounts.map((account) => (
+                    <div key={account.email} className="settingsAccountStatus">
+                      <div className="min-w-0">
+                        <div className="settingsStatusHeading">
+                          <span className="truncate">{account.email}</span>
+                          <Badge variant={getAuthBadgeVariant(account.authBrowser.status, account.hasAuthorization, account.authBrowser.lastError)}>
+                            {account.authBrowser.status.replaceAll("-", " ")}
+                          </Badge>
+                        </div>
+                        <p>
+                          {account.authorizationExpiresAt ? `Token until ${formatTime(account.authorizationExpiresAt)}` : "No active token"}
+                          {account.authBrowser.lastRefreshAt ? ` · refreshed ${formatTime(account.authBrowser.lastRefreshAt)}` : ""}
+                        </p>
+                        {account.authBrowser.lastError && <p className="text-red-300">{account.authBrowser.lastError}</p>}
+                      </div>
+                      <ButtonGroup>
+                        <Button variant="outline" size="icon" disabled={authActionPending} onClick={() => onAuthAccountConnect(account.email)}>
+                          <KeyRound />
+                          <span className="sr-only">Reconnect account</span>
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          disabled={authActionPending || !account.authBrowser.hasProfile}
+                          onClick={() => onAuthAccountRefresh(account.email)}
+                        >
+                          <RefreshCw />
+                          <span className="sr-only">Refresh token</span>
+                        </Button>
+                        <Button variant="outline" size="icon" disabled={authActionPending} onClick={() => onAuthAccountRemove(account.email)}>
+                          <Trash2 />
+                          <span className="sr-only">Remove account</span>
+                        </Button>
+                      </ButtonGroup>
+                    </div>
+                  ))}
+                </div>
+              )}
               {config?.mediaDir && (
                 <div className="settingsPath">
                   <Label>Media directory</Label>

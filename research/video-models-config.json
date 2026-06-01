@@ -1,0 +1,65 @@
+[
+  {
+    "id": "wan2.7-i2v",
+    "label": "Wan 2.7",
+    "dashscopeModelId": "wan2.7-i2v",
+    "host": "maas",
+    "protocol": "media",
+    "kind": "i2v",
+    "resolutions": ["720P", "1080P"],
+    "durations": [4, 8, 10, 15],
+    "tier": "pro",
+    "description": "Newest Wan — most cinematic motion and detail."
+  },
+  {
+    "id": "wan2.7-i2v-spicy",
+    "label": "Spicy",
+    "dashscopeModelId": "wan2.7-i2v-spicy",
+    "host": "maas",
+    "protocol": "media",
+    "kind": "i2v",
+    "resolutions": ["720P", "1080P"],
+    "durations": [4, 8, 10, 15],
+    "tier": "pro",
+    "description": "Wan 2.7 image-to-video tuned for explicit high-intensity motion."
+  },
+  {
+    "id": "wan2.6-i2v-flash",
+    "label": "Wan 2.6 Flash",
+    "dashscopeModelId": "wan2.6-i2v-flash",
+    "host": "intl",
+    "protocol": "img_url",
+    "kind": "i2v",
+    "audio": true,
+    "resolutions": ["720P", "1080P"],
+    "durations": [4, 8, 10, 15],
+    "tier": "standard",
+    "description": "Fast Wan with native audio."
+  },
+  {
+    "id": "wan2.2-i2v-plus",
+    "label": "Wan 2.2 Plus",
+    "dashscopeModelId": "wan2.2-i2v-plus",
+    "host": "maas",
+    "protocol": "img_url",
+    "kind": "i2v",
+    "fixedDuration": true,
+    "resolutions": ["1080P"],
+    "durations": [5],
+    "tier": "standard",
+    "description": "Reliable Wan 2.2 image-to-video (1080p, fixed ~5s clips)."
+  },
+  {
+    "id": "wan2.7-t2v",
+    "label": "Wan 2.7 Text→Video",
+    "dashscopeModelId": "wan2.7-t2v",
+    "host": "maas",
+    "protocol": "t2v",
+    "kind": "t2v",
+    "defaultRatio": "16:9",
+    "resolutions": ["720P", "1080P"],
+    "durations": [4, 8, 10, 15],
+    "tier": "pro",
+    "description": "Generate video from a prompt — no image needed."
+  }
+]

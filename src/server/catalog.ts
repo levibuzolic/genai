@@ -91,9 +91,12 @@ export async function downloadJob(job: GeneratePornJob): Promise<Partial<Catalog
 }
 
 export function toCatalogItem(job: GeneratePornJob, existing: Partial<CatalogItem> = {}): CatalogItem {
+  const lastPolledAt = job.last_polled_at || job.lastPolledAt || (existing.lastPolledAt as string | number | null | undefined) || (existing.last_polled_at as string | number | null | undefined) || null
+
   return {
     ...existing,
     id: job.id,
+    accountEmail: job.accountEmail ?? existing.accountEmail ?? null,
     userId: job.user_id,
     type: job.type,
     prompt: job.prompt || "",
@@ -101,13 +104,19 @@ export function toCatalogItem(job: GeneratePornJob, existing: Partial<CatalogIte
     status: job.status,
     outputUrl: job.output_url || null,
     inputUrl: job.input_url || null,
+    lastPolledAt,
+    modelId: job.modelId || job.model_id || null,
     duration: normalizeDurationSeconds(job.duration ?? existing.duration),
     createdAt: job.created_at || null,
     createdAtIso: job.created_at ? new Date(Number(job.created_at) * 1000).toISOString() : null,
+    timeToGenerateMs:
+      calculateTimeToGenerateMs(job.created_at, lastPolledAt),
     externalTaskId: job.external_task_id || null,
     shared: Boolean(job.shared),
     favorited: Boolean(job.favorited),
     error: job.error || null,
+    remoteDeletedAt: null,
+    remoteDeleteStatus: null,
     updatedAt: new Date().toISOString(),
   }
 }
@@ -123,6 +132,31 @@ function normalizeDurationSeconds(value: unknown): number | null {
 
   const duration = Number(value)
   return Number.isFinite(duration) && duration > 0 ? duration : null
+}
+
+function toEpochMs(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null
+  }
+
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return null
+  }
+
+  return numeric > 1e11 ? numeric : numeric * 1000
+}
+
+function calculateTimeToGenerateMs(createdAt: unknown, lastPolledAt: unknown, lastPolledAtAlias?: unknown): number | null {
+  const createdAtMs = toEpochMs(createdAt)
+  const lastPolledAtMs = toEpochMs(lastPolledAt) ?? toEpochMs(lastPolledAtAlias)
+
+  if (!createdAtMs || !lastPolledAtMs) {
+    return null
+  }
+
+  const deltaMs = lastPolledAtMs - createdAtMs
+  return deltaMs >= 0 ? Math.round(deltaMs) : null
 }
 
 export function isIncrementalBoundaryJob(job: GeneratePornJob | null | undefined): boolean {
@@ -306,6 +340,7 @@ export function buildFacets(items: CatalogItem[], deletedCount = 0): CatalogFace
 export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
   return {
     id: item.id,
+    accountEmail: item.accountEmail ?? null,
     userId: item.userId ?? null,
     type: item.type ?? null,
     prompt: item.prompt ?? null,
@@ -317,6 +352,8 @@ export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
     createdAt: item.createdAt ?? null,
     createdAtIso: item.createdAtIso ?? null,
     externalTaskId: item.externalTaskId ?? null,
+    modelId: item.modelId ?? item.model_id ?? null,
+    model_id: item.modelId ?? item.model_id ?? null,
     shared: item.shared ?? null,
     favorited: item.favorited ?? null,
     error: item.error ?? null,
@@ -329,6 +366,7 @@ export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
     contentType: item.contentType ?? null,
     downloadedAt: item.downloadedAt ?? null,
     downloadError: item.downloadError ?? null,
+    timeToGenerateMs: item.timeToGenerateMs ?? calculateTimeToGenerateMs(item.createdAt, item.lastPolledAt ?? item.last_polled_at),
     thumbnailFile: item.thumbnailFile ?? null,
     thumbnailGeneratedAt: item.thumbnailGeneratedAt ?? null,
     thumbnailError: item.thumbnailError ?? null,
@@ -362,7 +400,8 @@ export async function deleteCatalogItemRemote(
     throw httpError("Catalog item was not found.", 404)
   }
 
-  const remoteStatus = typeof item.remoteDeletedAt === "string" ? "previously-deleted" : (await deleteRemoteJob(id)).status
+  const remoteStatus =
+    typeof item.remoteDeletedAt === "string" ? "previously-deleted" : (await deleteRemoteJob(id, { accountEmail: item.accountEmail })).status
   const now = new Date().toISOString()
   let deletedLocalFiles: string[] = []
   let responseItem: PublicCatalogItem | null = null
@@ -414,7 +453,7 @@ export async function setCatalogItemFavoriteRemote(
     throw httpError("Catalog item was not found.", 404)
   }
 
-  await setRemoteJobFavorite(id, favorited)
+  await setRemoteJobFavorite(id, favorited, { accountEmail: item.accountEmail })
   item.favorited = favorited
   item.updatedAt = new Date().toISOString()
   catalog.updatedAt = item.updatedAt
@@ -818,6 +857,7 @@ export function isDownloadableCatalogItem(item: CatalogItem | null | undefined):
 export function jobFromCatalogItem(item: CatalogItem): GeneratePornJob {
   return {
     id: item.id,
+    ...(item.accountEmail ? { accountEmail: item.accountEmail } : {}),
     user_id: item.userId,
     type: item.type,
     prompt: item.prompt,

@@ -10,6 +10,7 @@ export const CreateApiResponseSchema = z.object({ job_id: optionalNullableString
 export const CreateSubmissionRequestSchema = z
   .object({
     modeId: optionalStringSchema,
+    accountEmail: optionalNullableStringSchema,
     params: z.unknown().optional(),
     source: z.unknown().optional(),
     templateId: optionalStringSchema,

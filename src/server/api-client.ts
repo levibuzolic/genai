@@ -1,4 +1,4 @@
-import { getActiveAuthorization } from "./auth-state.ts"
+import { getActiveAuthorization, getAuthBrowserForAccount, normalizeAccountEmail } from "./auth-state.ts"
 import { API_BASE_URL, AUTH_SETUP_MESSAGE } from "./config.ts"
 import { parseApiHeaders, parseJobsPageResponse } from "./schemas.ts"
 import type { ApiHeaders, GeneratePornJob } from "./types.ts"
@@ -11,14 +11,18 @@ export type FavoriteRemoteJobResult = {
   favorited: boolean
 }
 
-export async function fetchJobsPage(page: number): Promise<GeneratePornJob[]> {
+const API_AUTH_FAILURE_STATUSES = new Set([401, 403])
+
+export type ApiAccountOptions = {
+  accountEmail?: string | null | undefined
+}
+
+export async function fetchJobsPage(page: number, options: ApiAccountOptions = {}): Promise<GeneratePornJob[]> {
   const url = new URL(API_BASE_URL)
   url.searchParams.set("type", "all")
   url.searchParams.set("page", String(page))
 
-  const response = await fetch(url, {
-    headers: buildApiHeaders(),
-  })
+  const response = await fetchGeneratePornApi(url, {}, options)
 
   if (response.status === 401 || response.status === 403) {
     throw new Error(`API returned ${response.status}. ${AUTH_SETUP_MESSAGE}`)
@@ -35,14 +39,14 @@ export async function fetchJobsPage(page: number): Promise<GeneratePornJob[]> {
     throw new Error(`Unexpected API response on page ${page}: missing results array`)
   }
 
-  return jobs
+  const accountEmail = normalizeNullableAccountEmail(options.accountEmail)
+  return accountEmail ? jobs.map((job) => ({ ...job, accountEmail })) : jobs
 }
 
-export async function deleteRemoteJob(jobId: string): Promise<DeleteRemoteJobResult> {
-  const response = await fetch(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}`, {
+export async function deleteRemoteJob(jobId: string, options: ApiAccountOptions = {}): Promise<DeleteRemoteJobResult> {
+  const response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}`, {
     method: "DELETE",
-    headers: buildApiHeaders(),
-  })
+  }, options)
 
   if (response.status === 401 || response.status === 403) {
     throw new Error(`API returned ${response.status}. ${AUTH_SETUP_MESSAGE}`)
@@ -59,11 +63,14 @@ export async function deleteRemoteJob(jobId: string): Promise<DeleteRemoteJobRes
   return { status: "deleted" }
 }
 
-export async function setRemoteJobFavorite(jobId: string, favorited: boolean): Promise<FavoriteRemoteJobResult> {
-  const response = await fetch(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}/favorite`, {
+export async function setRemoteJobFavorite(
+  jobId: string,
+  favorited: boolean,
+  options: ApiAccountOptions = {},
+): Promise<FavoriteRemoteJobResult> {
+  const response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}/favorite`, {
     method: favorited ? "POST" : "DELETE",
-    headers: buildApiHeaders(),
-  })
+  }, options)
 
   if (response.status === 401 || response.status === 403) {
     throw new Error(`API returned ${response.status}. ${AUTH_SETUP_MESSAGE}`)
@@ -76,7 +83,22 @@ export async function setRemoteJobFavorite(jobId: string, favorited: boolean): P
   return { favorited }
 }
 
-export function buildApiHeaders(): ApiHeaders {
+export async function fetchGeneratePornApi(input: string | URL, init: RequestInit = {}, options: ApiAccountOptions = {}): Promise<Response> {
+  const response = await fetch(input, buildApiRequestInit(init, options))
+
+  if (!isApiAuthFailure(response.status)) {
+    return response
+  }
+
+  const refreshed = await refreshApiAuthorization(options)
+  if (!refreshed) {
+    return response
+  }
+
+  return fetch(input, buildApiRequestInit(init, options))
+}
+
+export function buildApiHeaders(options: ApiAccountOptions = {}): ApiHeaders {
   const headers: ApiHeaders = {
     accept: "application/json",
     "content-type": "application/json",
@@ -85,11 +107,13 @@ export function buildApiHeaders(): ApiHeaders {
     "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
   }
 
-  if (process.env["GENERATEPORN_COOKIE"]) {
+  const accountEmail = normalizeNullableAccountEmail(options.accountEmail)
+
+  if (!accountEmail && process.env["GENERATEPORN_COOKIE"]) {
     headers["cookie"] = process.env["GENERATEPORN_COOKIE"]
   }
 
-  const authorization = getActiveAuthorization()
+  const authorization = getActiveAuthorization(accountEmail)
   if (authorization) {
     headers["authorization"] = authorization
   }
@@ -104,6 +128,33 @@ export function buildApiHeaders(): ApiHeaders {
 
 export function getJobsApiBaseUrl(): string {
   return String(API_BASE_URL).replace(/\/+$/, "")
+}
+
+function buildApiRequestInit(init: RequestInit, options: ApiAccountOptions): RequestInit {
+  const headers = new Headers(buildApiHeaders(options))
+
+  if (init.headers) {
+    new Headers(init.headers).forEach((value, key) => headers.set(key, value))
+  }
+
+  return {
+    ...init,
+    headers,
+  }
+}
+
+function isApiAuthFailure(status: number): boolean {
+  return API_AUTH_FAILURE_STATUSES.has(status)
+}
+
+async function refreshApiAuthorization(options: ApiAccountOptions): Promise<boolean> {
+  const accountEmail = normalizeNullableAccountEmail(options.accountEmail)
+  const status = await getAuthBrowserForAccount(accountEmail).refreshHeadless()
+  return status.status === "connected" && Boolean(getActiveAuthorization(accountEmail))
+}
+
+function normalizeNullableAccountEmail(value: unknown): string | null {
+  return value === null || value === undefined || value === "" ? null : normalizeAccountEmail(value)
 }
 
 async function readApiError(response: Response): Promise<string | null> {

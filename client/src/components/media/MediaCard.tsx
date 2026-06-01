@@ -1,9 +1,9 @@
-import { Clapperboard, Copy, FileDown, FileQuestion, Heart, ImageIcon, Info, Loader2, Sparkles, Trash2, WandSparkles } from "lucide-react"
+import { AlertTriangle, Clapperboard, Copy, FileDown, FileQuestion, Heart, ImageIcon, Info, Loader2, Sparkles, Trash2, WandSparkles } from "lucide-react"
 import * as React from "react"
 
 import { Button } from "@/components/ui/button"
 import { formatDuration, formatShortMonthDay } from "@/lib/format"
-import { isImageItem, isPendingMediaItem, isVideoItem, mediaUrlForItem } from "@/lib/media"
+import { isFailedMediaItem, isImageItem, isPendingMediaItem, isVideoItem, mediaUrlForItem } from "@/lib/media"
 import { cn } from "@/lib/utils"
 import type { CatalogItem, ViewMode } from "@/types/domain"
 
@@ -36,6 +36,7 @@ export function MediaCard({
   const isVideo = isVideoItem(item)
   const isImage = isImageItem(item)
   const isPendingMedia = isPendingMediaItem(item)
+  const isFailed = isFailedMediaItem(item)
   const isDeleted = Boolean(item.remoteDeletedAt)
   const badge = mediaTypeBadge(item, isVideo, isImage)
   const previewLabel = isVideo ? "Open video details" : isImage ? "Open image details" : "Open media details"
@@ -45,12 +46,23 @@ export function MediaCard({
       <span className="sr-only">Deleted remotely</span>
     </span>
   ) : null
+  const failedBadge = isFailed ? (
+    <span className="failedMediaBadge" title="Generation failed">
+      <AlertTriangle aria-hidden="true" />
+      <span className="sr-only">Failed generation</span>
+    </span>
+  ) : null
 
   return (
     <article
-      className={cn("card media-card group", view === "list" && "is-list", isDeleted && "is-deleted")}
+      className={cn(
+        "card media-card group",
+        view === "list" && "is-list",
+        isDeleted && "is-deleted",
+        isFailed && "is-failed",
+      )}
       data-media={isVideo ? "video" : isImage ? "image" : "missing"}
-      data-media-state={isPendingMedia ? "loading" : mediaUrl ? "ready" : "missing"}
+      data-media-state={isFailed ? "failed" : isPendingMedia ? "loading" : mediaUrl ? "ready" : "missing"}
       data-remote-deleted={isDeleted ? "true" : undefined}
       data-media-loaded="true"
       onMouseEnter={() => setPreviewActive(true)}
@@ -76,7 +88,7 @@ export function MediaCard({
           </span>
           {deletedBadge}
         </div>
-      ) : isVideo && mediaUrl ? (
+      ) : isVideo && mediaUrl && !isFailed ? (
         <div className="preview videoPreview">
           <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
             {item.posterUrl ? (
@@ -104,7 +116,7 @@ export function MediaCard({
           <span className="durationBadge">{formatDuration(item.duration)}</span>
           {deletedBadge}
         </div>
-      ) : isImage && mediaUrl ? (
+      ) : isImage && mediaUrl && !isFailed ? (
         <div className="preview imagePreview">
           <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
             <img src={mediaUrl} alt={item.prompt || item.id} loading="lazy" decoding="async" />
@@ -116,6 +128,23 @@ export function MediaCard({
             <badge.Icon />
           </span>
           {deletedBadge}
+        </div>
+      ) : isFailed ? (
+        <div className="preview failedPreview">
+          <button className="mediaPreviewButton" type="button" onClick={onDetails} aria-label={previewLabel}>
+            <div className="failed-preview">
+              <AlertTriangle className="size-6" />
+              <span>{item.downloadError || "Generation failed"}</span>
+            </div>
+          </button>
+          <span className="previewOpenBadge" aria-hidden="true">
+            <Info className="size-4" />
+          </span>
+          <span className="mediaTypeBadge" title={badge.label} aria-label={badge.label}>
+            <badge.Icon />
+          </span>
+          {deletedBadge}
+          {failedBadge}
         </div>
       ) : (
         <div className="preview missingPreview">
@@ -139,6 +168,7 @@ export function MediaCard({
           {[
             formatShortMonthDay(item.createdAtIso),
             isPendingMedia ? "rendering" : "",
+            isFailed ? "failed" : "",
             item.createModeId ? "created here" : "",
             item.remoteDeletedAt ? "remote deleted" : "",
             item.localFile && !item.sha256 ? "unverified" : "",
@@ -154,16 +184,18 @@ export function MediaCard({
                 <Sparkles />
               </Button>
             )}
-            <Button
-              className={cn("favoriteButton", item.favorited && "is-favorited")}
-              size="icon-sm"
-              variant="outline"
-              onClick={onToggleFavorite}
-              title={item.favorited ? "Unfavorite" : "Favorite"}
-              aria-label={item.favorited ? "Unfavorite" : "Favorite"}
-            >
-              <Heart className={item.favorited ? "fill-current" : undefined} />
-            </Button>
+            {!isFailed && (
+              <Button
+                className={cn("favoriteButton", item.favorited && "is-favorited")}
+                size="icon-sm"
+                variant="outline"
+                onClick={onToggleFavorite}
+                title={item.favorited ? "Unfavorite" : "Favorite"}
+                aria-label={item.favorited ? "Unfavorite" : "Favorite"}
+              >
+                <Heart className={item.favorited ? "fill-current" : undefined} />
+              </Button>
+            )}
             <Button
               className="copyPromptButton"
               size="icon-sm"

@@ -36,8 +36,10 @@ export function useCreateStudio(onOpen?: () => void) {
   const [uploadMeta, setUploadMeta] = React.useState("No file selected.")
   const [sourceUrl, setSourceUrl] = React.useState("")
   const [modeId, setModeId] = React.useState("")
+  const [selectedAccountEmail, setSelectedAccountEmail] = React.useState("")
   const [prompt, setPrompt] = React.useState("")
   const [negativePrompt, setNegativePrompt] = React.useState("")
+  const [modelId, setModelId] = React.useState("")
   const [quality, setQuality] = React.useState("")
   const [status, setStatus] = React.useState("Choose a source and mode.")
   const [submitting, setSubmitting] = React.useState(false)
@@ -56,7 +58,13 @@ export function useCreateStudio(onOpen?: () => void) {
     [sourceItems, selectedSourceId],
   )
   const promptField = selectedMode?.fields?.find((field) => field.name === "prompt") as CreateField | undefined
+  const modelField = selectedMode?.fields?.find((field) => field.name === "modelId") as CreateField | undefined
   const qualityField = selectedMode?.fields?.find((field) => field.name === "quality") as CreateField | undefined
+  const availableQualityOptions = React.useMemo(() => {
+    const options = qualityField?.options || []
+    if (!modelField || !modelId) return options
+    return options.filter((option) => !option.modelId || option.modelId === modelId)
+  }, [modelField, modelId, qualityField])
 
   const loadModes = React.useCallback(async () => {
     const data = await fetchJson<{ modes: CreateMode[] }>("/api/create/modes")
@@ -79,16 +87,31 @@ export function useCreateStudio(onOpen?: () => void) {
 
   React.useEffect(() => {
     if (!modeId || !selectedMode) return
+    const firstModelOption = modelField?.options?.[0]
+    if (firstModelOption) {
+      setModelId((current) => {
+        if (current && modelField.options?.some((option) => option.value === current)) return current
+        return modelField.default || firstModelOption.value
+      })
+    } else {
+      setModelId("")
+    }
+  }, [modeId, modelField, selectedMode])
+
+  React.useEffect(() => {
+    if (!modeId || !selectedMode) return
     const firstQualityOption = qualityField?.options?.[0]
-    if (firstQualityOption) {
+    const firstAvailableQualityOption = availableQualityOptions[0] || firstQualityOption
+    if (firstAvailableQualityOption) {
       setQuality((current) => {
-        if (current && qualityField.options?.some((option) => option.value === current)) return current
-        return qualityField?.default || firstQualityOption.value
+        if (current && availableQualityOptions.some((option) => option.value === current)) return current
+        const defaultForModel = availableQualityOptions.find((option) => option.value === qualityField?.default)
+        return defaultForModel?.value || firstAvailableQualityOption.value
       })
     } else {
       setQuality("")
     }
-  }, [modeId, qualityField, selectedMode])
+  }, [availableQualityOptions, modeId, qualityField, selectedMode])
 
   const openCreator = React.useCallback(
     async function openCreator(
@@ -100,6 +123,7 @@ export function useCreateStudio(onOpen?: () => void) {
         modeId?: string | undefined
         params?: CreateParams | undefined
         templateId?: string | undefined
+        accountEmail?: string | null | undefined
       } = {},
     ) {
       onOpen?.()
@@ -108,11 +132,14 @@ export function useCreateStudio(onOpen?: () => void) {
       if (options.sourceKind) setSourceKind(options.sourceKind)
       if (options.prompt !== undefined) setPrompt(options.prompt)
       if (options.modeId) setModeId(options.modeId)
+      if (options.accountEmail) setSelectedAccountEmail(options.accountEmail)
       const promptParam = paramAsString(options.params?.["prompt"])
       const negativePromptParam = paramAsString(options.params?.["negativePrompt"] ?? options.params?.["negative_prompt"])
+      const modelParam = paramAsString(options.params?.["modelId"])
       const qualityParam = paramAsString(options.params?.["quality"])
       if (promptParam !== undefined) setPrompt(promptParam)
       if (negativePromptParam !== undefined) setNegativePrompt(negativePromptParam)
+      if (modelParam) setModelId(modelParam)
       if (qualityParam) setQuality(qualityParam)
       if (options.source?.kind === "url" && typeof options.source.url === "string") {
         setSourceKind("url")
@@ -126,6 +153,7 @@ export function useCreateStudio(onOpen?: () => void) {
       }
       const sourceItem = options.sourceItem
       if (sourceItem && isImageItem(sourceItem)) {
+        if (sourceItem.accountEmail) setSelectedAccountEmail(sourceItem.accountEmail)
         setSourceKind("catalog")
         setSourceItems((current) => {
           if (current.some((item) => item.id === sourceItem.id)) return current
@@ -203,6 +231,7 @@ export function useCreateStudio(onOpen?: () => void) {
     setStatus("Submitting creation job...")
     try {
       const request: CreateJobSubmitRequest = {
+        accountEmail: selectedAccountEmail || null,
         modeId,
         source: buildCreateSourcePayload(),
         params: buildCreateParamsPayload(),
@@ -252,9 +281,11 @@ export function useCreateStudio(onOpen?: () => void) {
     const promptParam = paramAsString(settings.params?.["prompt"])
     const negativePromptParam =
       paramAsString(settings.params?.["negativePrompt"] ?? settings.params?.["negative_prompt"]) ?? template.negativePrompt
+    const modelParam = paramAsString(settings.params?.["modelId"])
     const qualityParam = paramAsString(settings.params?.["quality"])
     if (promptParam !== undefined) setPrompt(promptParam)
     if (negativePromptParam !== undefined) setNegativePrompt(negativePromptParam)
+    if (modelParam !== undefined) setModelId(modelParam)
     if (qualityParam !== undefined) setQuality(qualityParam)
     setStatus(`Using template ${template.label}. Overrides apply only to this run.`)
   }
@@ -273,8 +304,9 @@ export function useCreateStudio(onOpen?: () => void) {
     const promptParam = paramAsString(settings.params["prompt"]) || ""
     const negativePromptParam = paramAsString(settings.params["negativePrompt"]) || ""
     const qualityParam = paramAsString(settings.params["quality"]) || "1080p-15"
+    const modelParam = paramAsString(settings.params["modelId"]) || modelId
     const imageParams: CreateParams = { prompt: promptParam }
-    const videoParams: CreateParams = { prompt: promptParam, quality: qualityParam }
+    const videoParams: CreateParams = { prompt: promptParam, quality: qualityParam, modelId: modelParam }
 
     if (negativePromptParam) {
       imageParams["negativePrompt"] = negativePromptParam
@@ -333,6 +365,7 @@ export function useCreateStudio(onOpen?: () => void) {
     const params: CreateParams = {}
     if (promptField) params["prompt"] = prompt.trim()
     if (promptField && negativePrompt.trim()) params["negativePrompt"] = negativePrompt.trim()
+    if (modelField) params["modelId"] = modelId
     if (qualityField) params["quality"] = quality
     return params
   }
@@ -357,6 +390,7 @@ export function useCreateStudio(onOpen?: () => void) {
     clearSource()
     setPrompt("")
     setNegativePrompt("")
+    setModelId("")
     setStatus("Choose a source and mode.")
   }
 
@@ -384,15 +418,20 @@ export function useCreateStudio(onOpen?: () => void) {
     setSourceUrl,
     modeId,
     setModeId,
+    selectedAccountEmail,
+    setSelectedAccountEmail,
     selectedMode,
     prompt,
     setPrompt,
     negativePrompt,
     setNegativePrompt,
     promptField,
+    modelId,
+    setModelId,
+    modelField,
     quality,
     setQuality,
-    qualityField,
+    qualityField: qualityField ? { ...qualityField, options: availableQualityOptions } : undefined,
     status,
     submitting,
     templateJobId,

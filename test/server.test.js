@@ -9,6 +9,7 @@ import { parseCreateApiResponse } from "../src/server/create-schemas.ts"
 import { parseGeneratePornJob } from "../src/server/schemas.ts"
 import { ensureVideoThumbnail, getThumbnailRelativePath, setThumbnailProcessRunnerForTests } from "../src/thumbnails.ts"
 import {
+  deferred,
   fakeBearerToken,
   importServer,
   jsonResponse,
@@ -63,8 +64,28 @@ test("server serves the app shell for client routes", async () => {
       assert.match(response.body.toString("utf8"), /<div id="root"><\/div>/)
     }
 
-    const missingAsset = await requestRaw(listener.port, "/assets/missing.js")
+    const shell = await requestRaw(listener.port, "/")
+    const assetPaths = Array.from(shell.body.toString("utf8").matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g), (match) => match[1])
+    assert.equal(assetPaths.length > 0, true)
+    for (const assetPath of assetPaths) {
+      const assetResponse = await requestRaw(listener.port, assetPath)
+      assert.equal(assetResponse.statusCode, 200)
+    }
+
+    const warnings = []
+    const originalWarn = console.warn
+    console.warn = (...args) => warnings.push(args.join(" "))
+    let missingAsset
+    try {
+      missingAsset = await requestRaw(listener.port, "/assets/missing.js")
+    } finally {
+      console.warn = originalWarn
+    }
     assert.equal(missingAsset.statusCode, 404)
+    assert.equal(
+      warnings.some((entry) => entry.includes("[http-404] static file not found") && entry.includes("/assets/missing.js")),
+      true,
+    )
   } finally {
     await listener.close()
   }
@@ -354,6 +375,95 @@ test("incremental sync scans past previous boundary for older pending completion
   }
 })
 
+test("sync downloads encountered media before full API coverage finishes", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-stream-sync-"))
+  const newId = "53535353-5353-4353-8353-535353535353"
+  const deletedId = "54545454-5454-4454-8454-545454545454"
+  const createdAt = 1779769825
+  const createdDate = new Date(createdAt * 1000).toISOString().slice(0, 10)
+  await mkdir(path.join(mediaDir, "2026-05-26"), { recursive: true })
+  await writeFile(path.join(mediaDir, `2026-05-26/2026-05-26_edit_${deletedId}.jpg`), PNG_BYTES)
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id: deletedId,
+        type: "edit",
+        status: "done",
+        outputUrl: "https://assets.example/deleted.png",
+        localFile: `2026-05-26/2026-05-26_edit_${deletedId}.jpg`,
+        createdAt,
+      },
+    ],
+    downloadedJobIds: [deletedId],
+    lastSeenJobId: deletedId,
+  })
+
+  const pageTwo = deferred()
+  const pageTwoRequested = deferred()
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url) => {
+    const href = String(url)
+
+    if (href.includes("/api/jobs") && href.includes("page=1")) {
+      return jsonResponse({
+        results: [
+          {
+            id: newId,
+            user_id: "user_test",
+            type: "edit",
+            prompt: "streamed prompt",
+            status: "done",
+            output_url: "https://assets.example/streamed.png",
+            created_at: createdAt,
+          },
+        ],
+      })
+    }
+
+    if (href.includes("/api/jobs") && href.includes("page=2")) {
+      pageTwoRequested.resolve()
+      return pageTwo.promise
+    }
+
+    if (href === "https://assets.example/streamed.png") {
+      return new Response(PNG_BYTES, {
+        status: 200,
+        headers: {
+          "content-type": "image/png",
+        },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const syncPromise = server.startSync({ incremental: true })
+
+    await pageTwoRequested.promise
+    const midSyncCatalog = await readCatalog(mediaDir)
+    const streamed = midSyncCatalog.items.find((entry) => entry.id === newId)
+    const notYetDeleted = midSyncCatalog.items.find((entry) => entry.id === deletedId)
+
+    assert.equal(streamed.localFile, `${createdDate}/${createdDate}_edit_${newId}.jpg`)
+    assert.equal(existsSync(path.join(mediaDir, streamed.localFile)), true)
+    assert.equal(notYetDeleted.remoteDeletedAt || null, null)
+
+    pageTwo.resolve(jsonResponse({ results: [] }))
+    await syncPromise
+
+    const finishedCatalog = await readCatalog(mediaDir)
+    const deleted = finishedCatalog.items.find((entry) => entry.id === deletedId)
+    assert.equal(deleted.remoteDeleteStatus, "deleted")
+    assert.equal(finishedCatalog.lastRun.remoteDeleted, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test("incremental sync runs full coverage when the last full scan is older than an hour", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-hourly-full-"))
   const presentId = "51515151-5151-4151-8151-515151515151"
@@ -428,7 +538,7 @@ test("incremental sync runs full coverage when the last full scan is older than 
     const deleted = catalog.items.find((entry) => entry.id === deletedId)
 
     assert.equal(server.syncState.currentPage, 2)
-    assert.equal(present.remoteDeletedAt, undefined)
+    assert.equal(present.remoteDeletedAt || null, null)
     assert.equal(deleted.remoteDeleteStatus, "deleted")
     assert.equal(typeof deleted.remoteDeletedAt, "string")
     assert.equal(catalog.lastRun.fullCoverageScan, true)

@@ -15,6 +15,7 @@ export type AppRouteResponse<T> = AppDomainResponse<T>
 
 export type PublicCatalogItem = {
   id: string
+  accountEmail?: string | null
   userId?: string | null
   type?: string | null
   prompt?: string | null
@@ -23,9 +24,12 @@ export type PublicCatalogItem = {
   outputUrl?: string | null
   inputUrl?: string | null
   duration?: number | null
+  timeToGenerateMs?: number | null
   createdAt?: string | number | null
   createdAtIso?: string | null
   externalTaskId?: string | null
+  modelId?: string | null
+  model_id?: string | null
   shared?: boolean | null
   favorited?: boolean | null
   error?: string | null
@@ -142,6 +146,7 @@ export type ImportCreateTemplateResponse = OkResponse & {
 }
 
 export type CreateJobSubmitRequest = {
+  accountEmail?: string | null
   modeId?: string
   params?: CreateParams
   source?: CreateSource | null
@@ -150,6 +155,7 @@ export type CreateJobSubmitRequest = {
 
 export type CreateJobSubmitResponse = OkResponse & {
   jobId: string
+  accountEmail?: string | null
   modeId: string
   modeLabel: string
   pollMs: number
@@ -160,6 +166,7 @@ export type CreateJobSubmitResponse = OkResponse & {
 
 export type PublicCreateJob = {
   id: string
+  accountEmail?: string | null
   type: string | null
   inputUrl: string | null
   prompt: string
@@ -168,6 +175,7 @@ export type PublicCreateJob = {
   duration: string | number | null
   seed: string | number | null
   externalTaskId: string | null
+  modelId: string | null
   outputUrl: string | null
   status: string | null
   error: string | null
@@ -186,6 +194,7 @@ export type DownloadCreateJobResponse = OkResponse & {
 }
 
 export type PublicCreation = Omit<CreationJob, "requestBody" | "source" | "request" | "response" | "job" | "workflow"> & {
+  accountEmail: string | null
   source: CreateSource | null
   active: boolean
   request?: Record<string, unknown> | null

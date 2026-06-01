@@ -35,7 +35,7 @@ Known job creation endpoints:
 Known source forms:
 
 - Edit upload: `image_base64: "data:image/...;base64,..."`
-- Edit URL/custom image URL: `input_url: "https://..."`, `prompt`, and `seed: null`
+- Edit URL/custom image URL: `input_url: "https://..."` and `prompt`
 - Custom video upload: `image_base64: "data:image/...;base64,..."`, `prompt`, `resolution`, `duration`, and `seed: null` per bundle inspection
 - Template video upload: supported; treat uploaded data URLs with the same image upload policy as Custom Video rather than copying the earlier failed `input_url` data-URL request shape
 - Video URL/custom video URL: `input_url: "https://..."`, `prompt`, `resolution`, `duration`, and `seed: null`
@@ -43,18 +43,34 @@ Known source forms:
 
 Known mode fields:
 
-- Custom Image/Edit: `prompt`, optional `seed` currently sent as `null`
+- Custom Image/Edit: `prompt` plus exactly one source field; the 2026-06-01 HAR shows no `seed`, `modelId`, or aspect-ratio field for edit jobs
 - Nudify preset: edit endpoint with a fixed prompt
 - Blowjob video template: fixed `prompt`, fixed `negative_prompt`, `resolution: "720p"`, `duration: 4`
-- Custom Video: user `prompt`, selected `resolution`, selected `duration`, optional `seed` currently sent as `null`
+- Custom Video (I2V): user `prompt` + image source + `modelId` (new in 2026-05), selected `resolution`/`duration` (model-dependent subsets), optional `seed`
+- New pure Text-to-Video (T2V): `modelId` (e.g. "wan2.7-t2v") + `prompt` only (no image), resolution, duration, seed. No source picker.
 - Poll result: `id`, `type`, `input_url`, `prompt`, `negative_prompt`, `resolution`, `duration`, `seed`, `external_task_id`, `output_url`, `status`, `coin_cost`, `error`
+- Fresh edit poll responses also include `model_id: "qwen-image-2.0-pro"` and may use `https://generations.generateporn.ai/generations/{job_id}.png` for image outputs.
 
-Captured custom video quality mapping:
+Captured custom video quality mapping (pre-2026-05-30 models):
 
 - `720p · 4s` -> `resolution: "720p"`, `duration: 4`
 - `720p · 8s` -> `resolution: "720p"`, `duration: 8`
 - `1080p · 10s` -> `resolution: "1080p"`, `duration: 10`
 - `1080p · 15s` -> `resolution: "1080p"`, `duration: 15`
+
+**2026-05-30/31 update**: The platform introduced explicit multi-model video generation with an authoritative client-side config (discovered in the JS bundle in `new-video-models-generate-initial-page-load-2.har`). `spicy-mode.har` later confirmed the additional `wan2.7-i2v-spicy` I2V model.
+
+See the full model definitions and precise supported (resolution × duration) matrix in:
+- `research/video-models-config.json` (clean reference)
+- `research/generateporn-api-notes.md` → "Authoritative Video Model Configuration (extracted from JS bundle)" section
+
+Key models:
+- I2V: `wan2.7-i2v`, `wan2.7-i2v-spicy`, `wan2.6-i2v-flash` (full 720p/1080p + 4/8/10/15s), `wan2.2-i2v-plus` (1080p only, fixed 5s)
+- **Pure T2V (no image)**: `wan2.7-t2v` (full range, `protocol: "t2v"`)
+
+The local creation system should model these exactly (including `protocol`, `fixedDuration`, `audio` flags, and `tier`).
+
+Job responses now echo `model_id`. See full details in `research/generateporn-api-notes.md` ("New Video Models" section). The local creation system needs per-model quality/duration option lists and a dedicated source-less T2V mode.
 
 Captured behavior:
 
@@ -146,7 +162,7 @@ Other source examples:
 The server maps that normalized request to the live API shape:
 
 - edit upload/catalog-file fallback: `{ "image_base64": "...", "prompt": "..." }`
-- edit URL/catalog-output URL: `{ "input_url": "...", "prompt": "...", "seed": null }`
+- edit URL/catalog-output URL: `{ "input_url": "...", "prompt": "..." }`
 - custom video upload/catalog-file fallback: `{ "image_base64": "...", "prompt": "...", "resolution": "...", "duration": 4, "seed": null }`
 - custom video URL/catalog-output URL: `{ "input_url": "...", "prompt": "...", "resolution": "...", "duration": 4, "seed": null }`
 - video template upload/catalog-file fallback: `{ "image_base64": "...", "prompt": "...", "negative_prompt": "...", "resolution": "...", "duration": 4 }`
@@ -186,7 +202,7 @@ Represent every creation feature as a mode definition. The mode registry should 
 
 Suggested built-in mode entries:
 
-- `custom-image`: endpoint `edit`, editable prompt, URL/data source, sends `seed: null` for URL sources
+- `custom-image`: endpoint `edit`, editable prompt, URL/data source, sends no `seed`
 - `nudify`: endpoint `edit`, fixed prompt `Remove all clothing, fully nude, keep face and pose unchanged`
 - `custom-video`: endpoint `video`, editable prompt, quality select with the four captured resolution/duration labels, sends `seed: null`
 - `blowjob-video`: endpoint `video`, fixed template prompt, fixed negative prompt, `720p`, `4`
@@ -240,7 +256,7 @@ Then shape by endpoint and source value:
 - `custom-video` with remote URL: send `input_url`.
 - `template-video` with data URL: send `image_base64`.
 - `template-video` with remote URL: send `input_url`.
-- Include `seed: null` for custom image and custom video parity with the captured app.
+- Include `seed: null` for custom video and text-to-video parity with the captured app. Do not include `seed` for edit-image jobs.
 - Include `negative_prompt` only for modes that captured one; custom video omitted it and polling returned `negative_prompt: null`.
 
 The failed Blowjob upload captures should not be copied for our implementation. They sent uploaded data URLs under `input_url`; the app should use `image_base64` for uploaded files and `input_url` for remote URLs across both custom video and template video modes.
@@ -285,7 +301,7 @@ That lineage would make it possible to filter derivative work, continue edit cha
 - `Nudify First` on video templates was visible in the captured UI but not submitted. Keep it disabled or omit it until there is a request body for that option.
 - Failure polling shape for jobs that return an ID and later fail is still not represented; captured failures were submit-time `500 {"error":"submission_failed"}` with no job ID.
 - `priority`, `shared`, and `favorited` appear in poll/history responses; there is no captured evidence that they are accepted on creation.
-- `seed` is sent as `null` for custom image/video, but no non-null seed capture exists yet. The app can include a seed field later if we intentionally test it.
+- `seed` is sent as `null` for custom video and text-to-video, but no non-null seed capture exists yet. Edit-image jobs should omit `seed`.
 - Custom Video upload with `image_base64` is inferred from bundle inspection rather than a live HAR. It is still the right implementation shape to use unless a later capture disproves it.
 - Template prompts need a private/local source of truth. Use history jobs by known ID to seed them, then store the resulting templates in local config.
 

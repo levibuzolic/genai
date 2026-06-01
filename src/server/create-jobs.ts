@@ -9,8 +9,8 @@ import type {
   DuplicateCreationResponse,
   RefreshCreationsResponse,
 } from "../types/routes.ts"
-import { buildApiHeaders, fetchJobsPage, getJobsApiBaseUrl } from "./api-client.ts"
-import { hasApiAuth } from "./auth-state.ts"
+import { fetchGeneratePornApi, fetchJobsPage, getJobsApiBaseUrl } from "./api-client.ts"
+import { getAuthBrowserForAccount, getSyncAccountEmails, hasApiAuth, normalizeAccountEmail } from "./auth-state.ts"
 import {
   addCreationEvent,
   findCreationJob,
@@ -46,7 +46,7 @@ async function createWorkflowJob(
     mode: CreateMode
     steps: TemplateSettings[]
   },
-  { attemptId, requestStartedAt }: { attemptId: string; requestStartedAt: string },
+  { accountEmail, attemptId, requestStartedAt }: { accountEmail: string | null; attemptId: string; requestStartedAt: string },
 ): Promise<CreateJobSubmitResponse> {
   const source = await resolveCreateSource(requireCreateSource(sourceRequest))
   const firstStep = steps[0]
@@ -70,6 +70,7 @@ async function createWorkflowJob(
   }
   const baseRecord = {
     id: attemptId,
+    accountEmail,
     status: "submitted",
     modeId: mode.id,
     modeLabel: mode.label,
@@ -95,11 +96,10 @@ async function createWorkflowJob(
   let body: Record<string, unknown>
   let apiResponse: ReturnType<typeof parseCreateApiResponse>
   try {
-    response = await fetch(`${getJobsApiBaseUrl()}/${firstMode.endpoint}`, {
+    response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${firstMode.endpoint}`, {
       method: "POST",
-      headers: buildApiHeaders(),
       body: JSON.stringify(liveRequest.body),
-    })
+    }, { accountEmail })
     apiResponse = parseCreateApiResponse(await readJsonObject(response))
     body = apiResponse.body
   } catch (error) {
@@ -162,6 +162,7 @@ async function createWorkflowJob(
   return {
     ok: true,
     jobId,
+    accountEmail,
     modeId: workflowCreation.modeId,
     modeLabel: mode.label,
     source: source.publicSource,
@@ -174,10 +175,9 @@ async function createWorkflowJob(
 export async function createMediaJob(requestBody: Record<string, unknown>): Promise<CreateJobSubmitResponse> {
   const attemptId = `local-${randomUUID()}`
   const requestStartedAt = new Date().toISOString()
+  const accountEmail = optionalAccountEmail(requestBody["accountEmail"])
 
-  if (!hasApiAuth()) {
-    throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
-  }
+  await ensureAccountApiAuth(accountEmail)
 
   const submission = await prepareCreateSubmission(requestBody)
   const { mode, sourceRequest, params, template } = submission
@@ -199,6 +199,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
         steps: workflowSteps,
       },
       {
+        accountEmail,
         attemptId,
         requestStartedAt,
       },
@@ -210,6 +211,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   const url = `${getJobsApiBaseUrl()}/${mode.endpoint}`
   const baseRecord = {
     id: attemptId,
+    accountEmail,
     status: "submitted",
     modeId: mode.id,
     modeLabel: mode.label,
@@ -234,11 +236,10 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   let body: Record<string, unknown>
   let apiResponse: ReturnType<typeof parseCreateApiResponse>
   try {
-    response = await fetch(url, {
+    response = await fetchGeneratePornApi(url, {
       method: "POST",
-      headers: buildApiHeaders(),
       body: JSON.stringify(liveRequest.body),
-    })
+    }, { accountEmail })
     apiResponse = parseCreateApiResponse(await readJsonObject(response))
     body = apiResponse.body
   } catch (error) {
@@ -322,6 +323,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   return {
     ok: true,
     jobId,
+    accountEmail,
     modeId: mode.id,
     modeLabel: mode.label,
     source: source?.publicSource || {},
@@ -349,6 +351,7 @@ function createWorkflowSteps(modeId: string, params: CreateParams, templateWorkf
           ...videoStep?.params,
           prompt: String(params["prompt"] || videoStep?.params["prompt"] || ""),
           quality: String(params["quality"] || videoStep?.params["quality"] || ""),
+          modelId: String(params["modelId"] || videoStep?.params["modelId"] || ""),
         },
       },
     ]
@@ -368,6 +371,7 @@ function createWorkflowSteps(modeId: string, params: CreateParams, templateWorkf
           ...videoStep?.params,
           prompt: String(params["prompt"] || videoStep?.params["prompt"] || ""),
           quality: String(params["quality"] || videoStep?.params["quality"] || ""),
+          modelId: String(params["modelId"] || videoStep?.params["modelId"] || ""),
         },
       },
     ]
@@ -392,7 +396,7 @@ export async function pollCreateJob(jobId: string): Promise<CreateJobPollRespons
     return pollCreateWorkflowJob({ ...existing, workflow: existing.workflow })
   }
 
-  const job = await fetchCreateJob(jobId)
+  const job = await fetchCreateJob(jobId, { accountEmail: existing?.accountEmail || null })
   const creation = saveCreationFromJob(job, {
     existing,
     eventMessage: `Job ${job.status || "updated"}.`,
@@ -411,7 +415,7 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
     throw new Error("Workflow has no active job.")
   }
 
-  const job = await fetchCreateJob(workflow.activeJobId)
+  const job = await fetchCreateJob(workflow.activeJobId, { accountEmail: creation.accountEmail })
   const publicJob = toPublicCreateJob(job)
   const now = new Date().toISOString()
   const isLastStep = workflow.currentStep >= workflow.steps.length - 1
@@ -445,11 +449,10 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
         ...workflow.overrides,
       },
     )
-    const response = await fetch(`${getJobsApiBaseUrl()}/${nextMode.endpoint}`, {
+    const response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${nextMode.endpoint}`, {
       method: "POST",
-      headers: buildApiHeaders(),
       body: JSON.stringify(liveRequest.body),
-    })
+    }, { accountEmail: creation.accountEmail })
     const { body, error: responseError, jobId } = parseCreateApiResponse(await readJsonObject(response))
 
     if (!response.ok || !jobId) {
@@ -566,7 +569,7 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
 export async function downloadCreateJob(jobId: string): Promise<DownloadCreateJobResponse> {
   const createState = findCreationJob(jobId)
   const activeJobId = createState?.workflow?.activeJobId || jobId
-  const job = await fetchCreateJob(activeJobId)
+  const job = await fetchCreateJob(activeJobId, { accountEmail: createState?.accountEmail || null })
 
   if (job.status !== "done" || !job.output_url) {
     throw new Error("Creation job is not ready to download.")
@@ -579,6 +582,7 @@ export async function downloadCreateJob(jobId: string): Promise<DownloadCreateJo
   const nextItem = toCatalogItem(job, {
     ...existing,
     ...downloaded,
+    accountEmail: createState?.accountEmail || job.accountEmail || existing?.accountEmail || null,
     downloadError: null,
     createModeId: creationState?.modeId || existing?.createModeId || null,
     templateId: creationState?.templateId || existing?.templateId || null,
@@ -614,7 +618,7 @@ export async function getCreations(searchParams = new URLSearchParams()): Promis
   const status = searchParams.get("status") || "all"
   const refresh = searchParams.get("refresh") === "true"
 
-  if (refresh && hasApiAuth()) {
+  if (refresh && getSyncAccountEmails().length > 0) {
     await refreshActiveCreations()
   }
 
@@ -654,6 +658,7 @@ export async function duplicateCreation(id: string, options: Record<string, unkn
   const source = includeSource ? getReusableCreationSource(creation.source) : null
   const draft = {
     id: `draft-${randomUUID()}`,
+    accountEmail: creation.accountEmail,
     status: "draft",
     modeId: creation.modeId,
     modeLabel: creation.modeLabel,
@@ -688,28 +693,32 @@ export async function refreshCreations({
 }: {
   pageLimit?: number
 } = {}): Promise<RefreshCreationsResponse> {
-  if (!hasApiAuth()) {
+  const syncAccounts = getSyncAccountEmails()
+  if (syncAccounts.length === 0) {
     throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
   }
 
   const active = await refreshActiveCreations()
   let imported = 0
 
-  for (let page = 1; page <= pageLimit; page += 1) {
-    const jobs = await fetchJobsPage(page)
+  for (const accountEmail of syncAccounts) {
+    for (let page = 1; page <= pageLimit; page += 1) {
+      const jobs = await fetchJobsPage(page, { accountEmail })
 
-    if (jobs.length === 0) {
-      break
-    }
+      if (jobs.length === 0) {
+        break
+      }
 
-    for (const job of jobs) {
-      const existing = findCreationJob(job.id)
-      saveCreationFromJob(job, {
-        existing,
-        eventMessage: existing ? `History refresh saw ${job.status}.` : "Imported from upstream history.",
-      })
-      if (!existing) {
-        imported += 1
+      for (const job of jobs) {
+        const existing = findCreationJob(job.id)
+        saveCreationFromJob(job, {
+          existing,
+          accountEmail,
+          eventMessage: existing ? `History refresh saw ${job.status}.` : "Imported from upstream history.",
+        })
+        if (!existing) {
+          imported += 1
+        }
       }
     }
   }
@@ -733,7 +742,7 @@ async function refreshActiveCreations(): Promise<{ refreshed: number; errors: { 
 
   for (const row of activeRows) {
     try {
-      const job = await fetchCreateJob(row.jobId || "")
+      const job = await fetchCreateJob(row.jobId || "", { accountEmail: row.accountEmail })
       saveCreationFromJob(job, {
         existing: row,
         eventMessage: `Job ${job.status || "updated"}.`,
@@ -753,14 +762,10 @@ async function refreshActiveCreations(): Promise<{ refreshed: number; errors: { 
   }
 }
 
-export async function fetchCreateJob(jobId: string): Promise<GeneratePornJob> {
-  if (!hasApiAuth()) {
-    throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
-  }
+export async function fetchCreateJob(jobId: string, { accountEmail = null }: { accountEmail?: string | null } = {}): Promise<GeneratePornJob> {
+  await ensureAccountApiAuth(accountEmail)
 
-  const response = await fetch(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}`, {
-    headers: buildApiHeaders(),
-  })
+  const response = await fetchGeneratePornApi(`${getJobsApiBaseUrl()}/${encodeURIComponent(jobId)}`, {}, { accountEmail })
   const { body, error } = parseCreateApiResponse(await readJsonObject(response))
 
   if (!response.ok) {
@@ -772,12 +777,12 @@ export async function fetchCreateJob(jobId: string): Promise<GeneratePornJob> {
     throw new Error("Job response did not include an id.")
   }
 
-  return job
+  return accountEmail ? { ...job, accountEmail } : job
 }
 
 export function saveCreationFromJob(
   job: GeneratePornJob,
-  options: { existing?: CreationJob | null; downloadedItemId?: string | null; eventMessage?: string } = {},
+  options: { existing?: CreationJob | null; accountEmail?: string | null; downloadedItemId?: string | null; eventMessage?: string } = {},
 ): CreationJob {
   const existing = options.existing || findCreationJob(job.id)
   const publicJob = toPublicCreateJob(job)
@@ -786,6 +791,7 @@ export function saveCreationFromJob(
   const creation: CreationJob = {
     ...existing,
     id: existing?.id || job.id,
+    accountEmail: existing?.accountEmail || options.accountEmail || job.accountEmail || null,
     jobId: job.id,
     status,
     modeId: existing?.modeId || inferCreateModeId(job),
@@ -823,10 +829,16 @@ export function saveCreationFromJob(
 }
 
 function inferCreateModeId(job: GeneratePornJob): string {
+  const modelId = job.modelId || job.model_id || ""
+  if (job.type === "video" && modelId.endsWith("-t2v")) return "text-to-video"
+
   return job.type === "video" ? "custom-video" : "custom-image"
 }
 
 function inferCreateModeLabel(job: GeneratePornJob): string {
+  const modelId = job.modelId || job.model_id || ""
+  if (job.type === "video" && modelId.endsWith("-t2v")) return "Text to Video"
+
   return job.type === "video" ? "Custom Video" : "Edit Image"
 }
 
@@ -841,6 +853,10 @@ function paramsFromCreateJob(job: GeneratePornJob): CreateParams {
     params["quality"] = `${job.resolution}-${job.duration}`
   }
 
+  if (job.modelId || job.model_id) {
+    params["modelId"] = job.modelId || job.model_id
+  }
+
   return params
 }
 
@@ -853,4 +869,21 @@ function sourceFromCreateJob(job: GeneratePornJob): Record<string, unknown> | nu
   }
 
   return null
+}
+
+function optionalAccountEmail(value: unknown): string | null {
+  return value === null || value === undefined || value === "" ? null : normalizeAccountEmail(value)
+}
+
+async function ensureAccountApiAuth(accountEmail: string | null): Promise<void> {
+  if (hasApiAuth(accountEmail)) {
+    return
+  }
+
+  const status = await getAuthBrowserForAccount(accountEmail).refreshHeadless()
+  if (status.status === "connected" && hasApiAuth(accountEmail)) {
+    return
+  }
+
+  throw new Error(`No active API auth token. ${AUTH_SETUP_MESSAGE}`)
 }

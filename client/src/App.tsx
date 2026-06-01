@@ -31,10 +31,15 @@ function App() {
   const backups = useBackups(async () => {
     await library.loadItems()
   })
-  const sync = useSyncOperations(() => {
-    void library.loadItems({ keepLoading: true })
-    void backups.loadBackups()
-  })
+  const sync = useSyncOperations(
+    () => {
+      void library.loadItems({ keepLoading: true })
+      void backups.loadBackups()
+    },
+    () => {
+      void library.loadItems({ keepLoading: true })
+    },
+  )
   const create = useCreateStudio(navigateToCreate)
   const templates = useTemplates()
   const creationHistory = useCreationHistory(
@@ -64,7 +69,9 @@ function App() {
   const activeView = route.view
   const createOpen = create.open
   const setCreateOpen = create.setOpen
+  const setSelectedCreateAccountEmail = create.setSelectedAccountEmail
   const galleryItems = library.itemsData?.items ?? []
+  const accountOptions = React.useMemo(() => config?.authAccounts?.map((account) => account.email) ?? [], [config?.authAccounts])
   const hasPendingGalleryMedia = galleryItems.some(isPendingMediaItem)
   const loadLibraryItems = library.loadItems
   const startIncrementalSync = sync.startSync
@@ -92,6 +99,27 @@ function App() {
       window.clearInterval(timer)
     }
   }, [hasPendingGalleryMedia, loadLibraryItems, startIncrementalSync, syncRunning])
+
+  React.useEffect(() => {
+    setSelectedCreateAccountEmail((current) => {
+      if (!accountOptions.length) return ""
+      if (current && accountOptions.includes(current)) return current
+      return config?.defaultAccountEmail || accountOptions[0] || ""
+    })
+  }, [accountOptions, config?.defaultAccountEmail, setSelectedCreateAccountEmail])
+
+  React.useEffect(() => {
+    function onToast(event: Event) {
+      const message = event instanceof CustomEvent && typeof event.detail?.message === "string" ? event.detail.message : ""
+      if (!message) return
+
+      setCopyFlash(message)
+      window.setTimeout(() => setCopyFlash(""), 2400)
+    }
+
+    window.addEventListener("genai:toast", onToast)
+    return () => window.removeEventListener("genai:toast", onToast)
+  }, [])
 
   React.useEffect(() => {
     if (route.createOpen && !createOpen) {
@@ -204,16 +232,21 @@ function App() {
     }
   }
 
-  async function runAuthBrowserAction(action: "connect" | "refresh" | "disconnect") {
+  async function runAuthBrowserAction(action: "connect" | "refresh" | "disconnect" | "remove", email?: string) {
     if (authActionPending) return
     setAuthActionPending(true)
-    const path =
-      action === "connect"
+    const path = email
+      ? action === "connect"
+        ? "/api/auth/accounts/connect"
+        : action === "refresh"
+          ? "/api/auth/accounts/refresh"
+          : "/api/auth/accounts/remove"
+      : action === "connect"
         ? "/api/auth/browser/connect"
         : action === "refresh"
           ? "/api/auth/browser/refresh"
           : "/api/auth/browser/disconnect"
-    const body = action === "disconnect" ? { deleteProfile: false } : {}
+    const body = email ? { email, deleteProfile: action === "remove" } : action === "disconnect" ? { deleteProfile: false } : {}
     try {
       const status = await fetchJson<{ message: string }>(path, {
         method: "POST",
@@ -292,6 +325,9 @@ function App() {
       onAuthConnect={() => void runAuthBrowserAction("connect")}
       onAuthRefresh={() => void runAuthBrowserAction("refresh")}
       onAuthDisconnect={() => void runAuthBrowserAction("disconnect")}
+      onAuthAccountConnect={(email) => void runAuthBrowserAction("connect", email)}
+      onAuthAccountRefresh={(email) => void runAuthBrowserAction("refresh", email)}
+      onAuthAccountRemove={(email) => void runAuthBrowserAction("remove", email)}
       authActionPending={authActionPending}
       mediaBlurred={mediaBlurred}
       onToggleMediaBlur={toggleMediaBlur}
@@ -433,11 +469,17 @@ function App() {
             modes={create.modes}
             modeId={create.modeId}
             setModeId={create.setModeId}
+            accountOptions={accountOptions}
+            selectedAccountEmail={create.selectedAccountEmail}
+            setSelectedAccountEmail={create.setSelectedAccountEmail}
             prompt={create.prompt}
             setPrompt={create.setPrompt}
             negativePrompt={create.negativePrompt}
             setNegativePrompt={create.setNegativePrompt}
             promptField={create.promptField}
+            modelId={create.modelId}
+            setModelId={create.setModelId}
+            modelField={create.modelField}
             quality={create.quality}
             setQuality={create.setQuality}
             qualityField={create.qualityField}

@@ -56,6 +56,49 @@ describe("useSyncOperations", () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
     expect(onSettled).toHaveBeenCalledTimes(2)
   })
+
+  it("reports running progress when sync counters advance", async () => {
+    vi.useFakeTimers()
+    const statuses = [
+      syncStatus({ running: true, status: "running", currentPage: 1, scanned: 1, downloaded: 0, finishedAt: null }),
+      syncStatus({ running: true, status: "running", currentPage: 1, scanned: 1, downloaded: 1, finishedAt: null }),
+      syncStatus({ running: true, status: "running", currentPage: 1, scanned: 1, downloaded: 1, finishedAt: null }),
+      syncStatus({ running: false, finishedAt: "2026-05-28T00:02:00.000Z" }),
+    ]
+    let index = 0
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => {
+      const status = statuses[Math.min(index, statuses.length - 1)]
+      index += 1
+      return jsonResponse(status)
+    })
+    globalThis.fetch = fetchMock
+    const onSettled = vi.fn<() => void>()
+    const onProgress = vi.fn<() => void>()
+
+    renderHook(() => useSyncOperations(onSettled, onProgress))
+
+    await flushAsyncWork()
+    expect(onProgress).toHaveBeenCalledTimes(1)
+    expect(onSettled).toHaveBeenCalledTimes(0)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400)
+    })
+    await flushAsyncWork()
+    expect(onProgress).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400)
+    })
+    await flushAsyncWork()
+    expect(onProgress).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1400)
+    })
+    await flushAsyncWork()
+    expect(onSettled).toHaveBeenCalledTimes(1)
+  })
 })
 
 async function flushAsyncWork(): Promise<void> {

@@ -1,7 +1,7 @@
 import path from "node:path"
 
 import { fetchJobsPage } from "./api-client.ts"
-import { hasApiAuth } from "./auth-state.ts"
+import { getSyncAccountEmails } from "./auth-state.ts"
 import { listCreationJobs } from "./catalog-db.ts"
 import {
   applyCatalogThumbnail,
@@ -145,31 +145,46 @@ export async function startSync({
   const downloadedJobIds = new Set(catalog.downloadedJobIds || [])
   const downloadQueue: GeneratePornJob[] = []
   const queuedJobIds = new Set<string>()
-  const previousLastSeenJobId = incremental && !fullCoverageScan ? catalog.lastSeenJobId : null
+  const lastSeenJobIdsByAccount = { ...(catalog.lastSeenJobIdsByAccount || {}) }
   const pendingKnownJobIds = incremental && !fullCoverageScan ? getPendingKnownJobIds(catalog) : new Set<string>()
-  const seenApiJobIds = new Set<string>()
+  const seenApiJobIdsByAccount = new Map<string, Set<string>>()
+  const completedFullCoverageAccounts = new Set<string>()
   let newestBoundaryJobId: string | null = null
   let stoppedAtPrevious = false
   let reachedApiEnd = false
+  let softStopAfterBoundaryPage: number | null = null
 
   for (const job of getCatalogDownloadQueue(catalog.items, { includeErrors: true })) {
     enqueueDownload(downloadQueue, queuedJobIds, job)
   }
 
-  if (hasApiAuth()) {
-    for (let page = 1; page <= PAGE_LIMIT; page += 1) {
-      if (shouldStopForCancellation()) {
-        break
-      }
+  const syncAccounts = getSyncAccountEmails()
+
+  if (syncAccounts.length > 0) {
+    for (const accountEmail of syncAccounts) {
+      const accountKey = accountSyncKey(accountEmail)
+      const seenApiJobIds = new Set<string>()
+      seenApiJobIdsByAccount.set(accountKey, seenApiJobIds)
+      const previousLastSeenJobId =
+        incremental && !fullCoverageScan ? lastSeenJobIdsByAccount[accountKey] || (accountEmail ? null : catalog.lastSeenJobId) || null : null
+      let accountReachedApiEnd = false
+      let accountNewestBoundaryJobId: string | null = null
+      softStopAfterBoundaryPage = null
+
+      for (let page = 1; page <= PAGE_LIMIT; page += 1) {
+        if (shouldStopForCancellation()) {
+          break
+        }
 
       syncState.currentPage = page
-      syncState.message = `Fetching page ${page}...`
+      syncState.message = `Fetching ${accountLabel(accountEmail)} page ${page}...`
 
-      const jobs = await fetchJobsPage(page)
+      const jobs = await fetchJobsPage(page, { accountEmail })
 
       if (jobs.length === 0) {
-        syncState.message = "Reached the end of the API."
+        syncState.message = `Reached the end of ${accountLabel(accountEmail)}.`
         reachedApiEnd = true
+        accountReachedApiEnd = true
         break
       }
 
@@ -192,8 +207,10 @@ export async function startSync({
           previousLastSeenJobId && job.id === previousLastSeenJobId && isBoundaryJob && pendingKnownJobIds.size === 0,
         )
 
-        if (!newestBoundaryJobId && isBoundaryJob) {
-          newestBoundaryJobId = job.id
+        if (!accountNewestBoundaryJobId && isBoundaryJob) {
+          accountNewestBoundaryJobId = job.id
+          newestBoundaryJobId ||= job.id
+          lastSeenJobIdsByAccount[accountKey] = job.id
         }
 
         if (!isDownloadableJob(job)) {
@@ -201,7 +218,10 @@ export async function startSync({
           if (reachedPreviousBoundary) {
             stoppedAtPrevious = true
             syncState.message = "Reached the previously saved latest settled job."
-            break
+            if (softStopAfterBoundaryPage === null) {
+              softStopAfterBoundaryPage = syncState.currentPage
+            }
+            continue
           }
           continue
         }
@@ -212,7 +232,10 @@ export async function startSync({
           if (reachedPreviousBoundary) {
             stoppedAtPrevious = true
             syncState.message = "Reached the previously saved latest settled job."
-            break
+            if (softStopAfterBoundaryPage === null) {
+              softStopAfterBoundaryPage = syncState.currentPage
+            }
+            continue
           }
           continue
         }
@@ -222,18 +245,35 @@ export async function startSync({
         if (reachedPreviousBoundary) {
           stoppedAtPrevious = true
           syncState.message = "Reached the previously saved latest settled job."
-          break
+          if (softStopAfterBoundaryPage === null) {
+            softStopAfterBoundaryPage = syncState.currentPage
+          }
         }
       }
 
       catalog.items = sortItems(Array.from(itemById.values()))
       catalog.downloadedJobIds = Array.from(downloadedJobIds).slice(-10000)
       catalog.lastSeenJobId = newestBoundaryJobId || catalog.lastSeenJobId
+      catalog.lastSeenJobIdsByAccount = lastSeenJobIdsByAccount
       catalog.updatedAt = new Date().toISOString()
       await saveCatalog(catalog)
 
-      if (stoppedAtPrevious) {
+      await drainDownloadQueue({
+        catalog,
+        itemById,
+        downloadedJobIds,
+        downloadQueue,
+        lastSeenJobId: newestBoundaryJobId || catalog.lastSeenJobId,
+        startMessage: `Downloading media found through page ${page}...`,
+      })
+
+      if (softStopAfterBoundaryPage !== null && syncState.currentPage >= softStopAfterBoundaryPage) {
         break
+      }
+    }
+
+      if (accountReachedApiEnd) {
+        completedFullCoverageAccounts.add(accountKey)
       }
     }
   } else {
@@ -242,22 +282,27 @@ export async function startSync({
       : "No active API auth and no known missing files to download."
   }
 
-  await runDownloadQueue({
-    catalog,
-    itemById,
-    downloadedJobIds,
-    downloadQueue,
-    lastSeenJobId: newestBoundaryJobId || catalog.lastSeenJobId,
-    startMessage: `Finished API scan. Downloading ${downloadQueue.length} file${downloadQueue.length === 1 ? "" : "s"}...`,
-  })
+  if (downloadQueue.length > 0) {
+    await runDownloadQueue({
+      catalog,
+      itemById,
+      downloadedJobIds,
+      downloadQueue,
+      lastSeenJobId: newestBoundaryJobId || catalog.lastSeenJobId,
+      startMessage: `Finished API scan. Downloading ${downloadQueue.length} file${downloadQueue.length === 1 ? "" : "s"}...`,
+    })
+  }
 
   const cancelled = Boolean(syncState.cancelRequested)
-  const completedFullCoverage = !cancelled && hasApiAuth() && reachedApiEnd
+  const completedFullCoverage = !cancelled && syncAccounts.length > 0 && reachedApiEnd
   const finishedAt = new Date().toISOString()
 
   let remoteDeleted = 0
   if (completedFullCoverage) {
-    remoteDeleted = markMissingApiItemsDeleted(itemById, seenApiJobIds, finishedAt)
+    for (const [accountKey, seenApiJobIds] of seenApiJobIdsByAccount) {
+      if (!completedFullCoverageAccounts.has(accountKey)) continue
+      remoteDeleted += markMissingApiItemsDeleted(itemById, seenApiJobIds, finishedAt, accountKey)
+    }
   }
 
   if (!cancelled && syncState.currentPage >= PAGE_LIMIT && !stoppedAtPrevious && !reachedApiEnd) {
@@ -269,6 +314,7 @@ export async function startSync({
   catalog.items = sortItems(Array.from(itemById.values()))
   catalog.downloadedJobIds = Array.from(downloadedJobIds).slice(-10000)
   catalog.lastSeenJobId = newestBoundaryJobId || catalog.lastSeenJobId
+  catalog.lastSeenJobIdsByAccount = lastSeenJobIdsByAccount
   catalog.updatedAt = new Date().toISOString()
   catalog.lastRun = {
     mode: syncState.mode,
@@ -294,6 +340,22 @@ export async function startSync({
       ? `Finished with ${syncState.errors.length} error${syncState.errors.length === 1 ? "" : "s"}.`
       : `Finished. Downloaded ${syncState.downloaded} new file${syncState.downloaded === 1 ? "" : "s"}.`,
   })
+}
+
+async function drainDownloadQueue(options: {
+  catalog: Catalog
+  itemById: Map<string, CatalogItem>
+  downloadedJobIds: Set<string>
+  downloadQueue: GeneratePornJob[]
+  lastSeenJobId: string | null
+  startMessage: string
+}): Promise<void> {
+  if (options.downloadQueue.length === 0) {
+    return
+  }
+
+  await runDownloadQueue(options)
+  options.downloadQueue.splice(0)
 }
 
 function getPendingKnownJobIds(catalog: Catalog): Set<string> {
@@ -361,11 +423,23 @@ function isExpiredNoMediaItem(item: CatalogItem, now: number): boolean {
   return createdAt !== null && now - createdAt >= EXPIRED_NO_MEDIA_ITEM_MS
 }
 
-function markMissingApiItemsDeleted(itemById: Map<string, CatalogItem>, seenApiJobIds: Set<string>, deletedAt: string): number {
+function markMissingApiItemsDeleted(
+  itemById: Map<string, CatalogItem>,
+  seenApiJobIds: Set<string>,
+  deletedAt: string,
+  accountKey: string,
+): number {
   let deleted = 0
 
   for (const item of itemById.values()) {
-    if (!item.id || seenApiJobIds.has(item.id) || item.remoteDeletedAt || !hasMediaResult(item)) continue
+    if (
+      !item.id ||
+      itemAccountSyncKey(item) !== accountKey ||
+      seenApiJobIds.has(item.id) ||
+      item.remoteDeletedAt ||
+      !hasMediaResult(item)
+    )
+      continue
 
     item.remoteDeletedAt = deletedAt
     item.remoteDeleteStatus = "deleted"
@@ -373,6 +447,18 @@ function markMissingApiItemsDeleted(itemById: Map<string, CatalogItem>, seenApiJ
   }
 
   return deleted
+}
+
+function accountSyncKey(accountEmail: string | null): string {
+  return accountEmail || "__legacy__"
+}
+
+function itemAccountSyncKey(item: CatalogItem): string {
+  return accountSyncKey(typeof item.accountEmail === "string" && item.accountEmail ? item.accountEmail : null)
+}
+
+function accountLabel(accountEmail: string | null): string {
+  return accountEmail || "default account"
 }
 
 function hasMediaResult(item: CatalogItem): boolean {
@@ -726,6 +812,7 @@ async function runDownloadQueue({
   startMessage: string
 }): Promise<void> {
   syncState.message = startMessage
+  let processedInBatch = 0
 
   for (const job of downloadQueue) {
     if (shouldStopForCancellation()) {
@@ -746,7 +833,8 @@ async function runDownloadQueue({
       )
       downloadedJobIds.add(job.id)
       syncState.downloaded += 1
-      syncState.message = `Downloaded ${syncState.downloaded} of ${downloadQueue.length} file${downloadQueue.length === 1 ? "" : "s"}.`
+      processedInBatch += 1
+      syncState.message = `Downloaded ${processedInBatch} of ${downloadQueue.length} queued file${downloadQueue.length === 1 ? "" : "s"} (${syncState.downloaded} total).`
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       syncState.errors.push({ id: job.id, message })

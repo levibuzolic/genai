@@ -70,6 +70,26 @@ describe("useCreateStudio", () => {
       },
     ])
   })
+
+  it("keeps video quality compatible with the selected model", async () => {
+    globalThis.fetch = vi.fn<(input: RequestInfo | URL) => Promise<Response>>(async (input) => {
+      const url = String(input)
+      if (url === "/api/create/modes") return jsonResponse({ modes: [multiModelVideoMode] })
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+
+    const { result } = renderHook(() => useCreateStudio())
+    await waitFor(() => expect(result.current.modes).toHaveLength(1))
+    await waitFor(() => expect(result.current.modelId).toBe("wan2.7-i2v"))
+    await waitFor(() => expect(result.current.quality).toBe("1080p-15"))
+
+    act(() => {
+      result.current.setModelId("wan2.2-i2v-plus")
+    })
+
+    await waitFor(() => expect(result.current.quality).toBe("1080p-5"))
+    expect(result.current.qualityField?.options?.map((option) => option.value)).toEqual(["1080p-5"])
+  })
 })
 
 const sourceItem: CatalogItem = {
@@ -98,6 +118,31 @@ const customVideoMode: CreateMode = {
       options: [
         { label: "720p · 4s", value: "720p-4" },
         { label: "1080p · 15s", value: "1080p-15" },
+      ],
+    },
+  ],
+}
+
+const multiModelVideoMode: CreateMode = {
+  ...customVideoMode,
+  fields: [
+    { name: "prompt", label: "Prompt", required: true },
+    {
+      name: "modelId",
+      label: "Model",
+      default: "wan2.7-i2v",
+      options: [
+        { label: "Wan 2.7", value: "wan2.7-i2v" },
+        { label: "Wan 2.2 Plus", value: "wan2.2-i2v-plus" },
+      ],
+    },
+    {
+      name: "quality",
+      label: "Quality",
+      default: "1080p-15",
+      options: [
+        { label: "1080p · 15s", value: "1080p-15", modelId: "wan2.7-i2v" },
+        { label: "1080p · 5s", value: "1080p-5", modelId: "wan2.2-i2v-plus" },
       ],
     },
   ],

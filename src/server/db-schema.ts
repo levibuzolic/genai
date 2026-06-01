@@ -35,6 +35,7 @@ export const creationJobs = sqliteTable(
   "creation_jobs",
   ({ text }) => ({
     id: text("id").primaryKey(),
+    accountEmail: text("account_email"),
     jobId: text("job_id").unique(),
     status: text("status").notNull(),
     modeId: text("mode_id"),
@@ -61,7 +62,11 @@ export const creationJobs = sqliteTable(
     finishedAt: text("finished_at"),
     downloadedItemId: text("downloaded_item_id"),
   }),
-  (table) => [index("creation_jobs_status_idx").on(table.status, desc(table.updatedAt)), index("creation_jobs_job_id_idx").on(table.jobId)],
+  (table) => [
+    index("creation_jobs_status_idx").on(table.status, desc(table.updatedAt)),
+    index("creation_jobs_job_id_idx").on(table.jobId),
+    index("creation_jobs_account_email_idx").on(table.accountEmail),
+  ],
 )
 
 export const creationEvents = sqliteTable(

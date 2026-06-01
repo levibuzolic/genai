@@ -24,11 +24,17 @@ export type CreateStudioProps = {
   modes: CreateMode[]
   modeId: string
   setModeId: (id: string) => void
+  accountOptions: string[]
+  selectedAccountEmail: string
+  setSelectedAccountEmail: (email: string) => void
   prompt: string
   setPrompt: (value: string) => void
   negativePrompt: string
   setNegativePrompt: (value: string) => void
   promptField: CreateField | undefined
+  modelId: string
+  setModelId: (value: string) => void
+  modelField: CreateField | undefined
   quality: string
   setQuality: (value: string) => void
   qualityField: CreateField | undefined

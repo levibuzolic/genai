@@ -106,4 +106,25 @@ describe("MediaCard", () => {
     expect(container.querySelector(".media-card")?.getAttribute("data-remote-deleted")).toBe("true")
     expect(screen.getByText("Deleted remotely")).toBeTruthy()
   })
+
+  it("marks failed media as failed, keeps details openable, and hides favorite", () => {
+    const { container, onDetails } = renderCard({
+      ...baseItem,
+      id: "failed-image-1",
+      type: "image",
+      status: "failed",
+      prompt: "soft studio portrait failed",
+      downloadError: "Server returned an error",
+    })
+
+    expect(container.querySelector(".media-card")?.classList.contains("is-failed")).toBe(true)
+    expect(screen.getByText("failed")).toBeTruthy()
+    expect(screen.getByText("Server returned an error")).toBeTruthy()
+    expect(screen.getByRole("button", { name: /open media details/i })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /favorite|unfavorite/i })).toBeNull()
+    expect(screen.getByRole("button", { name: /delete remote/i })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: /open media details/i }))
+    expect(onDetails).toHaveBeenCalledTimes(1)
+  })
 })

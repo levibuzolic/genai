@@ -1,6 +1,7 @@
 import type { CatalogItem } from "@/types/domain"
 
 const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
+const FAILED_MEDIA_STATUSES = new Set(["failed"])
 const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
 
 export function mediaUrlForItem(item?: CatalogItem | null) {
@@ -23,6 +24,10 @@ export function isPendingMediaItem(item?: CatalogItem | null) {
 
   const startedAt = mediaItemRenderStartedAtMs(item)
   return startedAt !== null && Date.now() - startedAt < RENDERING_MEDIA_MAX_AGE_MS
+}
+
+export function isFailedMediaItem(item?: CatalogItem | null): boolean {
+  return item ? FAILED_MEDIA_STATUSES.has(String(item.status || "").trim().toLowerCase()) : false
 }
 
 export function isImageUrl(value = "") {

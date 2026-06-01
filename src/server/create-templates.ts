@@ -18,9 +18,12 @@ import {
   CREATE_IMAGE_ACCEPT,
   CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
   CREATE_IMAGE_DEFAULT_MODEL_ID,
+  CREATE_TEXT_VIDEO_DEFAULT_MODEL_ID,
   CREATE_VIDEO_DEFAULT_DURATION,
+  CREATE_VIDEO_DEFAULT_MODEL_ID,
   CREATE_VIDEO_DEFAULT_QUALITY,
   CREATE_VIDEO_DEFAULT_RESOLUTION,
+  CREATE_VIDEO_MODEL_DEFINITIONS,
   CREATE_POLL_MS,
   CREATE_VIDEO_QUALITY_OPTIONS,
 } from "./create-constants.ts"
@@ -50,9 +53,6 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
         acceptedKinds: ["catalog", "upload", "url"],
       },
       fields: [{ name: "prompt", label: "Prompt", type: "textarea", required: true }],
-      defaults: {
-        seed: null,
-      },
     },
     {
       id: "text-to-image",
@@ -72,7 +72,7 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
           type: "select",
           required: true,
           default: "3:4",
-          options: CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
+          options: [...CREATE_IMAGE_ASPECT_RATIO_OPTIONS],
         },
       ],
       defaults: {
@@ -108,21 +108,47 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
       },
       fields: [
         { name: "prompt", label: "Prompt", type: "textarea", required: true },
+        videoModelField("i2v"),
         {
           name: "quality",
           label: "Quality",
           type: "select",
           required: true,
           default: CREATE_VIDEO_DEFAULT_QUALITY,
-          options: CREATE_VIDEO_QUALITY_OPTIONS.map((option) => ({
-            value: `${option.resolution}-${option.duration}`,
-            label: option.label,
-            resolution: option.resolution,
-            duration: option.duration,
-          })),
+          options: videoQualityOptions("i2v"),
         },
       ],
       defaults: {
+        modelId: CREATE_VIDEO_DEFAULT_MODEL_ID,
+        resolution: CREATE_VIDEO_DEFAULT_RESOLUTION,
+        duration: CREATE_VIDEO_DEFAULT_DURATION,
+        seed: null,
+      },
+    },
+    {
+      id: "text-to-video",
+      label: "Text to Video",
+      kind: "custom",
+      mediaType: "video",
+      endpoint: "video",
+      source: {
+        required: false,
+        acceptedKinds: [],
+      },
+      fields: [
+        { name: "prompt", label: "Prompt", type: "textarea", required: true },
+        videoModelField("t2v"),
+        {
+          name: "quality",
+          label: "Quality",
+          type: "select",
+          required: true,
+          default: CREATE_VIDEO_DEFAULT_QUALITY,
+          options: videoQualityOptions("t2v"),
+        },
+      ],
+      defaults: {
+        modelId: CREATE_TEXT_VIDEO_DEFAULT_MODEL_ID,
         resolution: CREATE_VIDEO_DEFAULT_RESOLUTION,
         duration: CREATE_VIDEO_DEFAULT_DURATION,
         seed: null,
@@ -140,21 +166,18 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
       },
       fields: [
         { name: "prompt", label: "Prompt", type: "textarea", required: true },
+        videoModelField("i2v"),
         {
           name: "quality",
           label: "Quality",
           type: "select",
           required: true,
           default: CREATE_VIDEO_DEFAULT_QUALITY,
-          options: CREATE_VIDEO_QUALITY_OPTIONS.map((option) => ({
-            value: `${option.resolution}-${option.duration}`,
-            label: option.label,
-            resolution: option.resolution,
-            duration: option.duration,
-          })),
+          options: videoQualityOptions("i2v"),
         },
       ],
       defaults: {
+        modelId: CREATE_VIDEO_DEFAULT_MODEL_ID,
         resolution: CREATE_VIDEO_DEFAULT_RESOLUTION,
         duration: CREATE_VIDEO_DEFAULT_DURATION,
         seed: null,
@@ -172,21 +195,18 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
       },
       fields: [
         { name: "prompt", label: "Video prompt", type: "textarea", required: true },
+        videoModelField("i2v"),
         {
           name: "quality",
           label: "Quality",
           type: "select",
           required: true,
           default: CREATE_VIDEO_DEFAULT_QUALITY,
-          options: CREATE_VIDEO_QUALITY_OPTIONS.map((option) => ({
-            value: `${option.resolution}-${option.duration}`,
-            label: option.label,
-            resolution: option.resolution,
-            duration: option.duration,
-          })),
+          options: videoQualityOptions("i2v"),
         },
       ],
       defaults: {
+        modelId: CREATE_VIDEO_DEFAULT_MODEL_ID,
         resolution: CREATE_VIDEO_DEFAULT_RESOLUTION,
         duration: CREATE_VIDEO_DEFAULT_DURATION,
         seed: null,
@@ -219,6 +239,39 @@ export function getCreateModeDefinitions(templates: CreateTemplate[] = []): Crea
   }
 
   return modes
+}
+
+function videoModelField(kind: "i2v" | "t2v"): CreateMode["fields"][number] {
+  const models = CREATE_VIDEO_MODEL_DEFINITIONS.filter((model) => model.kind === kind)
+
+  return {
+    name: "modelId",
+    label: "Model",
+    type: "select",
+    required: true,
+    default: kind === "t2v" ? CREATE_TEXT_VIDEO_DEFAULT_MODEL_ID : CREATE_VIDEO_DEFAULT_MODEL_ID,
+    options: models.map((model) => ({
+      value: model.id,
+      label: model.label,
+      description: model.description,
+      tier: model.tier,
+      protocol: model.protocol,
+      kind: model.kind,
+      audio: "audio" in model ? model.audio : undefined,
+      fixedDuration: "fixedDuration" in model ? model.fixedDuration : undefined,
+    })),
+  }
+}
+
+function videoQualityOptions(kind: "i2v" | "t2v"): NonNullable<CreateMode["fields"][number]["options"]> {
+  const modelIds = new Set(CREATE_VIDEO_MODEL_DEFINITIONS.filter((model) => model.kind === kind).map((model) => model.id))
+  return CREATE_VIDEO_QUALITY_OPTIONS.filter((option) => modelIds.has(option.modelId)).map((option) => ({
+    value: `${option.resolution}-${option.duration}`,
+    label: option.label,
+    modelId: option.modelId,
+    resolution: option.resolution,
+    duration: option.duration,
+  }))
 }
 
 export async function getCreateModes(): Promise<CreateModesResponse> {
@@ -349,6 +402,9 @@ function normalizeCreateTemplate(template: unknown): CreateTemplate | null {
     legacyParams["negativePrompt"] = String(templateRecord.negativePrompt || templateRecord.negative_prompt)
   if (templateRecord.resolution || templateRecord.duration)
     legacyParams["quality"] = `${templateRecord.resolution || "720p"}-${Number(templateRecord.duration || 4)}`
+  if (templateRecord.params && recordOrEmpty(templateRecord.params)["modelId"]) {
+    legacyParams["modelId"] = String(recordOrEmpty(templateRecord.params)["modelId"])
+  }
 
   const settings = normalizeTemplateSettings({
     modeId:
@@ -459,6 +515,7 @@ function templateParamsForMode(template: CreateTemplate, modeId: string): Create
       ...settings.params,
       prompt: String(videoStep?.params["prompt"] || imageStep?.params["prompt"] || settings.params["prompt"] || ""),
       quality: String(videoStep?.params["quality"] || settings.params["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+      modelId: String(videoStep?.params["modelId"] || settings.params["modelId"] || CREATE_VIDEO_DEFAULT_MODEL_ID),
     }
   }
 
@@ -468,6 +525,7 @@ function templateParamsForMode(template: CreateTemplate, modeId: string): Create
       ...settings.params,
       prompt: String(videoStep?.params["prompt"] || settings.params["prompt"] || ""),
       quality: String(videoStep?.params["quality"] || settings.params["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+      modelId: String(videoStep?.params["modelId"] || settings.params["modelId"] || CREATE_VIDEO_DEFAULT_MODEL_ID),
     }
   }
 
@@ -477,6 +535,7 @@ function templateParamsForMode(template: CreateTemplate, modeId: string): Create
       ...settings.params,
       prompt: String(videoStep?.params["prompt"] || settings.params["prompt"] || ""),
       quality: String(videoStep?.params["quality"] || settings.params["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+      modelId: String(videoStep?.params["modelId"] || settings.params["modelId"] || CREATE_VIDEO_DEFAULT_MODEL_ID),
     }
   }
 
@@ -515,6 +574,7 @@ function buildDefaultComboWorkflow(settings: TemplateSettings): TemplateSettings
       params: {
         prompt: String(settings.params?.["prompt"] || ""),
         quality: String(settings.params?.["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+        modelId: String(settings.params?.["modelId"] || CREATE_VIDEO_DEFAULT_MODEL_ID),
       },
     },
   ]
@@ -531,6 +591,7 @@ function buildDefaultNudifyVideoWorkflow(settings: TemplateSettings): TemplateSe
       params: {
         prompt: String(settings.params?.["prompt"] || ""),
         quality: String(settings.params?.["quality"] || CREATE_VIDEO_DEFAULT_QUALITY),
+        modelId: String(settings.params?.["modelId"] || CREATE_VIDEO_DEFAULT_MODEL_ID),
       },
     },
   ]

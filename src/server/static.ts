@@ -15,12 +15,14 @@ export async function serveStatic(response: HttpResponse, pathname: string): Pro
   let filePath = path.resolve(PUBLIC_DIR, `.${cleanPath}`)
 
   if (!filePath.startsWith(PUBLIC_DIR)) {
+    logHttpNotFound("static path escaped public root", { pathname, filePath })
     return sendJson(response, { error: "Not found" }, 404)
   }
 
   if (!(await fileExists(filePath))) {
     const indexPath = path.resolve(PUBLIC_DIR, "./index.html")
     if (!isAppRoutePath(cleanPath) || !(await fileExists(indexPath))) {
+      logHttpNotFound("static file not found", { pathname, filePath })
       return sendJson(response, { error: "Not found" }, 404)
     }
     filePath = indexPath
@@ -50,10 +52,12 @@ export async function serveMedia(request: HttpRequest, response: HttpResponse, m
   const filePath = path.resolve(MEDIA_DIR, decodedPath)
 
   if (!filePath.startsWith(MEDIA_DIR)) {
+    logHttpNotFound("media path escaped media root", { mediaPath, filePath })
     return sendJson(response, { error: "Not found" }, 404)
   }
 
   if (!(await fileExists(filePath))) {
+    logHttpNotFound("media file not found", { mediaPath, filePath })
     return sendJson(response, { error: "Not found" }, 404)
   }
 
@@ -175,4 +179,11 @@ export function sendJson(response: HttpResponse, body: unknown, statusCode = 200
     "access-control-allow-headers": "content-type",
   })
   response.end(`${JSON.stringify(body, null, 2)}\n`)
+}
+
+export function logHttpNotFound(message: string, details: Record<string, unknown> = {}): void {
+  const suffix = Object.entries(details)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(" ")
+  console.warn(`[http-404] ${message}${suffix ? ` ${suffix}` : ""}`)
 }

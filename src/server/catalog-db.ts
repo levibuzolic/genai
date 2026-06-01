@@ -41,6 +41,7 @@ type CreationJobInsert = typeof creationJobs.$inferInsert
 
 type CreationInput = {
   id?: string | null
+  accountEmail?: string | null
   jobId?: string | null
   status?: string | null
   modeId?: string | null
@@ -82,6 +83,7 @@ type CreationInput = {
   updated_at?: string | null
   finished_at?: string | null
   downloaded_item_id?: string | null
+  account_email?: string | null
   [key: string]: unknown
 }
 
@@ -186,6 +188,7 @@ function ensureCatalogSchema(db: DatabaseSync): void {
   ensureCatalogColumn(db, "creation_jobs", "template_id", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "template_label", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "workflow_json", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "account_email", "TEXT")
 }
 
 function ensureCatalogColumn(db: DatabaseSync, table: string, column: string, type: string): void {
@@ -210,6 +213,7 @@ export function readCatalogFromDb(): Catalog {
     downloadedJobIds: downloadedRows.map((row) => row.id),
     orphanFiles: orphanRows.map((row) => parseJson(row.fileJson, null)).filter(isOrphanFile),
     lastSeenJobId: stringOrNull(meta.get("lastSeenJobId")),
+    lastSeenJobIdsByAccount: (recordOrNull(meta.get("lastSeenJobIdsByAccount")) as Record<string, string | null> | null) || undefined,
     updatedAt: stringOrNull(meta.get("updatedAt")),
     lastRun: recordOrNull(meta.get("lastRun")),
   })
@@ -271,6 +275,7 @@ export function writeCatalogToDb(catalog: Catalog): void {
       }
 
       upsertCatalogMeta(tx, "lastSeenJobId", normalized.lastSeenJobId || null)
+      upsertCatalogMeta(tx, "lastSeenJobIdsByAccount", normalized.lastSeenJobIdsByAccount || {})
       upsertCatalogMeta(tx, "updatedAt", normalized.updatedAt || null)
       upsertCatalogMeta(tx, "lastRun", normalized.lastRun || null)
     },
@@ -413,6 +418,7 @@ export function normalizeCreationJob(creation: CreationInput = {}): CreationJob 
 
   return {
     id: stringOrNull(creation.id) || stringOrNull(creation.jobId) || `local-${randomUUID()}`,
+    accountEmail: stringOrNull(creation.accountEmail) || stringOrNull(creation.account_email),
     jobId: stringOrNull(creation.jobId) || stringOrNull(creation.job_id),
     status: stringOrNull(creation.status) || "draft",
     modeId: stringOrNull(creation.modeId) || stringOrNull(creation.mode_id),
@@ -444,6 +450,7 @@ export function normalizeCreationJob(creation: CreationInput = {}): CreationJob 
 function creationJobToInsert(creation: CreationJob): CreationJobInsert {
   return {
     id: creation.id,
+    accountEmail: creation.accountEmail,
     jobId: creation.jobId,
     status: creation.status,
     modeId: creation.modeId,
@@ -475,6 +482,7 @@ function creationJobToInsert(creation: CreationJob): CreationJobInsert {
 function creationJobFromRow(row: CreationJobRow): CreationJob {
   return normalizeCreationJob({
     id: row.id,
+    accountEmail: row.accountEmail,
     jobId: row.jobId,
     status: row.status,
     modeId: row.modeId,
@@ -506,6 +514,7 @@ function creationJobFromRow(row: CreationJobRow): CreationJob {
 export function toPublicCreation(creation: CreationJob, { details = false }: { details?: boolean } = {}): PublicCreation {
   const publicCreation: PublicCreation = {
     id: creation.id,
+    accountEmail: creation.accountEmail,
     jobId: creation.jobId,
     status: creation.status,
     modeId: creation.modeId,
@@ -567,9 +576,24 @@ export function normalizeCatalog(catalog: Partial<Catalog> = {}): Catalog {
     downloadedJobIds: parsed.downloadedJobIds,
     orphanFiles: parsed.orphanFiles.filter(isOrphanFile),
     lastSeenJobId: stringOrNull(parsed.lastSeenJobId),
+    lastSeenJobIdsByAccount: normalizeLastSeenJobIdsByAccount(parsed.lastSeenJobIdsByAccount),
     updatedAt: stringOrNull(parsed.updatedAt),
     lastRun: recordOrNull(parsed.lastRun),
   }
+}
+
+function normalizeLastSeenJobIdsByAccount(value: Record<string, unknown> | null | undefined): Record<string, string | null> {
+  const result: Record<string, string | null> = {}
+  if (!value) {
+    return result
+  }
+
+  for (const [key, entry] of Object.entries(value)) {
+    const id = stringOrNull(entry)
+    result[key] = id || null
+  }
+
+  return result
 }
 
 export function parseJson(value: unknown, fallback: unknown): unknown {

@@ -58,6 +58,36 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
               </SelectControl>
             </Field>
 
+            <Field label="Account">
+              <SelectControl
+                id="createAccountSelect"
+                value={props.selectedAccountEmail}
+                onChange={(value) => props.setSelectedAccountEmail(value)}
+              >
+                {props.accountOptions.length === 0 ? (
+                  <option value="">Default</option>
+                ) : (
+                  props.accountOptions.map((email) => (
+                    <option key={email} value={email}>
+                      {email}
+                    </option>
+                  ))
+                )}
+              </SelectControl>
+            </Field>
+
+            {props.modelField && (
+              <Field id="createModelLabel" label={props.modelField.label || "Model"}>
+                <SelectControl id="createModelSelect" value={props.modelId} onChange={(value) => props.setModelId(value)}>
+                  {props.modelField.options?.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </SelectControl>
+              </Field>
+            )}
+
             {props.qualityField && (
               <Field id="createQualityLabel" label={props.qualityField.label || "Quality"}>
                 <SelectControl id="createQualitySelect" value={props.quality} onChange={(value) => props.setQuality(value)}>

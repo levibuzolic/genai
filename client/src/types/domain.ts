@@ -5,6 +5,8 @@ export type Config = {
   authorizationExpiresAt: string | null
   authorizationSource: string | null
   authBrowser?: AuthBrowserStatus
+  authAccounts?: AuthAccountStatus[]
+  defaultAccountEmail?: string | null
   autoSync?: AutoSyncStatus
   thumbnailDir: string
   pageLimit: number
@@ -13,6 +15,7 @@ export type Config = {
 export type AuthBrowserStatus = {
   status: string
   message: string
+  email?: string | null
   expiresAt: string | null
   lastRefreshAt: string | null
   nextRefreshAt: string | null
@@ -22,6 +25,14 @@ export type AuthBrowserStatus = {
   loginUrl: string
   hasProfile: boolean
   browserOpen: boolean
+}
+
+export type AuthAccountStatus = {
+  email: string
+  hasAuthorization: boolean
+  authorizationExpiresAt: string | null
+  authorizationSource: string | null
+  authBrowser: AuthBrowserStatus
 }
 
 export type AutoSyncStatus = {
@@ -39,6 +50,7 @@ export type AutoSyncStatus = {
 
 export type CatalogItem = {
   id: string
+  accountEmail?: string | null
   type?: string | null
   status?: string | null
   prompt?: string | null
@@ -46,6 +58,9 @@ export type CatalogItem = {
   outputUrl?: string | null
   localFile?: string | null
   thumbnailFile?: string | null
+  modelId?: string | null
+  model_id?: string | null
+  timeToGenerateMs?: number | null
   posterUrl?: string | null
   size?: number | null
   duration?: number | null
@@ -126,12 +141,27 @@ export type SyncStatus = {
   finishedAt?: string | null
 }
 
+export type CreateFieldOption = {
+  label: string
+  value: string
+  modelId?: string | null
+  resolution?: string
+  duration?: number
+  description?: string
+  tier?: string
+  protocol?: string
+  kind?: string
+  audio?: boolean
+  fixedDuration?: boolean
+}
+
 export type CreateField = {
   name: string
   label: string
+  type?: string
   required?: boolean
   default?: string
-  options?: Array<{ label: string; value: string }>
+  options?: CreateFieldOption[]
 }
 
 export type CreateMode = {
@@ -192,12 +222,14 @@ export type CreateTemplatesResponse = {
 
 export type CreateJob = {
   id: string
+  accountEmail?: string | null
   type?: string | null
   status?: string | null
   prompt?: string
   outputUrl?: string | null
   resolution?: string | null
   duration?: string | number | null
+  modelId?: string | null
   error?: string | null
 }
 
@@ -209,6 +241,7 @@ export type CreationSource =
 
 export type Creation = {
   id: string
+  accountEmail?: string | null
   jobId?: string | null
   status: string
   modeId?: string | null

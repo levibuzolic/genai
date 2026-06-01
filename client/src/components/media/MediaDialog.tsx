@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { formatBytes, formatDate, formatDuration } from "@/lib/format"
-import { isImageItem, mediaUrlForItem } from "@/lib/media"
+import { isFailedMediaItem, isImageItem, mediaUrlForItem } from "@/lib/media"
 import type { CatalogItem } from "@/types/domain"
 
 import { MediaPreview } from "./MediaPreview"
@@ -43,9 +43,12 @@ export function MediaDialog({
   onVideoMutedChange: (muted: boolean) => void
 }) {
   const mediaUrl = mediaUrlForItem(item)
+  const isFailed = Boolean(item && isFailedMediaItem(item))
   const canUsePrompt = Boolean(item?.prompt)
   const canUseImage = Boolean(item && isImageItem(item))
   const dialogOpen = open && Boolean(item)
+  const modelId = item ? item.modelId ?? item.model_id : null
+  const timeToGenerate = item?.timeToGenerateMs ? formatDuration(item.timeToGenerateMs / 1000) : null
 
   return (
     <Dialog open={dialogOpen} onOpenChange={onOpenChange}>
@@ -117,6 +120,22 @@ export function MediaDialog({
                       {item.prompt || "No prompt text"}
                     </p>
                   </section>
+                  {modelId && (
+                    <section id="detailModelSection">
+                      <h3>Model ID</h3>
+                      <p id="detailModelId" className="detailText">
+                        {modelId}
+                      </p>
+                    </section>
+                  )}
+                  {timeToGenerate && (
+                    <section id="detailTimeToGenerateSection">
+                      <h3>Time to generate</h3>
+                      <p id="detailTimeToGenerate" className="detailText">
+                        {timeToGenerate}
+                      </p>
+                    </section>
+                  )}
                   {item.negativePrompt && (
                     <section id="negativePromptSection">
                       <h3>Negative prompt</h3>
@@ -164,10 +183,12 @@ export function MediaDialog({
                           URL
                         </Button>
                       )}
-                      <Button id="detailFavoriteButton" size="sm" variant="ghost" onClick={() => onToggleFavorite(item)}>
-                        <Heart className={item.favorited ? "fill-current" : undefined} />
-                        {item.favorited ? "Unfavorite" : "Favorite"}
-                      </Button>
+                      {!isFailed && (
+                        <Button id="detailFavoriteButton" size="sm" variant="ghost" onClick={() => onToggleFavorite(item)}>
+                          <Heart className={item.favorited ? "fill-current" : undefined} />
+                          {item.favorited ? "Unfavorite" : "Favorite"}
+                        </Button>
+                      )}
                       <Button id="detailDeleteRemoteButton" size="sm" variant="ghost" onClick={() => onDeleteRemote(item)}>
                         <Trash2 />
                         Delete

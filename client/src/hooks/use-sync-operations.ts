@@ -19,14 +19,20 @@ const defaultSyncStatus: SyncStatus = {
   message: "Idle.",
 }
 
-export function useSyncOperations(onSettled: () => void) {
+export function useSyncOperations(onSettled: () => void, onProgress?: () => void) {
   const [syncStatus, setSyncStatus] = React.useState<SyncStatus>(defaultSyncStatus)
   const onSettledRef = React.useRef(onSettled)
+  const onProgressRef = React.useRef(onProgress)
   const lastSettledFinishedAtRef = React.useRef<string | null>(defaultSyncStatus.finishedAt || null)
+  const lastProgressSignatureRef = React.useRef("")
 
   React.useEffect(() => {
     onSettledRef.current = onSettled
   }, [onSettled])
+
+  React.useEffect(() => {
+    onProgressRef.current = onProgress
+  }, [onProgress])
 
   React.useEffect(() => {
     let cancelled = false
@@ -38,8 +44,16 @@ export function useSyncOperations(onSettled: () => void) {
         if (cancelled) return
         setSyncStatus((current) => replaceEqualJson(current, next))
         timer = window.setTimeout(poll, next.running ? ACTIVE_POLL_MS : IDLE_POLL_MS)
+        if (next.running) {
+          const progressSignature = JSON.stringify([next.currentPage, next.scanned, next.downloaded, next.skipped, next.errors.length])
+          if (progressSignature !== lastProgressSignatureRef.current) {
+            lastProgressSignatureRef.current = progressSignature
+            onProgressRef.current?.()
+          }
+        }
         if (!next.running && next.finishedAt && next.finishedAt !== lastSettledFinishedAtRef.current) {
           lastSettledFinishedAtRef.current = next.finishedAt
+          lastProgressSignatureRef.current = ""
           onSettledRef.current()
         }
       } catch {

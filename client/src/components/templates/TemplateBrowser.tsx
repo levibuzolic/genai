@@ -18,6 +18,7 @@ type TemplateEditorState = {
   modeId: string
   prompt: string
   negativePrompt: string
+  modelId: string
   quality: string
   imagePrompt: string
   videoPrompt: string
@@ -31,6 +32,7 @@ const EMPTY_TEMPLATE: TemplateEditorState = {
   modeId: "custom-video",
   prompt: "",
   negativePrompt: "",
+  modelId: "",
   quality: "1080p-15",
   imagePrompt: "",
   videoPrompt: "",
@@ -55,7 +57,22 @@ export function TemplateBrowser({
 }) {
   const [query, setQuery] = React.useState("")
   const [editor, setEditor] = React.useState<TemplateEditorState>(EMPTY_TEMPLATE)
-  const qualityOptions = modes.find((mode) => mode.id === "custom-video")?.fields?.find((field) => field.name === "quality")?.options || []
+  const selectedEditorMode = modes.find((mode) => mode.id === editor.modeId)
+  const modelField = selectedEditorMode?.fields?.find((field) => field.name === "modelId")
+  const qualityField = selectedEditorMode?.fields?.find((field) => field.name === "quality")
+  const modelOptions = modelField?.options || []
+  const qualityOptions = (qualityField?.options || []).filter(
+    (option) => !option.modelId || !editor.modelId || option.modelId === editor.modelId,
+  )
+  React.useEffect(() => {
+    if (!modelField || editor.modelId) return
+    const nextModelId = defaultModelIdForMode(modes, editor.modeId)
+    if (nextModelId) setEditor((current) => ({ ...current, modelId: current.modelId || nextModelId }))
+  }, [editor.modeId, editor.modelId, modelField, modes])
+  React.useEffect(() => {
+    if (!qualityOptions.length || qualityOptions.some((option) => option.value === editor.quality)) return
+    setEditor((current) => ({ ...current, quality: qualityOptions[0]?.value || "" }))
+  }, [editor.quality, qualityOptions])
   const filteredTemplates = React.useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
     if (!normalizedQuery) return templates
@@ -82,6 +99,7 @@ export function TemplateBrowser({
       modeId: template.settings?.modeId || modeIdForTemplateType(template.type),
       prompt: paramAsString(params["prompt"]) || "",
       negativePrompt: paramAsString(params["negativePrompt"]) || "",
+      modelId: paramAsString(params["modelId"] ?? videoStep?.params["modelId"]) || "",
       quality: paramAsString(params["quality"]) || "1080p-15",
       imagePrompt: paramAsString(imageStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
       videoPrompt: paramAsString(videoStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
@@ -181,10 +199,12 @@ export function TemplateBrowser({
               value={editor.type}
               onChange={(value) => {
                 const type = value as CreateTemplateType
+                const modeId = modeIdForTemplateType(type)
                 setEditor({
                   ...editor,
                   type,
-                  modeId: modeIdForTemplateType(type),
+                  modeId,
+                  modelId: defaultModelIdForMode(modes, modeId),
                 })
               }}
             >
@@ -197,7 +217,16 @@ export function TemplateBrowser({
           {editor.type !== "combo" && editor.type !== "nudify-video" ? (
             <>
               <Field label="Mode">
-                <SelectControl value={editor.modeId} onChange={(value) => setEditor({ ...editor, modeId: value })}>
+                <SelectControl
+                  value={editor.modeId}
+                  onChange={(value) =>
+                    setEditor({
+                      ...editor,
+                      modeId: value,
+                      modelId: defaultModelIdForMode(modes, value),
+                    })
+                  }
+                >
                   {modes
                     .filter((mode) => mode.kind !== "template")
                     .map((mode) => (
@@ -224,6 +253,21 @@ export function TemplateBrowser({
             <Field label="Video prompt">
               <Textarea value={editor.videoPrompt} onChange={(event) => setEditor({ ...editor, videoPrompt: event.target.value })} />
             </Field>
+          )}
+          {editor.type !== "image" && (
+            <>
+              {modelField && (
+                <Field label="Model">
+                  <SelectControl value={editor.modelId} onChange={(value) => setEditor({ ...editor, modelId: value })}>
+                    {modelOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </SelectControl>
+                </Field>
+              )}
+            </>
           )}
           {editor.type !== "image" && (
             <Field label="Quality">
@@ -277,6 +321,7 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
         params: {
           prompt: editor.videoPrompt,
           quality: editor.quality,
+          modelId: editor.modelId,
         },
       },
       workflow: [
@@ -291,6 +336,7 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
           params: {
             prompt: editor.videoPrompt,
             quality: editor.quality,
+            modelId: editor.modelId,
           },
         },
       ],
@@ -309,6 +355,7 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
         params: {
           prompt: editor.videoPrompt,
           quality: editor.quality,
+          modelId: editor.modelId,
         },
       },
       workflow: [
@@ -321,6 +368,7 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
           params: {
             prompt: editor.videoPrompt,
             quality: editor.quality,
+            modelId: editor.modelId,
           },
         },
       ],
@@ -338,6 +386,7 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
       params: {
         prompt: editor.prompt,
         quality: editor.quality,
+        modelId: editor.modelId,
         negativePrompt: editor.negativePrompt,
       },
     },
@@ -347,6 +396,7 @@ function templateDraftFromEditor(editor: TemplateEditorState): CreateTemplateDra
         params: {
           prompt: editor.prompt,
           quality: editor.quality,
+          modelId: editor.modelId,
           negativePrompt: editor.negativePrompt,
         },
       },
@@ -369,4 +419,9 @@ function modeIdForTemplateType(type: CreateTemplateType): string {
   if (type === "nudify-video") return "nudify-video"
 
   return "custom-video"
+}
+
+function defaultModelIdForMode(modes: CreateMode[], modeId: string): string {
+  const modelField = modes.find((mode) => mode.id === modeId)?.fields?.find((field) => field.name === "modelId")
+  return modelField?.default || modelField?.options?.[0]?.value || ""
 }

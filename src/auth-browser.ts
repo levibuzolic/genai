@@ -18,6 +18,11 @@ type TokenResult = {
   source: string
 }
 
+type CapturedClerkSession = {
+  token: string
+  email: string | null
+}
+
 type LaunchOptions = {
   headless: boolean
 }
@@ -31,7 +36,7 @@ type AuthBrowserLogger = {
 type AuthBrowserOptions = {
   profileDir: string
   loginUrl: string
-  onToken: (token: string, source: string) => TokenResult | Promise<TokenResult>
+  onToken: (token: string, source: string, session: { email?: string | null }) => TokenResult | Promise<TokenResult>
   launchPersistentContext?: LaunchPersistentContext
   loginTimeoutMs?: number
   tokenTimeoutMs?: number
@@ -42,6 +47,7 @@ type AuthBrowserOptions = {
 type AuthBrowserState = {
   status: AuthBrowserStatusValue
   message: string
+  email: string | null
   expiresAt: string | null
   lastRefreshAt: string | null
   nextRefreshAt: string | null
@@ -62,6 +68,16 @@ declare global {
         session?: {
           getToken?: () => Promise<string | null> | string | null
         }
+        user?: {
+          primaryEmailAddress?: {
+            emailAddress?: string | null
+          } | null
+          primaryEmailAddressId?: string | null
+          emailAddresses?: Array<{
+            id?: string | null
+            emailAddress?: string | null
+          }>
+        } | null
       }
     | undefined
 }
@@ -73,7 +89,7 @@ export function createAuthBrowserService(options: AuthBrowserOptions): AuthBrows
 class AuthBrowserService {
   readonly profileDir: string
   readonly loginUrl: string
-  readonly onToken: (token: string, source: string) => TokenResult | Promise<TokenResult>
+  readonly onToken: (token: string, source: string, session: { email?: string | null }) => TokenResult | Promise<TokenResult>
   readonly launchPersistentContext: LaunchPersistentContext
   readonly loginTimeoutMs: number
   readonly tokenTimeoutMs: number
@@ -83,6 +99,7 @@ class AuthBrowserService {
   refreshTimer: NodeJS.Timeout | null
   loginPoll: Promise<void> | null
   private connectPromise: Promise<AuthBrowserStatus> | null
+  private refreshPromise: Promise<AuthBrowserStatus> | null
   private state: AuthBrowserState
 
   constructor({
@@ -107,9 +124,11 @@ class AuthBrowserService {
     this.refreshTimer = null
     this.loginPoll = null
     this.connectPromise = null
+    this.refreshPromise = null
     this.state = {
       status: existsSync(profileDir) ? "profile-ready" : "disconnected",
       message: existsSync(profileDir) ? "Saved auth browser profile is available." : "No saved auth browser profile.",
+      email: null,
       expiresAt: null,
       lastRefreshAt: null,
       nextRefreshAt: null,
@@ -174,10 +193,24 @@ class AuthBrowserService {
   }
 
   async refreshHeadless(): Promise<AuthBrowserStatus> {
+    if (this.refreshPromise) {
+      return this.refreshPromise
+    }
+
     if (this.state.status === "awaiting-login") {
       return this.getStatus()
     }
 
+    this.refreshPromise = this.runHeadlessRefresh()
+
+    try {
+      return await this.refreshPromise
+    } finally {
+      this.refreshPromise = null
+    }
+  }
+
+  private async runHeadlessRefresh(): Promise<AuthBrowserStatus> {
     await this.closeContext()
     await mkdir(this.profileDir, { recursive: true })
     this.setState({
@@ -191,8 +224,8 @@ class AuthBrowserService {
       this.context = await this.launchPersistentContext(this.profileDir, { headless: true })
       const page = await getOrCreatePage(this.context)
       await page.goto(this.loginUrl, { waitUntil: "domcontentloaded" })
-      const token = await readClerkToken(page, this.tokenTimeoutMs)
-      await this.acceptToken(token)
+      const session = await readClerkSession(page, this.tokenTimeoutMs)
+      await this.acceptToken(session)
       await this.closeContext()
       return this.getStatus()
     } catch (error) {
@@ -220,6 +253,7 @@ class AuthBrowserService {
       status: existsSync(this.profileDir) ? "profile-ready" : "disconnected",
       mode: null,
       message: existsSync(this.profileDir) ? "Saved auth browser profile is available." : "Auth browser profile removed.",
+      email: null,
       expiresAt: null,
       lastRefreshAt: null,
       nextRefreshAt: null,
@@ -242,10 +276,10 @@ class AuthBrowserService {
     const deadline = Date.now() + this.loginTimeoutMs
 
     while (Date.now() < deadline && this.context) {
-      const token = await readClerkToken(page, 1000).catch(() => null)
+      const session = await readClerkSession(page, 1000).catch(() => null)
 
-      if (token) {
-        await this.acceptToken(token)
+      if (session) {
+        await this.acceptToken(session)
         await sleep(PROFILE_SETTLE_MS)
         await this.closeContext()
         return
@@ -257,13 +291,14 @@ class AuthBrowserService {
     throw new Error("Timed out waiting for login to complete.")
   }
 
-  async acceptToken(token: string): Promise<void> {
-    const result = await this.onToken(token, "auth-browser")
+  async acceptToken(session: CapturedClerkSession): Promise<void> {
+    const result = await this.onToken(session.token, "auth-browser", { email: session.email })
     const nextRefreshAt = calculateNextRefreshAt(result.expiresAt, this.refreshIntervalMs)
     this.setState({
       status: "connected",
       mode: null,
       message: "Auth browser profile is connected.",
+      email: session.email,
       expiresAt: result.expiresAt,
       lastRefreshAt: new Date().toISOString(),
       nextRefreshAt,
@@ -321,20 +356,41 @@ async function getOrCreatePage(context: BrowserContext): Promise<Page> {
   return context.pages()[0] ?? context.newPage()
 }
 
-async function readClerkToken(page: Page, timeoutMs: number): Promise<string> {
+async function readClerkSession(page: Page, timeoutMs: number): Promise<CapturedClerkSession> {
   const deadline = Date.now() + timeoutMs
 
   while (Date.now() < deadline) {
-    const token = await page
+    const session = await page
       .evaluate(async () => {
         const clerk = globalThis.Clerk
         if (!clerk?.session?.getToken) return null
-        return await clerk.session.getToken()
+        const token = await clerk.session.getToken()
+        if (!token) return null
+        const primaryEmail = clerk.user?.primaryEmailAddress?.emailAddress || null
+        const primaryEmailId = clerk.user?.primaryEmailAddressId || null
+        const emailFromList =
+          clerk.user?.emailAddresses?.find((entry) => entry.id && entry.id === primaryEmailId)?.emailAddress ||
+          clerk.user?.emailAddresses?.[0]?.emailAddress ||
+          null
+        return {
+          token,
+          email: primaryEmail || emailFromList,
+        }
       })
       .catch(() => null)
 
-    if (typeof token === "string" && token) {
-      return token
+    if (typeof session === "string" && session) {
+      return {
+        token: session,
+        email: null,
+      }
+    }
+
+    if (session && typeof session === "object" && typeof session.token === "string" && session.token) {
+      return {
+        token: session.token,
+        email: typeof session.email === "string" && session.email ? session.email : null,
+      }
     }
 
     await sleep(1000)

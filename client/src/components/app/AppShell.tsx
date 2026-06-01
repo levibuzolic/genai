@@ -49,6 +49,9 @@ export function AppShell({
   onAuthConnect,
   onAuthRefresh,
   onAuthDisconnect,
+  onAuthAccountConnect,
+  onAuthAccountRefresh,
+  onAuthAccountRemove,
   authActionPending,
   mediaBlurred,
   onToggleMediaBlur,
@@ -81,6 +84,9 @@ export function AppShell({
   onAuthConnect: () => void
   onAuthRefresh: () => void
   onAuthDisconnect: () => void
+  onAuthAccountConnect: (email: string) => void
+  onAuthAccountRefresh: (email: string) => void
+  onAuthAccountRemove: (email: string) => void
   authActionPending: boolean
   mediaBlurred: boolean
   onToggleMediaBlur: () => void
@@ -275,6 +281,9 @@ export function AppShell({
         onAuthConnect={onAuthConnect}
         onAuthRefresh={onAuthRefresh}
         onAuthDisconnect={onAuthDisconnect}
+        onAuthAccountConnect={onAuthAccountConnect}
+        onAuthAccountRefresh={onAuthAccountRefresh}
+        onAuthAccountRemove={onAuthAccountRemove}
         onCreateBackup={onCreateBackup}
         onRestoreBackup={onRestoreBackup}
       />

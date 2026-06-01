@@ -1,0 +1,112 @@
+[
+  {
+    "id": "qwen-image-2.0-pro",
+    "label": "Qwen Image 2.0 Pro",
+    "provider": "dashscope",
+    "dashscopeModelId": "qwen-image-2.0-pro",
+    "endpoint": "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "transport": "sync",
+    "coinsPerImage": 20,
+    "sizes": {
+      "1:1": "2048*2048",
+      "4:3": "2368*1728",
+      "3:4": "1728*2368"
+    },
+    "defaultSize": "3:4",
+    "supports": {
+      "negativePrompt": true,
+      "promptExtend": true,
+      "thinkingMode": false
+    },
+    "tier": "pro",
+    "description": "Highest quality. Strong text rendering, posters, illustrations."
+  },
+  {
+    "id": "qwen-image-2.0",
+    "label": "Qwen Image 2.0",
+    "provider": "dashscope",
+    "dashscopeModelId": "qwen-image-2.0",
+    "endpoint": "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "transport": "sync",
+    "coinsPerImage": 12,
+    "sizes": {
+      "1:1": "2048*2048",
+      "4:3": "2368*1728",
+      "3:4": "1728*2368"
+    },
+    "defaultSize": "3:4",
+    "supports": {
+      "negativePrompt": true,
+      "promptExtend": true,
+      "thinkingMode": false
+    },
+    "tier": "standard",
+    "description": "Balanced quality and cost. Same family as Pro."
+  },
+  {
+    "id": "wan2.7-image-pro",
+    "label": "WAN 2.7 Image Pro",
+    "provider": "dashscope",
+    "dashscopeModelId": "wan2.7-image-pro",
+    "endpoint": "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+    "transport": "async",
+    "coinsPerImage": 18,
+    "sizes": {
+      "1:1": "2048*2048",
+      "4:3": "2368*1728",
+      "3:4": "1728*2368"
+    },
+    "defaultSize": "3:4",
+    "supports": {
+      "negativePrompt": false,
+      "promptExtend": false,
+      "thinkingMode": true
+    },
+    "tier": "pro",
+    "description": "WAN family — feature-rich, strong portraits and colors."
+  },
+  {
+    "id": "wan2.7-image",
+    "label": "WAN 2.7 Image",
+    "provider": "dashscope",
+    "dashscopeModelId": "wan2.7-image",
+    "endpoint": "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/image-generation/generation",
+    "transport": "async",
+    "coinsPerImage": 10,
+    "sizes": {
+      "1:1": "2048*2048",
+      "4:3": "2368*1728",
+      "3:4": "1728*2368"
+    },
+    "defaultSize": "3:4",
+    "supports": {
+      "negativePrompt": false,
+      "promptExtend": false,
+      "thinkingMode": true
+    },
+    "tier": "standard",
+    "description": "WAN family base model — good value."
+  },
+  {
+    "id": "z-image-turbo",
+    "label": "Z-Image Turbo",
+    "provider": "dashscope",
+    "dashscopeModelId": "z-image-turbo",
+    "endpoint": "https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+    "transport": "sync",
+    "coinsPerImage": 5,
+    "sizes": {
+      "1:1": "2048*2048",
+      "4:3": "2368*1728",
+      "3:4": "1728*2368"
+    },
+    "defaultSize": "3:4",
+    "supports": {
+      "negativePrompt": false,
+      "promptExtend": false,
+      "thinkingMode": false
+    },
+    "tier": "turbo",
+    "description": "Fastest and cheapest. Realistic portraits and product shots."
+  }
+]

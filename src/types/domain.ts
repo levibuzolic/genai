@@ -7,6 +7,7 @@ export type ApiHeaders = Record<string, string>
 
 export type GeneratePornJobResponse = {
   id: string
+  accountEmail?: string | null | undefined
   user_id?: string | null | undefined
   userId?: string | null | undefined
   type?: string | null | undefined
@@ -25,6 +26,8 @@ export type GeneratePornJobResponse = {
   createdAt?: string | number | null | undefined
   external_task_id?: string | null | undefined
   externalTaskId?: string | null | undefined
+  last_polled_at?: string | number | null | undefined
+  lastPolledAt?: string | number | null | undefined
   shared?: boolean | null | undefined
   favorited?: boolean | null | undefined
   error?: string | null | undefined
@@ -34,6 +37,7 @@ export type GeneratePornJobResponse = {
 
 export type GeneratePornJob = {
   id: string
+  accountEmail?: string | null | undefined
   user_id?: string | null | undefined
   type?: string | null | undefined
   prompt?: string | null | undefined
@@ -46,6 +50,11 @@ export type GeneratePornJob = {
   seed?: string | number | null | undefined
   created_at?: string | number | null | undefined
   external_task_id?: string | null | undefined
+  last_polled_at?: string | number | null | undefined
+  lastPolledAt?: string | number | null | undefined
+  modelId?: string | null | undefined
+  model_id?: string | null | undefined
+  timeToGenerateMs?: number | null | undefined
   shared?: boolean | null | undefined
   favorited?: boolean | null | undefined
   error?: string | null | undefined
@@ -63,6 +72,7 @@ export type NormalizedJob = GeneratePornJob & {
 
 export type CatalogItem = {
   id: string
+  accountEmail?: string | null | undefined
   userId?: string | null | undefined
   type?: string | null | undefined
   prompt?: string | null | undefined
@@ -74,6 +84,11 @@ export type CatalogItem = {
   createdAt?: string | number | null | undefined
   createdAtIso?: string | null | undefined
   externalTaskId?: string | null | undefined
+  modelId?: string | null | undefined
+  model_id?: string | null | undefined
+  last_polled_at?: string | number | null | undefined
+  lastPolledAt?: string | number | null | undefined
+  timeToGenerateMs?: number | null | undefined
   shared?: boolean | null | undefined
   favorited?: boolean | null | undefined
   error?: string | null | undefined
@@ -122,6 +137,7 @@ export type Catalog = {
   downloadedJobIds: string[]
   orphanFiles: OrphanFile[]
   lastSeenJobId: string | null
+  lastSeenJobIdsByAccount?: Record<string, string | null> | undefined
   updatedAt: string | null
   lastRun: Record<string, unknown> | null
 }
@@ -154,6 +170,20 @@ export type ResolvedCreateSource = {
 
 export type CreateParams = Record<string, string | number | boolean | null | undefined>
 
+export type CreateFieldOption = {
+  label: string
+  value: string
+  modelId?: string | null | undefined
+  resolution?: string | undefined
+  duration?: number | undefined
+  description?: string | undefined
+  tier?: string | undefined
+  protocol?: string | undefined
+  kind?: string | undefined
+  audio?: boolean | undefined
+  fixedDuration?: boolean | undefined
+}
+
 export type CreateMode = {
   id: string
   label: string
@@ -164,7 +194,14 @@ export type CreateMode = {
     required: boolean
     acceptedKinds: string[]
   }
-  fields: Record<string, unknown>[]
+  fields: Array<{
+    name: string
+    label: string
+    type?: string | undefined
+    required?: boolean | undefined
+    default?: string | undefined
+    options?: CreateFieldOption[] | undefined
+  }>
   defaults?: CreateParams
   fixed?: CreateParams & {
     prompt?: string
@@ -227,6 +264,7 @@ export type CreationWorkflow = {
 
 export type CreationJob = {
   id: string
+  accountEmail: string | null
   jobId: string | null
   status: string
   modeId: string | null

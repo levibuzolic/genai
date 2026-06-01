@@ -8,9 +8,15 @@ import {
   acceptAuthorization,
   authBrowser,
   authState,
+  connectAuthAccount,
+  getAuthAccountStatuses,
   getActiveAuthorization,
   getAuthExpiresAt,
+  getDefaultAccountEmail,
+  refreshAuthAccount,
+  removeAuthAccount,
   resetAuthRuntimeState,
+  startAuthAccountAutoRefresh,
 } from "./server/auth-state.ts"
 import { closeCatalogDb } from "./server/catalog-db.ts"
 import {
@@ -64,7 +70,7 @@ import {
   saveCreateTemplateRegistry,
 } from "./server/create-templates.ts"
 import { getErrorStatusCode } from "./server/errors.ts"
-import { readJsonBody, sendJson, serveMedia, serveStatic } from "./server/static.ts"
+import { logHttpNotFound, readJsonBody, sendJson, serveMedia, serveStatic } from "./server/static.ts"
 import {
   autoSyncState,
   getAutoSyncStatus,
@@ -85,11 +91,13 @@ import { clamp, hashBuffer, resolveMediaDirFromRoot } from "./server/utils.ts"
 
 const AuthTokenBodySchema = z
   .object({
+    accountEmail: z.string().optional(),
     authorization: z.unknown().optional(),
     source: z.string().catch("browser"),
     token: z.unknown().optional(),
   })
   .passthrough()
+const AuthAccountBodySchema = z.object({ email: z.string(), deleteProfile: z.boolean().catch(false) }).passthrough()
 const CatalogBackupBodySchema = z.object({ reason: z.string().catch("manual") }).passthrough()
 const CatalogRestoreBodySchema = z.object({ file: z.string().catch("") }).passthrough()
 const DisconnectBrowserBodySchema = z.object({ deleteProfile: z.boolean().catch(false) }).passthrough()
@@ -112,13 +120,16 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/config") {
+      const authAccounts = getAuthAccountStatuses()
       return sendJson(response, {
         mediaDir: MEDIA_DIR,
         hasCookie: Boolean(process.env["GENERATEPORN_COOKIE"]),
-        hasAuthorization: Boolean(getActiveAuthorization()),
+        hasAuthorization: Boolean(getActiveAuthorization() || authAccounts.some((account) => account.hasAuthorization)),
         authorizationExpiresAt: getAuthExpiresAt(),
         authorizationSource: authState.source,
         authBrowser: authBrowser.getStatus(),
+        authAccounts,
+        defaultAccountEmail: getDefaultAccountEmail(),
         autoSync: getAutoSyncStatus(),
         thumbnailDir: THUMBNAIL_DIR,
         pageLimit: PAGE_LIMIT,
@@ -215,12 +226,13 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "POST" && url.pathname === "/api/auth/token") {
       const body = AuthTokenBodySchema.parse(await readJsonBody(request))
-      const auth = acceptAuthorization(body.authorization || body.token, body.source)
+      const auth = acceptAuthorization(body.authorization || body.token, body.source, body.accountEmail)
 
       return sendJson(response, {
         ok: true,
         expiresAt: auth.expiresAt,
         source: auth.source,
+        email: auth.email,
       })
     }
 
@@ -239,6 +251,25 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/auth/browser/disconnect") {
       const body = DisconnectBrowserBodySchema.parse(await readJsonBody(request))
       return sendJson(response, await authBrowser.disconnect({ deleteProfile: body.deleteProfile }))
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/auth/accounts") {
+      return sendJson(response, { accounts: getAuthAccountStatuses(), defaultAccountEmail: getDefaultAccountEmail() })
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/auth/accounts/connect") {
+      const body = AuthAccountBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, await connectAuthAccount(body.email))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/auth/accounts/refresh") {
+      const body = AuthAccountBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, await refreshAuthAccount(body.email))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/auth/accounts/remove") {
+      const body = AuthAccountBodySchema.parse(await readJsonBody(request))
+      return sendJson(response, await removeAuthAccount(body.email, { deleteProfile: body.deleteProfile }))
     }
 
     if (request.method === "GET" && url.pathname === "/api/items") {
@@ -367,6 +398,7 @@ const server = http.createServer(async (request, response) => {
       return serveStatic(response, url.pathname)
     }
 
+    logHttpNotFound("route not found", { method: request.method, pathname: url.pathname })
     sendJson(response, { error: "Not found" }, 404)
   } catch (error) {
     console.error(error)
@@ -384,7 +416,7 @@ if (isCliEntry()) {
   server.listen(PORT, () => {
     console.log(`Media library running at http://localhost:${PORT}`)
     console.log(`Media directory: ${MEDIA_DIR}`)
-    authBrowser.startAutoRefresh()
+    startAuthAccountAutoRefresh()
     startAutoSyncLoop()
   })
 }
@@ -401,6 +433,7 @@ export {
   acceptAuthorization,
   autoSyncState,
   authBrowser,
+  connectAuthAccount,
   buildFacets,
   buildCreateApiRequest,
   createCatalogBackup,
@@ -411,6 +444,7 @@ export {
   findJobForTemplate,
   duplicateCreation,
   getCatalogDownloadQueue,
+  getAuthAccountStatuses,
   getCreateModes,
   getCreateTemplateRegistryResponse,
   getCreationDetails,
@@ -430,10 +464,12 @@ export {
   saveCreateTemplateFromRequest,
   applyDuplicateMetadata,
   reconcileCatalogWithLocalFiles,
+  refreshAuthAccount,
   requestSyncCancellation,
   refreshCreations,
   restoreCatalogBackup,
   resolveMediaDir,
+  removeAuthAccount,
   server,
   setCatalogItemFavoriteRemote,
   startCatalogDownload,

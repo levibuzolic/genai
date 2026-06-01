@@ -7,7 +7,10 @@ import {
   CREATE_IMAGE_ACCEPT,
   CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
   CREATE_IMAGE_DEFAULT_MODEL_ID,
+  CREATE_TEXT_VIDEO_DEFAULT_MODEL_ID,
+  CREATE_VIDEO_DEFAULT_MODEL_ID,
   CREATE_VIDEO_QUALITY_OPTIONS,
+  CREATE_VIDEO_MODEL_DEFINITIONS,
   CREATE_VIDEO_DEFAULT_DURATION,
   CREATE_VIDEO_DEFAULT_RESOLUTION,
 } from "./create-constants.ts"
@@ -19,6 +22,7 @@ import { contentTypeFor } from "./utils.ts"
 
 export type PublicCreateJob = {
   id: string
+  accountEmail: string | null
   type: string | null
   inputUrl: string | null
   prompt: string
@@ -27,6 +31,7 @@ export type PublicCreateJob = {
   duration: string | number | null
   seed: string | number | null
   externalTaskId: string | null
+  modelId: string | null
   outputUrl: string | null
   status: string | null
   error: string | null
@@ -61,18 +66,10 @@ export function buildCreateApiRequest(
     }
   }
 
-  if (!source) {
-    throw new Error("Source is required.")
-  }
-
-  if (source.isDataUrl) {
-    body["image_base64"] = source.value
-  } else {
-    body["input_url"] = source.value
-  }
-
   if (mode.endpoint === "video") {
-    const quality = getVideoQuality(params, mode)
+    const model = getVideoModel(params, mode)
+    const quality = getVideoQuality(params, mode, model.id)
+    body["modelId"] = model.id
     body["resolution"] = quality.resolution
     body["duration"] = quality.duration
 
@@ -81,9 +78,31 @@ export function buildCreateApiRequest(
       assertCreateTextAllowed(negativePrompt, "Negative prompt")
       body["negative_prompt"] = negativePrompt
     }
+
+    if (model.kind !== "t2v") {
+      if (!source) {
+        throw new Error("Source is required.")
+      }
+
+      if (source.isDataUrl) {
+        body["image_base64"] = source.value
+      } else {
+        body["input_url"] = source.value
+      }
+    }
+  } else {
+    if (!source) {
+      throw new Error("Source is required.")
+    }
+
+    if (source.isDataUrl) {
+      body["image_base64"] = source.value
+    } else {
+      body["input_url"] = source.value
+    }
   }
 
-  if (mode.id === "custom-image" || mode.id === "custom-video") {
+  if (mode.id === "custom-video" || mode.id === "text-to-video") {
     body["seed"] = params["seed"] ?? mode.defaults?.["seed"] ?? null
   }
 
@@ -104,7 +123,31 @@ function getImageAspectRatio(params: CreateParams, mode: CreateMode): string {
   return aspectRatio
 }
 
-function getVideoQuality(params: CreateParams, mode: CreateMode): { resolution: string; duration: number } {
+function getVideoModel(params: CreateParams, mode: CreateMode): { id: string; kind: string } {
+  const modelId = String(
+    params["modelId"] ||
+      mode.fixed?.["modelId"] ||
+      mode.defaults?.["modelId"] ||
+      (mode.source?.required === false ? CREATE_TEXT_VIDEO_DEFAULT_MODEL_ID : CREATE_VIDEO_DEFAULT_MODEL_ID),
+  )
+  const model = CREATE_VIDEO_MODEL_DEFINITIONS.find((entry) => entry.id === modelId)
+
+  if (!model) {
+    throw new Error("Unsupported video model.")
+  }
+
+  if (mode.source?.required === false && model.kind !== "t2v") {
+    throw new Error("Text-to-video mode requires a text-to-video model.")
+  }
+
+  if (mode.source?.required !== false && model.kind === "t2v") {
+    throw new Error("Image-to-video mode requires an image-to-video model.")
+  }
+
+  return model
+}
+
+function getVideoQuality(params: CreateParams, mode: CreateMode, modelId: string): { resolution: string; duration: number } {
   if (mode.kind === "template") {
     return {
       resolution: mode.fixed?.resolution || CREATE_VIDEO_DEFAULT_RESOLUTION,
@@ -113,7 +156,10 @@ function getVideoQuality(params: CreateParams, mode: CreateMode): { resolution: 
   }
 
   if (params["quality"]) {
-    const option = CREATE_VIDEO_QUALITY_OPTIONS.find((entry) => `${entry.resolution}-${entry.duration}` === params["quality"])
+    const quality = String(params["quality"])
+    const option = CREATE_VIDEO_QUALITY_OPTIONS.find(
+      (entry) => entry.modelId === modelId && (entry.value === quality || `${entry.resolution}-${entry.duration}` === quality),
+    )
     if (option) {
       return {
         resolution: option.resolution,
@@ -124,7 +170,9 @@ function getVideoQuality(params: CreateParams, mode: CreateMode): { resolution: 
 
   const resolution = String(params["resolution"] || mode.defaults?.["resolution"] || CREATE_VIDEO_DEFAULT_RESOLUTION)
   const duration = Number(params["duration"] || mode.defaults?.["duration"] || CREATE_VIDEO_DEFAULT_DURATION)
-  const allowed = CREATE_VIDEO_QUALITY_OPTIONS.some((entry) => entry.resolution === resolution && entry.duration === duration)
+  const allowed = CREATE_VIDEO_QUALITY_OPTIONS.some(
+    (entry) => entry.modelId === modelId && entry.resolution === resolution && entry.duration === duration,
+  )
 
   if (!allowed) {
     throw new Error("Unsupported video quality.")
@@ -295,6 +343,7 @@ async function normalizeCreateDataUrl(value: unknown): Promise<{ dataUrl: string
 export function toPublicCreateJob(job: GeneratePornJob): PublicCreateJob {
   return {
     id: job.id,
+    accountEmail: job.accountEmail || null,
     type: job.type || null,
     inputUrl: job.input_url || null,
     prompt: job.prompt || "",
@@ -303,6 +352,7 @@ export function toPublicCreateJob(job: GeneratePornJob): PublicCreateJob {
     duration: job.duration || null,
     seed: job.seed ?? null,
     externalTaskId: job.external_task_id || null,
+    modelId: job.modelId || job.model_id || null,
     outputUrl: job.output_url || null,
     status: job.status || null,
     error: job.error || null,

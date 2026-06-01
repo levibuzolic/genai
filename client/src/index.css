@@ -215,6 +215,20 @@
   @apply bg-red-950/20;
 }
 
+.media-card.is-failed {
+  @apply border-amber-900/70 bg-amber-950/25 hover:border-amber-700/70 hover:bg-amber-950/35;
+}
+
+.media-card.is-failed .preview,
+.media-card.is-failed .mediaPreviewButton,
+.media-card.is-failed .cardActions {
+  @apply bg-amber-950/20;
+}
+
+.media-card.is-failed .cardBody {
+  @apply bg-amber-950/20;
+}
+
 .media-card.is-list {
   @apply grid md:grid-cols-[220px_minmax(0,1fr)];
 }
@@ -303,7 +317,19 @@
   @apply size-4;
 }
 
+.failedMediaBadge {
+  @apply pointer-events-none absolute right-1.5 top-1.5 z-20 grid size-8 place-items-center rounded-full border border-amber-500/60 bg-amber-950/90 text-amber-200 shadow-sm shadow-amber-950/50 backdrop-blur-sm;
+}
+
+.failedMediaBadge svg {
+  @apply size-4;
+}
+
 .media-card.is-deleted .previewOpenBadge {
+  @apply right-10;
+}
+
+.media-card.is-failed .previewOpenBadge {
   @apply right-10;
 }
 
@@ -334,6 +360,10 @@
 
 .pendingPreview {
   @apply border-dashed bg-muted/20;
+}
+
+.failed-preview {
+  @apply grid place-items-center gap-2 p-4 text-amber-200;
 }
 
 .durationBadge {

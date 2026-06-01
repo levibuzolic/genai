@@ -43,8 +43,16 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
     prompt: "animate this",
     quality: "1080p-10",
   }).body
+  const spicyVideo = server.buildCreateApiRequest(customVideo, dataSource, {
+    prompt: "spicy motion",
+    modelId: "wan2.7-i2v-spicy",
+    quality: "1080p-15",
+  }).body
   const imageUrl = server.buildCreateApiRequest(customImage, urlSource, {
     prompt: "edit this",
+  }).body
+  const imageUpload = server.buildCreateApiRequest(customImage, dataSource, {
+    prompt: "edit upload",
   }).body
   const templateUpload = server.buildCreateApiRequest(template, dataSource).body
   const templateUrl = server.buildCreateApiRequest(template, urlSource).body
@@ -55,15 +63,36 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
 
   assert.equal(videoUpload.image_base64, imageDataUrl())
   assert.equal(videoUpload.input_url, undefined)
+  assert.equal(videoUpload.modelId, "wan2.7-i2v")
   assert.equal(videoUpload.resolution, "1080p")
   assert.equal(videoUpload.duration, 10)
+  assert.equal(customVideo.fields.find((field) => field.name === "modelId").options.length, 5)
   assert.equal(customVideo.fields.find((field) => field.name === "quality").default, "1080p-15")
+  assert.deepEqual(
+    {
+      modelId: spicyVideo.modelId,
+      resolution: spicyVideo.resolution,
+      duration: spicyVideo.duration,
+      seed: spicyVideo.seed,
+      hasSource: Boolean(spicyVideo.image_base64),
+    },
+    {
+      modelId: "wan2.7-i2v-spicy",
+      resolution: "1080p",
+      duration: 15,
+      seed: null,
+      hasSource: true,
+    },
+  )
   assert.equal(imageVideo.label, "Image Edit + Video")
   assert.equal(nudifyVideo.label, "Nudify + Video")
   assert.equal(videoUpload.seed, null)
   assert.equal(imageUrl.input_url, "https://assets.example/source.png")
   assert.equal(imageUrl.image_base64, undefined)
-  assert.equal(imageUrl.seed, null)
+  assert.equal(imageUrl.seed, undefined)
+  assert.equal(imageUpload.image_base64, imageDataUrl())
+  assert.equal(imageUpload.input_url, undefined)
+  assert.equal(imageUpload.seed, undefined)
   assert.equal(templateUpload.image_base64, imageDataUrl())
   assert.equal(templateUpload.negative_prompt, "template negative")
   assert.equal(templateUrl.input_url, "https://assets.example/source.png")
@@ -73,6 +102,29 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
   assert.equal(generatedImage.prompt, "make a poster")
   assert.equal(generatedImage.modelId, "qwen-image-2.0-pro")
   assert.equal(generatedImage.aspectRatio, "1:1")
+
+  const textToVideo = modes.find((mode) => mode.id === "text-to-video")
+  const generatedVideo = server.buildCreateApiRequest(textToVideo, null, {
+    prompt: "make a video",
+    modelId: "wan2.7-t2v",
+    quality: "1080p-15",
+  }).body
+  assert.deepEqual(generatedVideo, {
+    prompt: "make a video",
+    modelId: "wan2.7-t2v",
+    resolution: "1080p",
+    duration: 15,
+    seed: null,
+  })
+  assert.throws(
+    () =>
+      server.buildCreateApiRequest(customVideo, urlSource, {
+        prompt: "bad combo",
+        modelId: "wan2.2-i2v-plus",
+        quality: "720p-4",
+      }),
+    /Unsupported video quality/,
+  )
 })
 
 test("template selection does not force a combo workflow when mode is video only", async () => {
@@ -139,6 +191,117 @@ test("template selection does not force a combo workflow when mode is video only
     assert.equal(details.creation.templateId, template.id)
     assert.equal(details.creation.modeId, "custom-video")
     assert.equal(details.creation.workflow, null)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("creation requests refresh auth in the browser once after an upstream token failure", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-auth-refresh-"))
+  const jobId = "63636363-6363-4636-8636-636363636363"
+  const initialToken = fakeBearerTokenWithClaim("initial")
+  const refreshedToken = fakeBearerTokenWithClaim("refreshed")
+  const authorizations = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+    const headers = new Headers(options.headers)
+    authorizations.push(headers.get("authorization"))
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      if (authorizations.length === 1) {
+        return new Response(JSON.stringify({ error: "expired_token" }), {
+          status: 401,
+          headers: {
+            "content-type": "application/json",
+          },
+        })
+      }
+
+      return jsonResponse({ job_id: jobId })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: initialToken,
+    })
+    let refreshes = 0
+    server.authBrowser.refreshHeadless = async () => {
+      refreshes += 1
+      server.acceptAuthorization(refreshedToken, "auth-browser")
+      return { ...server.authBrowser.getStatus(), status: "connected" }
+    }
+
+    const result = await server.createMediaJob({
+      modeId: "custom-image",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "refresh auth once",
+      },
+    })
+
+    assert.equal(result.jobId, jobId)
+    assert.equal(refreshes, 1)
+    assert.deepEqual(authorizations, [initialToken, refreshedToken])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("creation requests report a second auth failure without another automatic refresh", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-auth-refresh-failed-"))
+  const originalFetch = globalThis.fetch
+  let requests = 0
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+    requests += 1
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      return new Response(JSON.stringify({ error: `expired_token_${requests}` }), {
+        status: 401,
+        headers: {
+          "content-type": "application/json",
+        },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerTokenWithClaim("initial"),
+    })
+    let refreshes = 0
+    server.authBrowser.refreshHeadless = async () => {
+      refreshes += 1
+      server.acceptAuthorization(fakeBearerTokenWithClaim("refreshed"), "auth-browser")
+      return { ...server.authBrowser.getStatus(), status: "connected" }
+    }
+
+    await assert.rejects(
+      () =>
+        server.createMediaJob({
+          modeId: "custom-image",
+          source: {
+            kind: "url",
+            url: "https://assets.example/source.png",
+          },
+          params: {
+            prompt: "refresh auth fails",
+          },
+        }),
+      /expired_token_2/,
+    )
+
+    assert.equal(requests, 2)
+    assert.equal(refreshes, 1)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -218,6 +381,45 @@ test("text-to-image creation submits without a source image", async () => {
       prompt: "make a portrait",
       modelId: "qwen-image-2.0-pro",
       aspectRatio: "4:3",
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("text-to-video creation submits model video without a source image", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-text-to-video-"))
+  const jobId = "59595959-5959-4595-8595-595959595959"
+  const originalFetch = globalThis.fetch
+  let submittedBody = null
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), "https://api.generateporn.ai/api/jobs/video")
+    submittedBody = JSON.parse(String(options.body))
+    return jsonResponse({ job_id: jobId })
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    const response = await server.createMediaJob({
+      modeId: "text-to-video",
+      params: {
+        prompt: "make a cinematic shot",
+        modelId: "wan2.7-t2v",
+        quality: "720p-8",
+      },
+      source: null,
+    })
+
+    assert.equal(response.jobId, jobId)
+    assert.equal(response.modeId, "text-to-video")
+    assert.deepEqual(submittedBody, {
+      prompt: "make a cinematic shot",
+      modelId: "wan2.7-t2v",
+      resolution: "720p",
+      duration: 8,
+      seed: null,
     })
   } finally {
     globalThis.fetch = originalFetch
@@ -578,6 +780,7 @@ test("creation job submit and download use mocked API and merge into catalog", a
     assert.equal(submitBody.image_base64.startsWith("data:image/jpeg;base64,"), true)
     assert.notEqual(submitBody.image_base64, sourceDataUrl)
     assert.equal(submitBody.input_url, undefined)
+    assert.equal(submitBody.modelId, "wan2.7-i2v")
     assert.equal(submitBody.seed, null)
     assert.equal(
       history.creations.some((creation) => creation.jobId === jobId && creation.status === "done"),
@@ -780,3 +983,15 @@ test("creation refresh updates active jobs and imports upstream history", async 
     globalThis.fetch = originalFetch
   }
 })
+
+function fakeBearerTokenWithClaim(claim) {
+  const header = Buffer.from(JSON.stringify({ alg: "none", typ: "JWT" })).toString("base64url")
+  const payload = Buffer.from(
+    JSON.stringify({
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      claim,
+    }),
+  ).toString("base64url")
+
+  return `Bearer ${header}.${payload}.signature`
+}

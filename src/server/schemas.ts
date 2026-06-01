@@ -25,6 +25,7 @@ export const JwtPayloadSchema = z.object({ exp: z.number().optional() }).passthr
 export const GeneratePornJobResponseSchema = z
   .object({
     id: z.string(),
+    accountEmail: nullableStringSchema,
     user_id: nullableStringSchema,
     userId: nullableStringSchema,
     type: nullableStringSchema,
@@ -43,6 +44,10 @@ export const GeneratePornJobResponseSchema = z
     createdAt: nullableStringOrNumberSchema,
     external_task_id: nullableStringSchema,
     externalTaskId: nullableStringSchema,
+    last_polled_at: nullableStringOrNumberSchema,
+    lastPolledAt: nullableStringOrNumberSchema,
+    modelId: nullableStringSchema,
+    model_id: nullableStringSchema,
     shared: z.boolean().nullish(),
     favorited: z.boolean().nullish(),
     error: nullableStringSchema,
@@ -62,6 +67,10 @@ function preferString<T extends string | null | undefined>(primary: T, fallback:
   return primary || fallback
 }
 
+function optionalString(value: unknown): string | null | undefined {
+  return typeof value === "string" || value === null || value === undefined ? value : undefined
+}
+
 function preferStringOrNumber<T extends string | number | null | undefined>(primary: T, fallback: T): T {
   return primary || fallback
 }
@@ -69,6 +78,7 @@ function preferStringOrNumber<T extends string | number | null | undefined>(prim
 function normalizeGeneratePornJobResponse(job: GeneratePornJobResponse): GeneratePornJob {
   return {
     id: job.id,
+    accountEmail: job.accountEmail,
     user_id: preferString(job.user_id, job.userId),
     type: job.type,
     prompt: job.prompt,
@@ -81,6 +91,10 @@ function normalizeGeneratePornJobResponse(job: GeneratePornJobResponse): Generat
     seed: job.seed,
     created_at: preferStringOrNumber(job.created_at, job.createdAt),
     external_task_id: preferString(job.external_task_id, job.externalTaskId),
+    last_polled_at: preferStringOrNumber(job.last_polled_at, job.lastPolledAt),
+    lastPolledAt: preferStringOrNumber(job.last_polled_at, job.lastPolledAt),
+    modelId: preferString(optionalString(job["modelId"]), optionalString(job["model_id"])),
+    model_id: preferString(optionalString(job["modelId"]), optionalString(job["model_id"])),
     shared: job.shared,
     favorited: job.favorited,
     error: job.error,
@@ -91,6 +105,7 @@ function normalizeGeneratePornJobResponse(job: GeneratePornJobResponse): Generat
 export const CatalogItemSchema = z
   .object({
     id: z.string(),
+    accountEmail: nullableStringSchema,
     userId: nullableStringSchema,
     type: nullableStringSchema,
     prompt: nullableStringSchema,
@@ -98,6 +113,11 @@ export const CatalogItemSchema = z
     status: nullableStringSchema,
     outputUrl: nullableStringSchema,
     inputUrl: nullableStringSchema,
+    modelId: nullableStringSchema,
+    model_id: nullableStringSchema,
+    last_polled_at: nullableStringOrNumberSchema,
+    lastPolledAt: nullableStringOrNumberSchema,
+    timeToGenerateMs: z.number().nullish(),
     duration: z.number().nullish(),
     createdAt: nullableStringOrNumberSchema,
     createdAtIso: nullableStringSchema,
@@ -137,6 +157,7 @@ export const CatalogInputSchema = z
     items: z.array(z.unknown()).catch([]),
     lastRun: RecordSchema.nullable().catch(null),
     lastSeenJobId: z.string().nullable().catch(null),
+    lastSeenJobIdsByAccount: z.record(z.string(), z.string().nullable()).catch({}),
     orphanFiles: z.array(z.unknown()).catch([]),
     updatedAt: z.string().nullable().catch(null),
   })
@@ -145,6 +166,7 @@ export const CatalogInputSchema = z
     items: [],
     lastRun: null,
     lastSeenJobId: null,
+    lastSeenJobIdsByAccount: {},
     orphanFiles: [],
     updatedAt: null,
   })
