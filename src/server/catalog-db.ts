@@ -103,6 +103,34 @@ type PlayboxAssetRow = typeof playboxAssets.$inferSelect
 type PlayboxCollectionInsert = typeof playboxCollections.$inferInsert
 type PlayboxAssetInsert = typeof playboxAssets.$inferInsert
 
+type MediaItemIndexColumns = {
+  provider: string
+  mediaKind: string
+  status: string | null
+  prompt: string | null
+  negativePrompt: string | null
+  searchText: string | null
+  localFile: string | null
+  outputUrl: string | null
+  downloadError: string | null
+  remoteDeletedAt: string | null
+  size: number | null
+  hasLocalFile: number
+  hasOutputUrl: number
+  hasDownloadError: number
+  isDeleted: number
+  isMissing: number
+  isFavorited: number
+  isDuplicate: number
+  isUnverified: number
+  isImage: number
+  isVideo: number
+  renderStartedAt: number | null
+  failureObservedAt: number | null
+  createdAt: number
+  updatedAt: string | null
+}
+
 export type PlayboxCollectionRecord = {
   id: string
   accountId: string | null
@@ -131,6 +159,12 @@ export type PlayboxAssetRecord = {
   downloadError: string | null
 }
 
+const MEDIA_ITEM_INDEX_VERSION = 1
+const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
+const FAILED_MEDIA_STATUSES = new Set(["failed", "error", "cancelled", "canceled"])
+const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
+const FAILED_MEDIA_VISIBLE_MS = 5 * 60 * 1000
+
 let catalogDb: DatabaseSync | null = null
 let catalogOrm: CatalogOrm | null = null
 let catalogDbRevision = 0
@@ -145,6 +179,7 @@ export function getCatalogDb(): DatabaseSync {
   catalogDb.exec("PRAGMA foreign_keys = ON")
   catalogDb.exec("PRAGMA busy_timeout = 5000")
   ensureCatalogSchema(catalogDb)
+  backfillMediaItemIndexColumns(catalogDb)
   return catalogDb
 }
 
@@ -177,6 +212,29 @@ function ensureCatalogSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS media_items (
       id TEXT PRIMARY KEY,
       item_json TEXT NOT NULL,
+      provider TEXT NOT NULL DEFAULT 'generateporn',
+      media_kind TEXT NOT NULL DEFAULT 'unknown',
+      status TEXT,
+      prompt TEXT,
+      negative_prompt TEXT,
+      search_text TEXT,
+      local_file TEXT,
+      output_url TEXT,
+      download_error TEXT,
+      remote_deleted_at TEXT,
+      size INTEGER,
+      has_local_file INTEGER NOT NULL DEFAULT 0,
+      has_output_url INTEGER NOT NULL DEFAULT 0,
+      has_download_error INTEGER NOT NULL DEFAULT 0,
+      is_deleted INTEGER NOT NULL DEFAULT 0,
+      is_missing INTEGER NOT NULL DEFAULT 0,
+      is_favorited INTEGER NOT NULL DEFAULT 0,
+      is_duplicate INTEGER NOT NULL DEFAULT 0,
+      is_unverified INTEGER NOT NULL DEFAULT 0,
+      is_image INTEGER NOT NULL DEFAULT 0,
+      is_video INTEGER NOT NULL DEFAULT 0,
+      render_started_at INTEGER,
+      failure_observed_at INTEGER,
       created_at INTEGER,
       updated_at TEXT
     );
@@ -272,6 +330,35 @@ function ensureCatalogSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS playbox_assets_collection_id_idx ON playbox_assets(collection_id);
     CREATE INDEX IF NOT EXISTS playbox_assets_kind_idx ON playbox_assets(kind);
   `)
+  ensureCatalogColumn(db, "media_items", "provider", "TEXT NOT NULL DEFAULT 'generateporn'")
+  ensureCatalogColumn(db, "media_items", "media_kind", "TEXT NOT NULL DEFAULT 'unknown'")
+  ensureCatalogColumn(db, "media_items", "status", "TEXT")
+  ensureCatalogColumn(db, "media_items", "prompt", "TEXT")
+  ensureCatalogColumn(db, "media_items", "negative_prompt", "TEXT")
+  ensureCatalogColumn(db, "media_items", "search_text", "TEXT")
+  ensureCatalogColumn(db, "media_items", "local_file", "TEXT")
+  ensureCatalogColumn(db, "media_items", "output_url", "TEXT")
+  ensureCatalogColumn(db, "media_items", "download_error", "TEXT")
+  ensureCatalogColumn(db, "media_items", "remote_deleted_at", "TEXT")
+  ensureCatalogColumn(db, "media_items", "size", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "has_local_file", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "has_output_url", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "has_download_error", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "is_deleted", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "is_missing", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "is_favorited", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "is_duplicate", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "is_unverified", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "is_image", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "is_video", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "render_started_at", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "failure_observed_at", "INTEGER")
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS media_items_provider_created_at_idx ON media_items(provider, created_at DESC);
+    CREATE INDEX IF NOT EXISTS media_items_media_kind_created_at_idx ON media_items(media_kind, created_at DESC);
+    CREATE INDEX IF NOT EXISTS media_items_status_created_at_idx ON media_items(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS media_items_size_idx ON media_items(size);
+  `)
   ensureCatalogColumn(db, "creation_jobs", "template_id", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "template_label", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "workflow_json", "TEXT")
@@ -279,6 +366,241 @@ function ensureCatalogSchema(db: DatabaseSync): void {
   ensureCatalogColumn(db, "creation_jobs", "queue_not_before", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "queue_attempt", "INTEGER")
   ensureCatalogColumn(db, "creation_jobs", "last_rate_limited_at", "TEXT")
+}
+
+function backfillMediaItemIndexColumns(db: DatabaseSync): void {
+  const versionRow = db.prepare("SELECT value_json AS valueJson FROM catalog_meta WHERE key = ?").get("mediaItemIndexVersion") as
+    | { valueJson: string }
+    | undefined
+  const currentVersion = versionRow ? Number(parseJson(versionRow.valueJson, 0)) : 0
+  if (currentVersion >= MEDIA_ITEM_INDEX_VERSION) {
+    return
+  }
+
+  const rows = db.prepare("SELECT id, item_json AS itemJson FROM media_items").all() as { id: string; itemJson: string }[]
+  const update = db.prepare(`
+    UPDATE media_items
+    SET provider = ?,
+        media_kind = ?,
+        status = ?,
+        prompt = ?,
+        negative_prompt = ?,
+        search_text = ?,
+        local_file = ?,
+        output_url = ?,
+        download_error = ?,
+        remote_deleted_at = ?,
+        size = ?,
+        has_local_file = ?,
+        has_output_url = ?,
+        has_download_error = ?,
+        is_deleted = ?,
+        is_missing = ?,
+        is_favorited = ?,
+        is_duplicate = ?,
+        is_unverified = ?,
+        is_image = ?,
+        is_video = ?,
+        render_started_at = ?,
+        failure_observed_at = ?,
+        created_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `)
+  const upsertVersion = db.prepare(`
+    INSERT INTO catalog_meta (key, value_json)
+    VALUES ('mediaItemIndexVersion', ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+  `)
+
+  db.exec("BEGIN IMMEDIATE")
+  try {
+    for (const row of rows) {
+      const item = parseJson(row.itemJson, null)
+      if (!isCatalogItem(item)) continue
+
+      const index = mediaItemIndexColumns(item)
+      update.run(...mediaItemIndexUpdateArgs(index), row.id)
+    }
+    upsertVersion.run(JSON.stringify(MEDIA_ITEM_INDEX_VERSION))
+    db.exec("COMMIT")
+    bumpCatalogDbRevision()
+  } catch (error) {
+    db.exec("ROLLBACK")
+    throw error
+  }
+}
+
+function mediaItemIndexColumns(item: CatalogItem): MediaItemIndexColumns {
+  const isImage = isImageCatalogItem(item)
+  const isVideo = isVideoCatalogItem(item)
+  const localFile = stringOrNull(item.localFile)
+  const outputUrl = stringOrNull(item.outputUrl)
+  const downloadError = stringOrNull(item.downloadError)
+  const renderStartedAt = mediaItemRenderStartedAtMs(item)
+  const failureObservedAt = mediaItemFailureObservedAtMs(item)
+
+  return {
+    provider: stringOrNull(item.provider) || "generateporn",
+    mediaKind: isImage ? "image" : isVideo ? "video" : "unknown",
+    status: stringOrNull(item.status),
+    prompt: stringOrNull(item.prompt),
+    negativePrompt: stringOrNull(item.negativePrompt),
+    searchText: mediaItemSearchText(item),
+    localFile,
+    outputUrl,
+    downloadError,
+    remoteDeletedAt: stringOrNull(item.remoteDeletedAt),
+    size: finiteNumberOrNull(item.size ?? item.fileSize),
+    hasLocalFile: bit(Boolean(localFile)),
+    hasOutputUrl: bit(Boolean(outputUrl)),
+    hasDownloadError: bit(Boolean(downloadError)),
+    isDeleted: bit(isDeletedCatalogItem(item) || isExpiredFailedMediaGenerationItem(item)),
+    isMissing: bit(isMissingMediaItem(item)),
+    isFavorited: bit(Boolean(item.favorited)),
+    isDuplicate: bit(Number(item.duplicateGroupSize || 0) > 1),
+    isUnverified: bit(Boolean(localFile) && !item.sha256),
+    isImage: bit(isImage),
+    isVideo: bit(isVideo),
+    renderStartedAt,
+    failureObservedAt,
+    createdAt: Math.trunc(finiteNumberOrNull(item.createdAt) || 0),
+    updatedAt: stringOrNull(item.updatedAt),
+  }
+}
+
+function mediaItemIndexUpdateArgs(index: MediaItemIndexColumns): Array<string | number | null> {
+  return [
+    index.provider,
+    index.mediaKind,
+    index.status,
+    index.prompt,
+    index.negativePrompt,
+    index.searchText,
+    index.localFile,
+    index.outputUrl,
+    index.downloadError,
+    index.remoteDeletedAt,
+    index.size,
+    index.hasLocalFile,
+    index.hasOutputUrl,
+    index.hasDownloadError,
+    index.isDeleted,
+    index.isMissing,
+    index.isFavorited,
+    index.isDuplicate,
+    index.isUnverified,
+    index.isImage,
+    index.isVideo,
+    index.renderStartedAt,
+    index.failureObservedAt,
+    index.createdAt,
+    index.updatedAt,
+  ]
+}
+
+function mediaItemSearchText(item: CatalogItem): string | null {
+  const values = [
+    item.id,
+    item.type,
+    item.provider,
+    item.collectionId,
+    item.assetId,
+    item.assetKind,
+    item.prompt,
+    item.negativePrompt,
+    item.localFile,
+  ]
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+
+  return values.length ? values.join("\n") : null
+}
+
+function isImageCatalogItem(item: CatalogItem): boolean {
+  return Boolean(
+    /\.(png|jpe?g|webp|bmp)$/i.test(item.localFile || "") || item.outputUrl?.toLowerCase().match(/\.(png|jpe?g|webp|bmp)(?:[?#].*)?$/),
+  )
+}
+
+function isVideoCatalogItem(item: CatalogItem): boolean {
+  return Boolean(item.type === "video" || item.localFile?.toLowerCase().endsWith(".mp4") || item.outputUrl?.toLowerCase().match(/\.mp4(?:[?#].*)?$/))
+}
+
+function isMissingMediaItem(item: CatalogItem): boolean {
+  return !item.localFile && !item.downloadError && !isPendingMediaItem(item) && !isFailedMediaGenerationItem(item)
+}
+
+function isPendingMediaItem(item: CatalogItem): boolean {
+  return isActiveNoMediaItem(item) && isRecentRenderingMediaItem(item)
+}
+
+function isActiveNoMediaItem(item: CatalogItem): boolean {
+  return ACTIVE_MEDIA_STATUSES.has(String(item.status || "").toLowerCase()) && !item.localFile && !item.outputUrl
+}
+
+function isRecentRenderingMediaItem(item: CatalogItem, now = Date.now()): boolean {
+  const startedAt = mediaItemRenderStartedAtMs(item)
+  return startedAt !== null && now - startedAt < RENDERING_MEDIA_MAX_AGE_MS
+}
+
+function isDeletedCatalogItem(item: CatalogItem): boolean {
+  return typeof item.remoteDeletedAt === "string" && item.remoteDeletedAt.length > 0
+}
+
+function isFailedMediaGenerationItem(item: CatalogItem): boolean {
+  return FAILED_MEDIA_STATUSES.has(String(item.status || "").trim().toLowerCase()) && !item.localFile && !item.outputUrl
+}
+
+function isExpiredFailedMediaGenerationItem(item: CatalogItem, now = Date.now()): boolean {
+  if (!isFailedMediaGenerationItem(item)) return false
+
+  const failedAt = mediaItemFailureObservedAtMs(item)
+  return failedAt === null || now - failedAt >= FAILED_MEDIA_VISIBLE_MS
+}
+
+function mediaItemRenderStartedAtMs(item: CatalogItem): number | null {
+  for (const value of [item.createdAtIso, item.createdLocallyAt, item.createdAt, item.updatedAt]) {
+    const timestamp = timestampMs(value)
+    if (timestamp !== null) return timestamp
+  }
+
+  return null
+}
+
+function mediaItemFailureObservedAtMs(item: CatalogItem): number | null {
+  for (const value of [item.updatedAt, item.lastPolledAt, item.last_polled_at, item.createdLocallyAt, item.createdAtIso, item.createdAt]) {
+    const timestamp = timestampMs(value)
+    if (timestamp !== null) return timestamp
+  }
+
+  return null
+}
+
+function timestampMs(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null
+
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value <= 0) return null
+    return Math.trunc(value > 1_000_000_000_000 ? value : value * 1000)
+  }
+
+  if (typeof value !== "string") return null
+
+  const numeric = Number(value)
+  if (Number.isFinite(numeric) && numeric > 0) return Math.trunc(numeric > 1_000_000_000_000 ? numeric : numeric * 1000)
+
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function finiteNumberOrNull(value: unknown): number | null {
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
+function bit(value: boolean): number {
+  return value ? 1 : 0
 }
 
 export function savePlayboxCollection(collection: PlayboxCollectionRecord): PlayboxCollectionRecord {
@@ -441,8 +763,7 @@ export function writeCatalogToDb(catalog: Catalog): void {
         .map((item) => ({
           id: item.id,
           itemJson: JSON.stringify(item),
-          createdAt: Number(item.createdAt || 0),
-          updatedAt: item.updatedAt || null,
+          ...mediaItemIndexColumns(item),
         }))
       if (itemRows.length) {
         tx.insert(mediaItems).values(itemRows).run()
