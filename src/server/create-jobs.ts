@@ -456,6 +456,7 @@ export function getPendingGenerationCountsByAccount(): Record<string, number> {
 }
 
 async function processCreationQueues(accountEmail?: string | null): Promise<Record<string, unknown>> {
+  const downloaded = await downloadCompletedCreations()
   const accounts = new Set<string>()
   if (accountEmail !== undefined) {
     accounts.add(accountQueueKey(accountEmail))
@@ -472,7 +473,6 @@ async function processCreationQueues(accountEmail?: string | null): Promise<Reco
     [...accounts].map((accountKey) => processCreationQueueForAccount(accountKey === "__default__" ? null : accountKey)),
   )
   dispatched = results.reduce((total, count) => total + count, 0)
-  const downloaded = await downloadCompletedCreations()
 
   scheduleNextQueuedCreationRun()
   return {
