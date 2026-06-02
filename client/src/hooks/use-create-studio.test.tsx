@@ -8,6 +8,7 @@ import { useCreateStudio } from "./use-create-studio"
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 describe("useCreateStudio", () => {
@@ -91,6 +92,41 @@ describe("useCreateStudio", () => {
 
     await waitFor(() => expect(result.current.quality).toBe("1080p-5"))
     expect(result.current.qualityField?.options?.map((option) => option.value)).toEqual(["1080p-5"])
+  })
+
+  it("clears the submit loading state after the local queue accepts a pending job", async () => {
+    globalThis.fetch = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async (input, init) => {
+      const url = String(input)
+      if (url === "/api/create/modes") return jsonResponse({ modes: [customVideoMode] })
+      if (url === "/api/create/jobs" && init?.method === "POST") {
+        return jsonResponse({ ok: true, queued: true, jobId: "job-1", modeId: "custom-video", pollMs: 1000 })
+      }
+      if (url === "/api/create/jobs/job-1") return jsonResponse({ job: { id: "job-1", status: "pending" }, pollMs: 1000 })
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+
+    const { result } = renderHook(() => useCreateStudio())
+    await waitFor(() => expect(result.current.modes).toHaveLength(1))
+    await act(async () => {
+      await result.current.openCreator({
+        sourceItem,
+        modeId: "custom-video",
+      })
+    })
+    vi.useFakeTimers()
+
+    await act(async () => {
+      await result.current.submitCreateJob()
+    })
+
+    expect(result.current.submitting).toBe(false)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    expect(result.current.status).toBe("Pending.")
+    expect(result.current.submitting).toBe(false)
   })
 })
 

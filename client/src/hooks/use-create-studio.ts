@@ -301,7 +301,9 @@ export function useCreateStudio(onOpen?: () => void) {
   }
 
   async function pollCreateJob(jobId: string, pollMs: number) {
+    setSubmitting(false)
     const data = await fetchJson<CreateJobPollResponse>(`/api/create/jobs/${encodeURIComponent(jobId)}`)
+    setSubmitting(false)
     setStatus(formatCreateJobStatus(data.job.status))
     if (["done", "failed", "error"].includes(data.job.status || "")) return
     window.setTimeout(() => {
