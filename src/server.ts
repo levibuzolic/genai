@@ -156,6 +156,7 @@ async function warmStartupReadCaches(): Promise<void> {
     ],
     ["/api/items?status=missing&sort=newest&pageSize=48", () => getItems(new URLSearchParams("status=missing&sort=newest&pageSize=48"))],
     ["/api/create/templates", () => getCreateTemplateRegistryResponse()],
+    ["/api/create/modes", () => getCreateModes()],
     ["/api/creations", () => getCreations(new URLSearchParams())],
     ["/api/creations?status=active", () => getCreations(new URLSearchParams("status=active"))],
   ]
@@ -216,7 +217,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/create/modes") {
-      return sendJson(response, await getCreateModes())
+      return sendCachedJson(response, cachedReadOptions(url), () => getCreateModes())
     }
 
     if (request.method === "GET" && url.pathname === "/api/background/jobs") {
