@@ -8,7 +8,16 @@ import test from "node:test"
 import sharp from "sharp"
 
 import { setThumbnailProcessRunnerForTests } from "../src/thumbnails.ts"
-import { PNG_BYTES, fakeBearerToken, imageDataUrl, importServer, jsonResponse, readCatalog, writeCatalog } from "./helpers/server.js"
+import {
+  PNG_BYTES,
+  deferred,
+  fakeBearerToken,
+  imageDataUrl,
+  importServer,
+  jsonResponse,
+  readCatalog,
+  writeCatalog,
+} from "./helpers/server.js"
 
 test("creation request shaping uses image_base64 for uploads and input_url for URLs", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-shape-"))
@@ -182,8 +191,10 @@ test("template selection does not force a combo workflow when mode is video only
       templateId: template.id,
       modeId: "custom-video",
     })
+    await server.runCreationQueueBackgroundJob()
     const details = await server.getCreationDetails(jobId)
 
+    assert.equal(response.queued, true)
     assert.equal(response.modeId, "custom-video")
     assert.equal(submitted.length, 1)
     assert.equal(submitted[0].url, "https://api.generateporn.ai/api/jobs/video")
@@ -246,8 +257,9 @@ test("creation requests refresh auth in the browser once after an upstream token
         prompt: "refresh auth once",
       },
     })
+    await server.runCreationQueueBackgroundJob()
 
-    assert.equal(result.jobId, jobId)
+    assert.equal(result.queued, true)
     assert.equal(refreshes, 1)
     assert.deepEqual(authorizations, [initialToken, refreshedToken])
   } finally {
@@ -286,23 +298,23 @@ test("creation requests report a second auth failure without another automatic r
       return { ...server.authBrowser.getStatus(), status: "connected" }
     }
 
-    await assert.rejects(
-      () =>
-        server.createMediaJob({
-          modeId: "custom-image",
-          source: {
-            kind: "url",
-            url: "https://assets.example/source.png",
-          },
-          params: {
-            prompt: "refresh auth fails",
-          },
-        }),
-      /expired_token_2/,
-    )
+    const queued = await server.createMediaJob({
+      modeId: "custom-image",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "refresh auth fails",
+      },
+    })
+    await server.runCreationQueueBackgroundJob()
+    const details = await server.getCreationDetails(queued.jobId)
 
     assert.equal(requests, 2)
     assert.equal(refreshes, 1)
+    assert.equal(details.creation.status, "error")
+    assert.match(details.creation.error, /expired_token_2/)
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -352,6 +364,68 @@ test("creation source resolver prefers catalog output URL and falls back to loca
   assert.equal(local.value.startsWith("data:image/jpeg;base64,"), true)
 })
 
+test("creation submits are accepted locally before upstream queue dispatch", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-async-submit-"))
+  const jobIds = ["67676767-6767-4767-8767-676767676767", "68686868-6868-4768-8768-686868686868", "69696969-6969-4769-8769-696969696969"]
+  const submitted = []
+  const releaseSubmissions = deferred()
+  let timeout = null
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      submitted.push(JSON.parse(String(options.body)))
+      const jobId = jobIds[submitted.length - 1]
+      if (submitted.length === jobIds.length) {
+        if (timeout) clearTimeout(timeout)
+        releaseSubmissions.resolve()
+      }
+      await releaseSubmissions.promise
+      return jsonResponse({ job_id: jobId })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+    server.setMediaGenerationConcurrencyLimit(3)
+
+    const queued = await Promise.all(
+      ["first", "second", "third"].map((prompt) =>
+        server.createMediaJob({
+          modeId: "custom-image",
+          source: { kind: "url", url: `https://assets.example/${prompt}.png` },
+          params: { prompt },
+        }),
+      ),
+    )
+    const historyBeforeDispatch = await server.getCreations(new URLSearchParams())
+
+    assert.equal(submitted.length, 0)
+    assert.deepEqual(
+      queued.map((creation) => creation.queued),
+      [true, true, true],
+    )
+    assert.equal(historyBeforeDispatch.creations.filter((creation) => creation.status === "queued").length, 3)
+
+    timeout = setTimeout(() => {
+      releaseSubmissions.reject(new Error("Queued creations did not dispatch concurrently."))
+    }, 500)
+    await server.runCreationQueueBackgroundJob()
+
+    assert.equal(submitted.length, 3)
+    assert.deepEqual(submitted.map((body) => body.prompt).toSorted(), ["first", "second", "third"])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+    releaseSubmissions.resolve()
+    globalThis.fetch = originalFetch
+  }
+})
+
 test("text-to-image creation submits without a source image", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-text-to-image-"))
   const jobId = "57575757-5757-4575-8575-575757575757"
@@ -375,8 +449,9 @@ test("text-to-image creation submits without a source image", async () => {
       },
       source: null,
     })
+    await server.runCreationQueueBackgroundJob()
 
-    assert.equal(response.jobId, jobId)
+    assert.equal(response.queued, true)
     assert.equal(response.modeId, "text-to-image")
     assert.deepEqual(submittedBody, {
       prompt: "make a portrait",
@@ -412,8 +487,9 @@ test("text-to-video creation submits model video without a source image", async 
       },
       source: null,
     })
+    await server.runCreationQueueBackgroundJob()
 
-    assert.equal(response.jobId, jobId)
+    assert.equal(response.queued, true)
     assert.equal(response.modeId, "text-to-video")
     assert.deepEqual(submittedBody, {
       prompt: "make a cinematic shot",
@@ -480,12 +556,14 @@ test("creation requests queue per account when the configured generation limit i
       source: { kind: "url", url: "https://assets.example/source-2.png" },
       params: { prompt: "second" },
     })
+    await server.runCreationQueueBackgroundJob()
 
-    assert.equal(first.jobId, job1)
+    assert.equal(first.queued, true)
     assert.equal(queued.queued, true)
     assert.equal(submitted.length, 1)
 
     await server.pollCreateJob(job1)
+    await server.runCreationQueueBackgroundJob()
     const queuedDetails = await server.getCreationDetails(queued.jobId)
 
     assert.equal(submitted.length, 2)
@@ -538,16 +616,17 @@ test("rate limited creation responses show queued retry with exponential backoff
       source: { kind: "url", url: "https://assets.example/source.png" },
       params: { prompt: "retry me" },
     })
+    await server.runCreationQueueBackgroundJob()
     const queuedDetails = await server.getCreationDetails(created.jobId)
 
     assert.equal(created.queued, true)
-    assert.equal(created.rateLimited, true)
-    assert.match(created.error, /rate limit/i)
+    assert.equal(queuedDetails.creation.lastRateLimitedAt !== null, true)
+    assert.match(queuedDetails.creation.error, /rate limit/i)
     assert.equal(queuedDetails.creation.status, "queued")
     assert.equal(queuedDetails.creation.queueAttempt, 1)
     assert.equal(submitted.length, 1)
 
-    await server.pollCreateJob(created.jobId)
+    await server.runCreationQueueBackgroundJob()
     assert.equal(submitted.length, 1)
 
     const db = new DatabaseSync(path.join(mediaDir, "catalog.sqlite"))
@@ -557,7 +636,7 @@ test("rate limited creation responses show queued retry with exponential backoff
       db.close()
     }
 
-    await server.pollCreateJob(created.jobId)
+    await server.runCreationQueueBackgroundJob()
     const retriedDetails = await server.getCreationDetails(created.jobId)
     assert.equal(submitted.length, 2)
     assert.equal(retriedDetails.creation.jobId, jobId)
@@ -604,6 +683,7 @@ test("uploaded images are resized and compressed before create submission", asyn
         prompt: "resize this",
       },
     })
+    await server.runCreationQueueBackgroundJob()
     const details = await server.getCreationDetails(jobId)
     const submittedDataUrl = submittedBody.image_base64
     const submittedBytes = Buffer.from(submittedDataUrl.split(",")[1], "base64")
@@ -740,6 +820,7 @@ test("creation templates save all reusable settings and apply submission overrid
         prompt: "override prompt",
       },
     })
+    await server.runCreationQueueBackgroundJob()
     const registry = await server.loadCreateTemplateRegistry()
     const details = await server.getCreationDetails(jobId)
 
@@ -827,6 +908,7 @@ test("template previews use matching media prompts as the association", async ()
     })
 
     await server.createMediaJob({ templateId: template.id })
+    await server.runCreationQueueBackgroundJob()
     await server.downloadCreateJob(jobId)
     const catalog = await readCatalog(mediaDir)
     const registry = await server.getCreateTemplateRegistryResponse()
@@ -912,6 +994,7 @@ test("creation job submit and download use mocked API and merge into catalog", a
         quality: "720p-4",
       },
     })
+    await server.runCreationQueueBackgroundJob()
     const pendingView = await server.getItems(new URLSearchParams())
     const downloaded = await server.downloadCreateJob(jobId)
     const catalog = await readCatalog(mediaDir)
@@ -919,7 +1002,7 @@ test("creation job submit and download use mocked API and merge into catalog", a
     const history = await server.getCreations(new URLSearchParams())
     const details = await server.getCreationDetails(jobId)
 
-    assert.equal(created.jobId, jobId)
+    assert.equal(created.queued, true)
     assert.equal(
       pendingView.items.some((entry) => entry.id === jobId && entry.status === "pending" && entry.createModeId === "custom-video"),
       true,
@@ -990,6 +1073,7 @@ test("creation history persists submitted jobs across server imports", async () 
         prompt: "make it cinematic",
       },
     })
+    await server.runCreationQueueBackgroundJob()
 
     const reimported = await importServer(mediaDir, {
       GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
@@ -1029,23 +1113,20 @@ test("failed creation submissions are recorded with reusable settings", async ()
       GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
     })
 
-    await assert.rejects(
-      () =>
-        server.createMediaJob({
-          modeId: "custom-image",
-          source: {
-            kind: "url",
-            url: "https://assets.example/source.png",
-          },
-          params: {
-            prompt: "failed prompt",
-          },
-        }),
-      /submission_failed/,
-    )
+    const queued = await server.createMediaJob({
+      modeId: "custom-image",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "failed prompt",
+      },
+    })
+    await server.runCreationQueueBackgroundJob()
 
     const history = await server.getCreations(new URLSearchParams())
-    const failed = history.creations.find((creation) => creation.status === "error")
+    const failed = history.creations.find((creation) => creation.id === queued.jobId)
     const copied = await server.duplicateCreation(failed.id)
     const copiedWithSource = await server.duplicateCreation(failed.id, { includeSource: true })
 
@@ -1123,6 +1204,7 @@ test("creation refresh updates active jobs and imports upstream history", async 
         prompt: "active now done",
       },
     })
+    await server.runCreationQueueBackgroundJob()
 
     const refreshed = await server.refreshCreations({ pageLimit: 2 })
     const activeDetails = await server.getCreationDetails(activeId)
@@ -1182,6 +1264,7 @@ test("active creation polling does not rewrite unchanged pending jobs", async ()
         prompt: "still rendering",
       },
     })
+    await server.runCreationQueueBackgroundJob()
 
     await server.getCreations(new URLSearchParams("status=all&refresh=true"))
     const firstDetails = await server.getCreationDetails(activeId)
@@ -1237,6 +1320,7 @@ test("failed app-created pending media remains visible in the gallery after poll
         prompt: "failed visible",
       },
     })
+    await server.runCreationQueueBackgroundJob()
 
     await server.getCreations(new URLSearchParams("status=all&refresh=true"))
     const items = await server.getItems(new URLSearchParams())

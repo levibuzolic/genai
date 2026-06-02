@@ -783,6 +783,7 @@ export {
   restoreCatalogBackup,
   resolveMediaDir,
   removeAuthAccount,
+  runCreationQueueBackgroundJob,
   runMissingThumbnailBackgroundJob,
   server,
   setCatalogItemFavoriteRemote,

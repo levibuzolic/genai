@@ -69,7 +69,6 @@ async function createWorkflowJob(
     throw new Error("Workflow first step is not available.")
   }
 
-  const queueInitial = shouldQueueCreation(accountEmail)
   const liveRequest = buildCreateApiRequest(firstMode, source, firstStep.params || {})
   queuedRequestBodies.set(attemptId, liveRequest.body)
   const workflow = {
@@ -103,38 +102,9 @@ async function createWorkflowJob(
     eventStatus: QUEUED_CREATION_STATUS,
     eventMessage: "Queued creation workflow.",
   })
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "creation-submitted")
 
-  if (queueInitial) {
-    return queuedCreateResponse(baseRecord, mode, source.publicSource, liveRequest.publicRequest, template?.id)
-  }
-
-  const dispatched = await submitQueuedCreation(attemptId)
-  if (!dispatched) {
-    return queuedCreateResponse(
-      findCreationJob(attemptId) || baseRecord,
-      mode,
-      source.publicSource,
-      liveRequest.publicRequest,
-      template?.id,
-    )
-  }
-  if (dispatched.status === QUEUED_CREATION_STATUS) {
-    return queuedCreateResponse(dispatched, mode, source.publicSource, liveRequest.publicRequest, template?.id)
-  }
-
-  const submittedCreation = findCreationJob(attemptId) || dispatched
-
-  return {
-    ok: true,
-    jobId: submittedCreation.jobId || submittedCreation.id,
-    accountEmail,
-    modeId: submittedCreation.modeId || mode.id,
-    modeLabel: mode.label,
-    source: source.publicSource,
-    request: liveRequest.publicRequest,
-    ...(template ? { templateId: template.id } : {}),
-    pollMs: CREATE_POLL_MS,
-  }
+  return queuedCreateResponse(baseRecord, mode, source.publicSource, liveRequest.publicRequest, template?.id)
 }
 
 async function submitWorkflowCreation(creation: CreationJob & { workflow: CreationWorkflow }): Promise<CreationJob | null> {
@@ -263,7 +233,6 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   }
 
   const source = mode.source?.required === false ? null : await resolveCreateSource(requireCreateSource(sourceRequest))
-  const queueInitial = shouldQueueCreation(accountEmail) || requestBody["queue"] === true
   const liveRequest = buildCreateApiRequest(mode, source, params)
   queuedRequestBodies.set(attemptId, liveRequest.body)
   const baseRecord = {
@@ -288,35 +257,9 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
     eventStatus: QUEUED_CREATION_STATUS,
     eventMessage: "Queued creation request.",
   })
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "creation-submitted")
 
-  if (queueInitial) {
-    return queuedCreateResponse(baseRecord, mode, source?.publicSource || {}, liveRequest.publicRequest, template?.id)
-  }
-
-  const submittedCreation = await submitQueuedCreation(attemptId)
-  if (!submittedCreation) {
-    return queuedCreateResponse(
-      findCreationJob(attemptId) || baseRecord,
-      mode,
-      source?.publicSource || {},
-      liveRequest.publicRequest,
-      template?.id,
-    )
-  }
-  if (submittedCreation.status === QUEUED_CREATION_STATUS) {
-    return queuedCreateResponse(submittedCreation, mode, source?.publicSource || {}, liveRequest.publicRequest, template?.id)
-  }
-
-  return {
-    ok: true,
-    jobId: submittedCreation.jobId || submittedCreation.id,
-    accountEmail,
-    modeId: mode.id,
-    modeLabel: mode.label,
-    source: source?.publicSource || {},
-    request: liveRequest.publicRequest,
-    pollMs: CREATE_POLL_MS,
-  }
+  return queuedCreateResponse(baseRecord, mode, source?.publicSource || {}, liveRequest.publicRequest, template?.id)
 }
 
 async function submitDirectCreation(creation: CreationJob): Promise<CreationJob | null> {
@@ -525,9 +468,10 @@ async function processCreationQueues(accountEmail?: string | null): Promise<Reco
   }
 
   let dispatched = 0
-  for (const accountKey of accounts) {
-    dispatched += await processCreationQueueForAccount(accountKey === "__default__" ? null : accountKey)
-  }
+  const results = await Promise.all(
+    [...accounts].map((accountKey) => processCreationQueueForAccount(accountKey === "__default__" ? null : accountKey)),
+  )
+  dispatched = results.reduce((total, count) => total + count, 0)
 
   scheduleNextQueuedCreationRun()
   return {
@@ -538,29 +482,31 @@ async function processCreationQueues(accountEmail?: string | null): Promise<Reco
 }
 
 async function processCreationQueueForAccount(accountEmail: string | null): Promise<number> {
-  let dispatched = 0
-  while (countPendingGenerations(accountEmail) < getMediaGenerationConcurrencyLimit()) {
-    const queued = listCreationJobs({ status: "all", limit: 1000 })
-      .filter(
-        (creation) =>
-          creation.status === QUEUED_CREATION_STATUS && accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail),
-      )
-      .toSorted(compareQueuedCreations)
-    const nextQueued = queued.find(isQueueReady)
-
-    if (!nextQueued) {
-      return dispatched
-    }
-
-    try {
-      await submitQueuedCreation(nextQueued.id)
-      dispatched += 1
-    } catch {
-      return dispatched
-    }
+  const availableSlots = Math.max(0, getMediaGenerationConcurrencyLimit() - countPendingGenerations(accountEmail))
+  if (availableSlots === 0) {
+    return 0
   }
 
-  return dispatched
+  const readyQueued = listCreationJobs({ status: "all", limit: 1000 })
+    .filter(
+      (creation) => creation.status === QUEUED_CREATION_STATUS && accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail),
+    )
+    .filter(isQueueReady)
+    .toSorted(compareQueuedCreations)
+    .slice(0, availableSlots)
+
+  const results = await Promise.all(
+    readyQueued.map(async (creation) => {
+      try {
+        await submitQueuedCreation(creation.id)
+        return 1 as number
+      } catch {
+        return 0 as number
+      }
+    }),
+  )
+
+  return results.reduce((total, count) => total + count, 0)
 }
 
 async function submitQueuedCreation(id: string): Promise<CreationJob | null> {
@@ -590,19 +536,6 @@ async function submitQueuedCreation(id: string): Promise<CreationJob | null> {
       : await submitDirectCreation(submitting)
   scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "queued-submitted")
   return submitted
-}
-
-function shouldQueueCreation(accountEmail: string | null): boolean {
-  return hasReadyQueuedCreations(accountEmail) || countPendingGenerations(accountEmail) >= getMediaGenerationConcurrencyLimit()
-}
-
-function hasReadyQueuedCreations(accountEmail: string | null): boolean {
-  return listCreationJobs({ status: "all", limit: 1000 }).some(
-    (creation) =>
-      creation.status === QUEUED_CREATION_STATUS &&
-      accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail) &&
-      isQueueReady(creation),
-  )
 }
 
 function countPendingGenerations(accountEmail: string | null): number {
@@ -748,10 +681,9 @@ function getQueuedRequestBody(creation: CreationJob): Record<string, unknown> {
 }
 
 export async function pollCreateJob(jobId: string): Promise<CreateJobPollResponse> {
-  let existing = findCreationJob(jobId)
+  const existing = findCreationJob(jobId)
   if (existing?.status === QUEUED_CREATION_STATUS) {
-    await processCreationQueues(existing.accountEmail)
-    existing = findCreationJob(jobId)
+    scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "poll-queued")
   }
 
   if (existing?.status === QUEUED_CREATION_STATUS || (existing && !existing.jobId)) {
@@ -773,7 +705,7 @@ export async function pollCreateJob(jobId: string): Promise<CreateJobPollRespons
     eventMessage: `Job ${job.status || "updated"}.`,
   })
   if (isTerminalCreationStatus(job.status)) {
-    await processCreationQueues(existing?.accountEmail || job.accountEmail || null)
+    scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "creation-terminal")
   }
 
   return {
@@ -950,7 +882,7 @@ async function pollCreateWorkflowJob(creation: CreationJob & { workflow: Creatio
     },
   )
   if (isTerminalCreationStatus(status)) {
-    await processCreationQueues(creation.accountEmail)
+    scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "creation-terminal")
   }
 
   return {
@@ -1019,7 +951,7 @@ export async function getCreations(searchParams = new URLSearchParams()): Promis
   if (refresh && getSyncAccountEmails().length > 0) {
     await refreshActiveCreations()
   }
-  await processCreationQueues()
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "creation-history")
 
   const rows = listCreationJobs({ status })
   const activeCount = rows.filter((row) => isActiveCreationStatus(row.status)).length
@@ -1121,7 +1053,7 @@ export async function refreshCreations({
       }
     }
   }
-  await processCreationQueues()
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "creation-refresh")
 
   const rows = listCreationJobs({ status: "all" })
   return {
@@ -1157,7 +1089,7 @@ async function refreshActiveCreations(): Promise<{ refreshed: number; errors: { 
       })
     }
   }
-  await processCreationQueues()
+  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "active-refresh")
 
   return {
     refreshed,

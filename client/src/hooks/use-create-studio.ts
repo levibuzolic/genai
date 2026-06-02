@@ -297,7 +297,9 @@ export function useCreateStudio(onOpen?: () => void) {
             ? "Queued. Waiting for an account slot..."
             : "Submitted. Waiting for output...",
       )
-      await pollCreateJob(response.jobId, response.pollMs || 2000)
+      window.setTimeout(() => {
+        void pollCreateJob(response.jobId, response.pollMs || 2000)
+      }, 0)
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error))
     } finally {
