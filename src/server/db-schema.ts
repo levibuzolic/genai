@@ -76,6 +76,13 @@ export const creationJobs = sqliteTable(
     mediaType: text("media_type"),
     templateId: text("template_id"),
     templateLabel: text("template_label"),
+    sourceKind: text("source_kind"),
+    sourceItemId: text("source_item_id"),
+    sourceUrl: text("source_url"),
+    prompt: text("prompt"),
+    negativePrompt: text("negative_prompt"),
+    modelId: text("model_id"),
+    quality: text("quality"),
     sourceJson: text("source_json"),
     paramsJson: text("params_json"),
     requestJson: text("request_json"),
@@ -99,6 +106,7 @@ export const creationJobs = sqliteTable(
     index("creation_jobs_status_idx").on(table.status, desc(table.updatedAt)),
     index("creation_jobs_job_id_idx").on(table.jobId),
     index("creation_jobs_account_email_idx").on(table.accountEmail),
+    index("creation_jobs_prompt_idx").on(table.prompt),
   ],
 )
 

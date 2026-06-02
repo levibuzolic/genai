@@ -97,6 +97,16 @@ type CreationInput = {
   [key: string]: unknown
 }
 
+type CreationIndexColumns = {
+  modelId: string | null
+  negativePrompt: string | null
+  prompt: string | null
+  quality: string | null
+  sourceItemId: string | null
+  sourceKind: string | null
+  sourceUrl: string | null
+}
+
 type CatalogOrm = NodeSQLiteDatabase<CatalogDbSchema>
 type PlayboxCollectionRow = typeof playboxCollections.$inferSelect
 type PlayboxAssetRow = typeof playboxAssets.$inferSelect
@@ -160,6 +170,7 @@ export type PlayboxAssetRecord = {
 }
 
 const MEDIA_ITEM_INDEX_VERSION = 1
+const CREATION_JOB_INDEX_VERSION = 1
 const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
 const FAILED_MEDIA_STATUSES = new Set(["failed", "error", "cancelled", "canceled"])
 const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
@@ -180,6 +191,7 @@ export function getCatalogDb(): DatabaseSync {
   catalogDb.exec("PRAGMA busy_timeout = 5000")
   ensureCatalogSchema(catalogDb)
   backfillMediaItemIndexColumns(catalogDb)
+  backfillCreationJobIndexColumns(catalogDb)
   return catalogDb
 }
 
@@ -263,6 +275,13 @@ function ensureCatalogSchema(db: DatabaseSync): void {
       media_type TEXT,
       template_id TEXT,
       template_label TEXT,
+      source_kind TEXT,
+      source_item_id TEXT,
+      source_url TEXT,
+      prompt TEXT,
+      negative_prompt TEXT,
+      model_id TEXT,
+      quality TEXT,
       source_json TEXT,
       params_json TEXT,
       request_json TEXT,
@@ -367,6 +386,14 @@ function ensureCatalogSchema(db: DatabaseSync): void {
   ensureCatalogColumn(db, "creation_jobs", "queue_not_before", "TEXT")
   ensureCatalogColumn(db, "creation_jobs", "queue_attempt", "INTEGER")
   ensureCatalogColumn(db, "creation_jobs", "last_rate_limited_at", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "source_kind", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "source_item_id", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "source_url", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "prompt", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "negative_prompt", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "model_id", "TEXT")
+  ensureCatalogColumn(db, "creation_jobs", "quality", "TEXT")
+  db.exec("CREATE INDEX IF NOT EXISTS creation_jobs_prompt_idx ON creation_jobs(prompt)")
 }
 
 function backfillMediaItemIndexColumns(db: DatabaseSync): void {
@@ -424,6 +451,52 @@ function backfillMediaItemIndexColumns(db: DatabaseSync): void {
       update.run(...mediaItemIndexUpdateArgs(index), row.id)
     }
     upsertVersion.run(JSON.stringify(MEDIA_ITEM_INDEX_VERSION))
+    db.exec("COMMIT")
+    bumpCatalogDbRevision()
+  } catch (error) {
+    db.exec("ROLLBACK")
+    throw error
+  }
+}
+
+function backfillCreationJobIndexColumns(db: DatabaseSync): void {
+  const versionRow = db.prepare("SELECT value_json AS valueJson FROM catalog_meta WHERE key = ?").get("creationJobIndexVersion") as
+    | { valueJson: string }
+    | undefined
+  const currentVersion = versionRow ? Number(parseJson(versionRow.valueJson, 0)) : 0
+  if (currentVersion >= CREATION_JOB_INDEX_VERSION) {
+    return
+  }
+
+  const rows = db.prepare("SELECT id, source_json AS sourceJson, params_json AS paramsJson FROM creation_jobs").all() as {
+    id: string
+    paramsJson: string | null
+    sourceJson: string | null
+  }[]
+  const update = db.prepare(`
+    UPDATE creation_jobs
+    SET source_kind = ?,
+        source_item_id = ?,
+        source_url = ?,
+        prompt = ?,
+        negative_prompt = ?,
+        model_id = ?,
+        quality = ?
+    WHERE id = ?
+  `)
+  const upsertVersion = db.prepare(`
+    INSERT INTO catalog_meta (key, value_json)
+    VALUES ('creationJobIndexVersion', ?)
+    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+  `)
+
+  db.exec("BEGIN IMMEDIATE")
+  try {
+    for (const row of rows) {
+      const index = creationIndexColumns(parseJson(row.sourceJson || "null", null), parseJson(row.paramsJson || "{}", {}))
+      update.run(...creationIndexUpdateArgs(index), row.id)
+    }
+    upsertVersion.run(JSON.stringify(CREATION_JOB_INDEX_VERSION))
     db.exec("COMMIT")
     bumpCatalogDbRevision()
   } catch (error) {
@@ -512,7 +585,11 @@ function mediaItemSearchText(item: CatalogItem): string | null {
     item.negativePrompt,
     item.localFile,
   ]
-    .map((value) => String(value || "").trim().toLowerCase())
+    .map((value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase(),
+    )
     .filter(Boolean)
 
   return values.length ? values.join("\n") : null
@@ -525,7 +602,9 @@ function isImageCatalogItem(item: CatalogItem): boolean {
 }
 
 function isVideoCatalogItem(item: CatalogItem): boolean {
-  return Boolean(item.type === "video" || item.localFile?.toLowerCase().endsWith(".mp4") || item.outputUrl?.toLowerCase().match(/\.mp4(?:[?#].*)?$/))
+  return Boolean(
+    item.type === "video" || item.localFile?.toLowerCase().endsWith(".mp4") || item.outputUrl?.toLowerCase().match(/\.mp4(?:[?#].*)?$/),
+  )
 }
 
 function isMissingMediaItem(item: CatalogItem): boolean {
@@ -550,7 +629,15 @@ function isDeletedCatalogItem(item: CatalogItem): boolean {
 }
 
 function isFailedMediaGenerationItem(item: CatalogItem): boolean {
-  return FAILED_MEDIA_STATUSES.has(String(item.status || "").trim().toLowerCase()) && !item.localFile && !item.outputUrl
+  return (
+    FAILED_MEDIA_STATUSES.has(
+      String(item.status || "")
+        .trim()
+        .toLowerCase(),
+    ) &&
+    !item.localFile &&
+    !item.outputUrl
+  )
 }
 
 function isExpiredFailedMediaGenerationItem(item: CatalogItem, now = Date.now()): boolean {
@@ -602,6 +689,43 @@ function finiteNumberOrNull(value: unknown): number | null {
 
 function bit(value: boolean): number {
   return value ? 1 : 0
+}
+
+function creationIndexColumns(source: unknown, params: unknown): CreationIndexColumns {
+  const sourceRecord = recordOrNull(source)
+  const paramsRecord = recordOrNull(params) || {}
+
+  return {
+    modelId: stringOrNull(paramsRecord["modelId"]),
+    negativePrompt: stringOrNull(paramsRecord["negativePrompt"] ?? paramsRecord["negative_prompt"]),
+    prompt: stringOrNull(paramsRecord["prompt"]),
+    quality: stringOrNull(paramsRecord["quality"]),
+    sourceItemId: stringOrNull(sourceRecord?.["itemId"]),
+    sourceKind: stringOrNull(sourceRecord?.["kind"]),
+    sourceUrl: stringOrNull(sourceRecord?.["url"]),
+  }
+}
+
+function creationIndexUpdateArgs(index: CreationIndexColumns): Array<string | null> {
+  return [index.sourceKind, index.sourceItemId, index.sourceUrl, index.prompt, index.negativePrompt, index.modelId, index.quality]
+}
+
+function creationSourceFromIndex(row: Pick<CreationIndexColumns, "sourceItemId" | "sourceKind" | "sourceUrl">): CreateSource | null {
+  if (!row.sourceKind) return null
+
+  const source: CreateSource = { kind: row.sourceKind }
+  if (row.sourceItemId) source["itemId"] = row.sourceItemId
+  if (row.sourceUrl) source["url"] = row.sourceUrl
+  return source
+}
+
+function creationParamsFromIndex(row: Pick<CreationIndexColumns, "modelId" | "negativePrompt" | "prompt" | "quality">): CreateParams {
+  const params: CreateParams = {}
+  if (row.modelId) params["modelId"] = row.modelId
+  if (row.negativePrompt) params["negativePrompt"] = row.negativePrompt
+  if (row.prompt) params["prompt"] = row.prompt
+  if (row.quality) params["quality"] = row.quality
+  return params
 }
 
 export function savePlayboxCollection(collection: PlayboxCollectionRecord): PlayboxCollectionRecord {
@@ -913,8 +1037,13 @@ export function listCreationJobSummaries({ status = "all", limit = 80 }: { statu
     mediaType: creationJobs.mediaType,
     templateId: creationJobs.templateId,
     templateLabel: creationJobs.templateLabel,
-    sourceJson: creationJobs.sourceJson,
-    paramsJson: creationJobs.paramsJson,
+    modelId: creationJobs.modelId,
+    negativePrompt: creationJobs.negativePrompt,
+    prompt: creationJobs.prompt,
+    quality: creationJobs.quality,
+    sourceItemId: creationJobs.sourceItemId,
+    sourceKind: creationJobs.sourceKind,
+    sourceUrl: creationJobs.sourceUrl,
     error: creationJobs.error,
     inputUrl: creationJobs.inputUrl,
     outputUrl: creationJobs.outputUrl,
@@ -952,17 +1081,17 @@ export function listCreationJobSummaries({ status = "all", limit = 80 }: { statu
               .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
               .limit(limit)
               .all()
-        : getCatalogOrm()
-            .select(selection)
-            .from(creationJobs)
-            .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
-            .limit(limit)
-            .all()
+          : getCatalogOrm()
+              .select(selection)
+              .from(creationJobs)
+              .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+              .limit(limit)
+              .all()
   const creations = rows.map((row) =>
     normalizeCreationJob({
       ...row,
-      source: parseJson(row.sourceJson, null),
-      params: parseJson(row.paramsJson, {}),
+      source: creationSourceFromIndex(row),
+      params: creationParamsFromIndex(row),
     }),
   )
   const filtered = creations.filter((row) => {
@@ -1056,6 +1185,8 @@ export function normalizeCreationJob(creation: CreationInput = {}): CreationJob 
 }
 
 function creationJobToInsert(creation: CreationJob): CreationJobInsert {
+  const index = creationIndexColumns(creation.source, creation.params)
+
   return {
     id: creation.id,
     accountEmail: creation.accountEmail,
@@ -1069,6 +1200,13 @@ function creationJobToInsert(creation: CreationJob): CreationJobInsert {
     mediaType: creation.mediaType,
     templateId: creation.templateId,
     templateLabel: creation.templateLabel,
+    sourceKind: index.sourceKind,
+    sourceItemId: index.sourceItemId,
+    sourceUrl: index.sourceUrl,
+    prompt: index.prompt,
+    negativePrompt: index.negativePrompt,
+    modelId: index.modelId,
+    quality: index.quality,
     sourceJson: stringifyNullable(creation.source),
     paramsJson: stringifyNullable(creation.params),
     requestJson: stringifyNullable(creation.request),
