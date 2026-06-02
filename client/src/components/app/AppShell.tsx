@@ -126,7 +126,6 @@ export function AppShell({
   children: React.ReactNode
 }) {
   const autoSync = config?.autoSync
-  const currentTitle = createOpen ? "Create" : activeView === "templates" ? "Templates" : activeView === "playbox" ? "Playbox" : "Media"
   const syncLabel = activeView === "playbox" ? "Sync Playbox" : "Sync"
   const isDesktop = useMediaQuery("(min-width: 1024px)")
 

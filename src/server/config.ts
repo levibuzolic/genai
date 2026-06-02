@@ -44,8 +44,7 @@ export let BACKGROUND_THUMBNAIL_INTERVAL_MS: number
 export let BACKGROUND_THUMBNAIL_STARTUP_DELAY_MS: number
 export let BACKGROUND_THUMBNAIL_BATCH_SIZE: number
 export let REDIRECT_STATIC_TO_VITE: boolean
-export const AUTH_SETUP_MESSAGE =
-  "Open More > Auth browser > Connect account, complete login in the visible browser window, then retry. The legacy extension token helper can still post to /api/auth/token."
+export const AUTH_SETUP_MESSAGE = "Open More > Auth browser > Connect account, complete login in the visible browser window, then retry."
 
 export function reloadConfigFromEnv(): void {
   PORT = Number(process.env["PORT"] || 6177)

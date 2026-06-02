@@ -167,6 +167,7 @@ test("Playbox sync is registered as an automatic background worker", async () =>
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-playbox-background-"))
   const server = await importServer(mediaDir, {
     AUTO_SYNC_ENABLED: "true",
+    BACKGROUND_WORKERS_ENABLED: "true",
   })
 
   const worker = server.getBackgroundWorkerStatus()["playbox-sync"]

@@ -301,6 +301,7 @@ function matchesCurrentLibraryFilters(
 }
 
 function sortCatalogItemsForView(items: PublicCatalogItem[], sort: string): PublicCatalogItem[] {
+  // oxlint-disable-next-line unicorn/no-array-sort -- TS target does not include Array#toSorted; slice keeps this immutable.
   return items.slice().sort((left, right) => {
     if (sort === "oldest") return itemCreatedAtMs(left) - itemCreatedAtMs(right)
     if (sort === "largest") return Number(right.size || 0) - Number(left.size || 0)

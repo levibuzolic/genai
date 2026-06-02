@@ -101,12 +101,7 @@ import {
   refreshPlayboxImportedAuthorization,
   resetPlayboxImportedAuthRuntimeState,
 } from "./server/playbox-auth-import.ts"
-import {
-  acceptPlayboxAuthorization,
-  getPlayboxAuthStatus,
-  playboxAuthBrowser,
-  resetPlayboxAuthRuntimeState,
-} from "./server/playbox-auth-state.ts"
+import { getPlayboxAuthStatus, playboxAuthBrowser, resetPlayboxAuthRuntimeState } from "./server/playbox-auth-state.ts"
 import { startPlayboxSync } from "./server/playbox-sync.ts"
 import { logHttpNotFound, readJsonBody, sendJson, serveMedia, serveStatic } from "./server/static.ts"
 import {
@@ -128,23 +123,7 @@ import {
 } from "./server/sync.ts"
 import { clamp, hashBuffer, resolveMediaDirFromRoot } from "./server/utils.ts"
 
-const AuthTokenBodySchema = z
-  .object({
-    accountEmail: z.string().optional(),
-    authorization: z.unknown().optional(),
-    source: z.string().catch("browser"),
-    token: z.unknown().optional(),
-  })
-  .passthrough()
 const AuthAccountBodySchema = z.object({ email: z.string(), deleteProfile: z.boolean().catch(false) }).passthrough()
-const PlayboxAuthTokenBodySchema = z
-  .object({
-    authorization: z.unknown().optional(),
-    email: z.string().optional(),
-    source: z.string().catch("browser"),
-    token: z.unknown().optional(),
-  })
-  .passthrough()
 const PlayboxCurlImportBodySchema = z.object({ curl: z.string().min(1) }).passthrough()
 const CatalogBackupBodySchema = z.object({ reason: z.string().catch("manual") }).passthrough()
 const CatalogRestoreBodySchema = z.object({ file: z.string().catch("") }).passthrough()
@@ -309,18 +288,6 @@ const server = http.createServer(async (request, response) => {
       )
     }
 
-    if (request.method === "POST" && url.pathname === "/api/auth/token") {
-      const body = AuthTokenBodySchema.parse(await readJsonBody(request))
-      const auth = acceptAuthorization(body.authorization || body.token, body.source, body.accountEmail)
-
-      return sendJson(response, {
-        ok: true,
-        expiresAt: auth.expiresAt,
-        source: auth.source,
-        email: auth.email,
-      })
-    }
-
     if (request.method === "GET" && url.pathname === "/api/auth/browser/status") {
       return sendJson(response, authBrowser.getStatus())
     }
@@ -372,17 +339,6 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/playbox/auth/browser/disconnect") {
       const body = DisconnectBrowserBodySchema.parse(await readJsonBody(request))
       return sendJson(response, await playboxAuthBrowser.disconnect({ deleteProfile: body.deleteProfile }))
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/playbox/auth/token") {
-      const body = PlayboxAuthTokenBodySchema.parse(await readJsonBody(request))
-      const auth = acceptPlayboxAuthorization(body.authorization || body.token, body.source, { email: body.email || null })
-      return sendJson(response, {
-        ok: true,
-        expiresAt: auth.expiresAt,
-        source: auth.source,
-        email: auth.email,
-      })
     }
 
     if (request.method === "POST" && url.pathname === "/api/playbox/auth/import-curl") {
@@ -735,7 +691,6 @@ function registerBackgroundJobs(): void {
 
 export {
   acceptAuthorization,
-  acceptPlayboxAuthorization,
   autoSyncState,
   authBrowser,
   connectAuthAccount,

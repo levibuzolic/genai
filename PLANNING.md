@@ -5,7 +5,6 @@
 - `src/server.js` is a dependency-light Node HTTP server.
 - `public/` contains the built React app served by the Node server.
 - `client/src/` contains the React 19 + Vite source app.
-- `extension/` contains the unpacked Chrome extension **GP Auth Helper**, now a fallback auth helper.
 - `media/catalog.sqlite` stores the local catalog and create-template registry.
 - Media files are saved under date-based folders inside `MEDIA_DIR`.
 - `MEDIA_DIR` can point outside the repo, including mounted remote drives or cloud-synced folders; `catalog.sqlite` stays alongside the media.
@@ -39,13 +38,9 @@ The app-owned auth browser is the primary auth path:
 - `POST /api/auth/browser/refresh` forces a headless token refresh.
 - `POST /api/auth/browser/disconnect` closes the managed browser and optionally removes the profile when `deleteProfile` is true.
 
-The fallback extension reads that token from a logged-in browser page and posts it to:
+Playbox auth can also import browser cookie state from a copied cURL request so the server can refresh Playbox access tokens from Node.
 
-```text
-POST http://localhost:5177/api/auth/token
-```
-
-The server stores bearer tokens in memory only. The persistent browser profile contains normal browser session state and must be treated as sensitive local data. Extension token refresh is automatic every 30 seconds while the source tab is open.
+The server stores bearer tokens in memory only. The persistent browser profile and imported cookie sessions contain normal browser session state and must be treated as sensitive local data.
 
 ## Sync Behavior
 
@@ -101,7 +96,7 @@ The server stores bearer tokens in memory only. The persistent browser profile c
 
 - Make reconnect and refresh states more explicit when the auth browser profile can no longer refresh.
 - Add a confirmed destructive action for deleting the persisted auth browser profile when a full logout/reset is needed.
-- Keep the extension path as a fallback, but make the backend-owned auth browser the normal path in UI copy and troubleshooting.
+- Make Playbox's managed Chrome profile and cURL-cookie import states clearer when refresh fails.
 
 ### Background Sync UX
 

@@ -30,7 +30,7 @@ Do not rely on Vite alone for type safety. The build intentionally includes `pnp
 - After login, the server reuses the same persistent Chrome profile headlessly to refresh Clerk tokens.
 - The default profile path is `MEDIA_DIR/_auth_browser_profile`; override with `AUTH_BROWSER_PROFILE_DIR`.
 - Tokens stay in memory only. Treat the browser profile as sensitive because it contains session state.
-- The Chrome extension remains a fallback token sender to `/api/auth/token`, not the primary path.
+- Playbox can also import browser cookies from a copied cURL request; direct token forwarding endpoints are no longer supported.
 
 ## Background Sync
 

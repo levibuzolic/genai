@@ -61,8 +61,7 @@ This avoids persisting short-lived bearer tokens and gives the server a durable 
 Fallback auth options:
 
 - A backend-owned persistent Chrome profile can capture tokens via DevTools Protocol, but Cloudflare may reject that profile even when the user's standard Chrome profile works.
-- A DevTools Console snippet can fetch `/api/users/me-new` from a normal logged-in Playbox tab and POST the returned `accessToken` to the local app's `/api/playbox/auth/token` endpoint. This avoids an extension but only provides a short-lived token.
-- A token-forwarding extension could intercept `Authorization` headers from Playbox API requests and POST them to the local app. This is less robust because the token lives in app memory.
+- A copied browser cURL request can preserve Playbox cookies for server-side refresh. Posting short-lived Playbox bearer tokens directly to the local app is no longer supported.
 - Environment variables such as `PLAYBOX_AUTHORIZATION` and `PLAYBOX_COOKIE` would work for debugging, but they are brittle and easier to leak.
 - If another HAR is needed, export with sensitive headers/cookies enabled, then immediately redact it into a focused summary.
 

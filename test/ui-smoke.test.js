@@ -64,7 +64,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
 
     await page.locator("#templateViewButton").click()
     await page.waitForSelector(".templateBrowser", { timeout: 5000 })
-    assert.equal(await page.getByRole("heading", { name: "Templates", exact: true }).isVisible(), true)
+    assert.equal(await page.getByRole("heading", { name: "Saved templates", exact: true }).isVisible(), true)
     await page.getByRole("button", { name: "Library" }).click()
     await page.waitForSelector(".card", { timeout: 10000 })
     await page.locator("#playboxViewButton").click()

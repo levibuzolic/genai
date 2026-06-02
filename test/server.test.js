@@ -139,6 +139,21 @@ test("server does not serve stale static app routes while Vite redirect mode is 
   }
 })
 
+test("server does not expose direct token capture endpoints", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-token-endpoints-"))
+  const imported = await importServer(mediaDir)
+  const listener = await listenOnRandomPort(imported.server)
+
+  try {
+    for (const route of ["/api/auth/token", "/api/playbox/auth/token"]) {
+      const response = await requestRaw(listener.port, route, {}, "POST")
+      assert.equal(response.statusCode, 404)
+    }
+  } finally {
+    await listener.close()
+  }
+})
+
 test("primary auth browser account is listed alongside added accounts", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-auth-accounts-"))
   const server = await importServer(mediaDir)

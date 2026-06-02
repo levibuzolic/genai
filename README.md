@@ -2,12 +2,12 @@
 
 Local-only Node.js web app for syncing generated media metadata, downloading media files to disk, creating new media from existing assets/uploads/URLs, and browsing the local collection with prompt text.
 
-Auth is owned by the local Node app. It can open a visible Playwright/Chrome login window once, persist that browser profile under the media directory, and refresh short-lived Clerk tokens headlessly on later runs. The companion Chrome extension, **GP Auth Helper**, remains as a fallback token forwarder.
+Auth is owned by the local Node app. It can open a visible Playwright/Chrome login window once, persist that browser profile under the media directory, and refresh short-lived Clerk tokens headlessly on later runs. Playbox can also import a copied browser cURL request so the server can refresh from captured cookies.
 
 ## Requirements
 
 - [mise](https://mise.jdx.dev/) for the pinned Node.js and pnpm versions
-- Chrome, for the app-owned auth browser and optional unpacked auth helper extension
+- Chrome, for the app-owned auth browser and Playbox cURL cookie capture
 - A source-site account that can complete email/password/OTP login
 
 ## Tooling
@@ -92,7 +92,7 @@ Useful settings:
 - `PLAYBOX_AUTH_BROWSER_PROFILE_DIR`: persistent Playbox Chrome profile directory, defaults to `MEDIA_DIR/_playbox_auth_browser_profile`
 - `PLAYBOX_AUTH_IMPORT_PATH`: imported Playbox cURL session file, defaults to `MEDIA_DIR/_playbox_auth_session.json`
 - `PLAYBOX_CHROME_PATH`: optional path to the Chrome executable used for Playbox auth
-- `AUTH_BROWSER_REFRESH_MS`: fallback headless refresh interval, defaults to 15 minutes
+- `AUTH_BROWSER_REFRESH_MS`: headless refresh interval, defaults to 15 minutes
 - `AUTO_SYNC_ENABLED`: run background incremental syncs while the server is running, defaults to `true`
 - `AUTO_SYNC_STARTUP_DELAY_MS`: delay before the boot sync, defaults to 10 seconds
 - `AUTO_SYNC_INTERVAL_MS`: delay between background sync attempts, defaults to 1 hour
@@ -113,19 +113,6 @@ The persisted browser profile survives server restarts as long as `AUTH_BROWSER_
 Playbox auth uses a dedicated server-owned Chrome profile instead of the Playwright auth browser. The server opens normal Chrome visibly, you complete Playbox/Cloudflare/login there, and the backend connects to that Chrome through the Chrome DevTools Protocol to capture the current Playbox access token. Playbox refreshes may briefly reopen visible Chrome because headless refresh is not reliable behind its bot checks.
 
 The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.sqlite`, SQLite exports/backups, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
-
-## Auth Helper Extension
-
-The extension is now a fallback path when the app-owned auth browser is not suitable.
-
-1. Open `chrome://extensions`.
-2. Enable **Developer mode**.
-3. Click **Load unpacked**.
-4. Select the `extension/` directory.
-5. Visit the source site while logged in.
-6. Keep that tab open while syncing from the local app.
-
-The extension refreshes auth every 30 seconds while the logged-in tab is open. You can also press **Send auth to local app** to force an immediate refresh.
 
 ## Playbox cURL Auth Import
 
