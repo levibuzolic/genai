@@ -16,6 +16,7 @@ import {
   getCatalogDbRevision,
   listCreationJobSummaries,
   parseJson,
+  readCatalogMeta,
   readCatalogFromDb,
   saveCatalog,
 } from "./catalog-db.ts"
@@ -24,6 +25,7 @@ import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-share
 import { catalogMeta, catalogSchema, mediaItems } from "./db-schema.ts"
 import { httpError } from "./errors.ts"
 import { pngBufferToHighQualityJpeg } from "./media-conversion.ts"
+import { isCatalogItem } from "./refinements.ts"
 import { sendJson } from "./static.ts"
 import type {
   Catalog,
@@ -245,7 +247,6 @@ async function prepareDownloadedMedia(
 }
 
 export async function getItems(searchParams: URLSearchParams): Promise<ItemsResponse> {
-  const catalog = await loadCatalog({ reconcileLocalFiles: false })
   const query = (searchParams.get("q") || "").trim().toLowerCase()
   const media = searchParams.get("media") || "all"
   const provider = searchParams.get("provider") || "all"
@@ -253,62 +254,21 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
   const sort = searchParams.get("sort") || "newest"
   const page = Math.max(1, Number(searchParams.get("page") || 1))
   const pageSize = clamp(Number(searchParams.get("pageSize") || 60), 12, 240)
-
-  const catalogItems = includeActiveCreationItems(catalog.items || [], provider).filter(
-    (item) => !isStaleRenderingMediaItem(item) && matchesProviderFilter(item, provider),
-  )
-  const visibleItems = catalogItems.filter((item) => !isDeletedFilterItem(item))
-  const deletedItems = catalogItems.filter(isDeletedFilterItem)
-  let items = status === "deleted" ? deletedItems : visibleItems
-  const facets = buildFacets(visibleItems, deletedItems.length)
-
-  if (media !== "all") {
-    items = items.filter((item) => {
-      if (media === "image") return isImageItem(item)
-      if (media === "video") return isVideoItem(item)
-      return true
-    })
-  }
-
-  if (status !== "all") {
-    items = items.filter((item) => {
-      if (status === "downloaded") return Boolean(item.localFile)
-      if (status === "missing") return isMissingMediaItem(item)
-      if (status === "error") return Boolean(item.downloadError)
-      if (status === "favorited") return Boolean(item.favorited)
-      if (status === "duplicate") return Number(item.duplicateGroupSize || 0) > 1
-      if (status === "unverified") return Boolean(item.localFile) && !item.sha256
-      if (status === "deleted") return isDeletedFilterItem(item)
-      return true
-    })
-  }
-
-  if (query) {
-    items = items.filter((item) =>
-      [
-        item.id,
-        item.type,
-        item.provider,
-        item.collectionId,
-        item.assetId,
-        item.assetKind,
-        item.prompt,
-        item.negativePrompt,
-        item.localFile,
-      ].some((value) =>
-        String(value || "")
-          .toLowerCase()
-          .includes(query),
-      ),
-    )
-  }
-
-  items = sortItemsForView(items, sort)
-  const total = items.length
+  const activeItems = getActiveCreationCatalogItems(provider).filter((item) => matchesItemFilters(item, { media, query, status }))
+  const baseWhere = catalogBaseWhere(provider)
+  const visibleWhere = `(${baseWhere.sql}) AND NOT (${deletedSql()})`
+  const facetRows = readCatalogFacets(visibleWhere, baseWhere.params)
+  const deletedCount = readCatalogCount(`(${baseWhere.sql}) AND (${deletedSql()})`, baseWhere.params)
+  const activeVisibleItems = activeItems.filter((item) => !isDeletedFilterItem(item))
+  const activeDeletedItems = activeItems.filter(isDeletedFilterItem)
+  const facets = mergeFacets(facetRows, buildFacets(activeVisibleItems, activeDeletedItems.length + deletedCount))
+  const itemWhere = catalogItemsWhere({ baseWhere, media, query, status })
+  const tableTotal = readCatalogCount(itemWhere.sql, itemWhere.params)
+  const total = tableTotal + activeItems.length
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const currentPage = Math.min(page, pageCount)
   const start = (currentPage - 1) * pageSize
-  const pageItems = items.slice(start, start + pageSize)
+  const pageItems = sortItemsForView([...activeItems, ...readCatalogItemPage(itemWhere, sort, start + pageSize)], sort).slice(start, start + pageSize)
 
   return {
     items: pageItems.map(toPublicCatalogItem),
@@ -318,12 +278,260 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
     pageCount,
     facets: {
       ...facets,
-      orphanFiles: provider === "all" || provider === "generateporn" ? catalog.orphanFiles?.length || 0 : 0,
+      orphanFiles: provider === "all" || provider === "generateporn" ? readOrphanFileCount() : 0,
     },
-    catalogUpdatedAt: catalog.updatedAt || null,
-    lastSeenJobId: catalog.lastSeenJobId || null,
-    lastRun: catalog.lastRun || null,
+    catalogUpdatedAt: stringMeta("updatedAt"),
+    lastSeenJobId: stringMeta("lastSeenJobId"),
+    lastRun: recordMeta("lastRun"),
   }
+}
+
+type CatalogWhere = {
+  params: Array<string | number>
+  sql: string
+}
+
+type CatalogItemFilters = {
+  media: string
+  query: string
+  status: string
+}
+
+type CatalogFacetRow = {
+  allCount: number
+  imageCount: number
+  videoCount: number
+  downloadedCount: number
+  missingCount: number
+  errorCount: number
+  favoritedCount: number
+  duplicateCount: number
+  unverifiedCount: number
+}
+
+function catalogBaseWhere(provider: string): CatalogWhere {
+  const clauses = [`NOT (${staleRenderingSql()})`]
+  const params: Array<string | number> = []
+
+  if (provider === "playbox") {
+    clauses.push("provider = ?")
+    params.push("playbox")
+  } else if (provider === "generateporn") {
+    clauses.push("provider != ?")
+    params.push("playbox")
+  }
+
+  return {
+    params,
+    sql: clauses.join(" AND "),
+  }
+}
+
+function catalogItemsWhere({
+  baseWhere,
+  media,
+  query,
+  status,
+}: CatalogItemFilters & {
+  baseWhere: CatalogWhere
+}): CatalogWhere {
+  const clauses = [`(${baseWhere.sql})`]
+  const params = [...baseWhere.params]
+
+  if (status === "deleted") {
+    clauses.push(`(${deletedSql()})`)
+  } else {
+    clauses.push(`NOT (${deletedSql()})`)
+  }
+
+  if (media === "image") clauses.push("is_image = 1")
+  if (media === "video") clauses.push("is_video = 1")
+
+  if (status === "downloaded") clauses.push("has_local_file = 1")
+  if (status === "missing") clauses.push(`(${missingSql()})`)
+  if (status === "error") clauses.push("has_download_error = 1")
+  if (status === "favorited") clauses.push("is_favorited = 1")
+  if (status === "duplicate") clauses.push("is_duplicate = 1")
+  if (status === "unverified") clauses.push("is_unverified = 1")
+
+  if (query) {
+    clauses.push("search_text LIKE ? ESCAPE '\\'")
+    params.push(`%${escapeSqliteLike(query)}%`)
+  }
+
+  return {
+    params,
+    sql: clauses.join(" AND "),
+  }
+}
+
+function readCatalogFacets(sql: string, params: Array<string | number>): CatalogFacets {
+  const row = getCatalogDb()
+    .prepare(
+      `
+        SELECT
+          COUNT(*) AS allCount,
+          COALESCE(SUM(is_image), 0) AS imageCount,
+          COALESCE(SUM(is_video), 0) AS videoCount,
+          COALESCE(SUM(has_local_file), 0) AS downloadedCount,
+          COALESCE(SUM(CASE WHEN ${missingSql()} THEN 1 ELSE 0 END), 0) AS missingCount,
+          COALESCE(SUM(has_download_error), 0) AS errorCount,
+          COALESCE(SUM(is_favorited), 0) AS favoritedCount,
+          COALESCE(SUM(is_duplicate), 0) AS duplicateCount,
+          COALESCE(SUM(is_unverified), 0) AS unverifiedCount
+        FROM media_items
+        WHERE ${sql}
+      `,
+    )
+    .get(...params) as CatalogFacetRow
+
+  return {
+    media: {
+      all: Number(row.allCount || 0),
+      image: Number(row.imageCount || 0),
+      video: Number(row.videoCount || 0),
+    },
+    status: {
+      all: Number(row.allCount || 0),
+      downloaded: Number(row.downloadedCount || 0),
+      missing: Number(row.missingCount || 0),
+      error: Number(row.errorCount || 0),
+      favorited: Number(row.favoritedCount || 0),
+      duplicate: Number(row.duplicateCount || 0),
+      unverified: Number(row.unverifiedCount || 0),
+      deleted: 0,
+    },
+  }
+}
+
+function readCatalogCount(sql: string, params: Array<string | number>): number {
+  const row = getCatalogDb().prepare(`SELECT COUNT(*) AS count FROM media_items WHERE ${sql}`).get(...params) as { count: number }
+  return Number(row.count || 0)
+}
+
+function readCatalogItemPage(where: CatalogWhere, sort: string, limit: number): CatalogItem[] {
+  if (limit <= 0) return []
+
+  const rows = getCatalogDb()
+    .prepare(`SELECT item_json AS itemJson FROM media_items WHERE ${where.sql} ORDER BY ${catalogOrderBy(sort)} LIMIT ?`)
+    .all(...where.params, limit) as { itemJson: string }[]
+
+  return rows.map((row) => parseJson(row.itemJson, null)).filter(isCatalogItem)
+}
+
+function catalogOrderBy(sort: string): string {
+  if (sort === "oldest") return "created_at ASC, id ASC"
+  if (sort === "largest") return "size DESC NULLS LAST, created_at DESC, id ASC"
+  if (sort === "smallest") return "size ASC NULLS LAST, created_at DESC, id ASC"
+  if (sort === "type") return "media_kind ASC, created_at DESC, id ASC"
+  return "created_at DESC, id ASC"
+}
+
+function getActiveCreationCatalogItems(provider: string): CatalogItem[] {
+  if (provider === "playbox") return []
+
+  const projected = listCreationJobSummaries({ status: "catalog-projection", limit: 500 })
+    .map(catalogItemFromActiveCreation)
+    .filter((item): item is CatalogItem => Boolean(item))
+    .filter((item) => !isStaleRenderingMediaItem(item) && matchesProviderFilter(item, provider))
+  const existingIds = readExistingCatalogItemIds(projected.map((item) => item.id))
+
+  return projected.filter((item) => !existingIds.has(item.id))
+}
+
+function readExistingCatalogItemIds(ids: string[]): Set<string> {
+  const uniqueIds = [...new Set(ids)].filter(Boolean)
+  if (!uniqueIds.length) return new Set()
+
+  const placeholders = uniqueIds.map(() => "?").join(",")
+  const rows = getCatalogDb().prepare(`SELECT id FROM media_items WHERE id IN (${placeholders})`).all(...uniqueIds) as { id: string }[]
+  return new Set(rows.map((row) => row.id))
+}
+
+function matchesItemFilters(item: CatalogItem, { media, query, status }: CatalogItemFilters): boolean {
+  if (media === "image" && !isImageItem(item)) return false
+  if (media === "video" && !isVideoItem(item)) return false
+
+  if (status === "downloaded" && !item.localFile) return false
+  if (status === "missing" && !isMissingMediaItem(item)) return false
+  if (status === "error" && !item.downloadError) return false
+  if (status === "favorited" && !item.favorited) return false
+  if (status === "duplicate" && Number(item.duplicateGroupSize || 0) <= 1) return false
+  if (status === "unverified" && (!item.localFile || item.sha256)) return false
+  if (status === "deleted" && !isDeletedFilterItem(item)) return false
+  if (status !== "deleted" && isDeletedFilterItem(item)) return false
+
+  if (!query) return true
+  return [
+    item.id,
+    item.type,
+    item.provider,
+    item.collectionId,
+    item.assetId,
+    item.assetKind,
+    item.prompt,
+    item.negativePrompt,
+    item.localFile,
+  ].some((value) =>
+    String(value || "")
+      .toLowerCase()
+      .includes(query),
+  )
+}
+
+function mergeFacets(left: CatalogFacets, right: CatalogFacets): CatalogFacets {
+  return {
+    media: {
+      all: left.media.all + right.media.all,
+      image: left.media.image + right.media.image,
+      video: left.media.video + right.media.video,
+    },
+    status: {
+      all: left.status.all + right.status.all,
+      downloaded: left.status.downloaded + right.status.downloaded,
+      missing: left.status.missing + right.status.missing,
+      error: left.status.error + right.status.error,
+      favorited: left.status.favorited + right.status.favorited,
+      duplicate: left.status.duplicate + right.status.duplicate,
+      unverified: left.status.unverified + right.status.unverified,
+      deleted: left.status.deleted + right.status.deleted,
+    },
+  }
+}
+
+function readOrphanFileCount(): number {
+  const row = getCatalogDb().prepare("SELECT COUNT(*) AS count FROM orphan_files").get() as { count: number }
+  return Number(row.count || 0)
+}
+
+function stringMeta(key: string): string | null {
+  const value = readCatalogMeta(key)
+  return typeof value === "string" ? value : null
+}
+
+function recordMeta(key: string): Record<string, unknown> | null {
+  const value = readCatalogMeta(key)
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
+
+function staleRenderingSql(now = Date.now()): string {
+  return `status IN (${sqlStringList(ACTIVE_MEDIA_STATUSES)}) AND has_local_file = 0 AND has_output_url = 0 AND (render_started_at IS NULL OR render_started_at < ${now - RENDERING_MEDIA_MAX_AGE_MS})`
+}
+
+function deletedSql(now = Date.now()): string {
+  return `remote_deleted_at IS NOT NULL OR (status IN (${sqlStringList(FAILED_MEDIA_STATUSES)}) AND has_local_file = 0 AND has_output_url = 0 AND (failure_observed_at IS NULL OR failure_observed_at < ${now - FAILED_MEDIA_VISIBLE_MS}))`
+}
+
+function missingSql(now = Date.now()): string {
+  return `has_local_file = 0 AND has_download_error = 0 AND NOT (status IN (${sqlStringList(ACTIVE_MEDIA_STATUSES)}) AND has_local_file = 0 AND has_output_url = 0 AND render_started_at IS NOT NULL AND render_started_at >= ${now - RENDERING_MEDIA_MAX_AGE_MS}) AND NOT (status IN (${sqlStringList(FAILED_MEDIA_STATUSES)}) AND has_local_file = 0 AND has_output_url = 0)`
+}
+
+function sqlStringList(values: Iterable<string>): string {
+  return [...values].map((value) => `'${value.replace(/'/g, "''")}'`).join(", ")
+}
+
+function escapeSqliteLike(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`)
 }
 
 function matchesProviderFilter(item: CatalogItem, provider: string): boolean {
@@ -343,9 +551,9 @@ export async function getCatalogItem(id: string): Promise<CatalogItemResponse> {
     throw httpError("Item id is required.", 400)
   }
 
-  const catalog = await loadCatalog({ reconcileLocalFiles: false })
-  const item = catalog.items.find((entry) => entry.id === id)
-  if (!item) {
+  const row = getCatalogDb().prepare("SELECT item_json AS itemJson FROM media_items WHERE id = ?").get(id) as { itemJson: string } | undefined
+  const item = row ? parseJson(row.itemJson, null) : null
+  if (!isCatalogItem(item)) {
     throw httpError("Catalog item was not found.", 404)
   }
 
@@ -386,24 +594,6 @@ export function buildFacets(items: CatalogItem[], deletedCount = 0): CatalogFace
     media,
     status,
   }
-}
-
-function includeActiveCreationItems(items: CatalogItem[], provider: string): CatalogItem[] {
-  if (provider === "playbox") {
-    return items
-  }
-
-  const itemById = new Map(items.map((item) => [item.id, item]))
-  const next = items.slice()
-
-  for (const creation of listCreationJobSummaries({ status: "catalog-projection", limit: 500 })) {
-    const item = catalogItemFromActiveCreation(creation)
-    if (!item || itemById.has(item.id)) continue
-    itemById.set(item.id, item)
-    next.push(item)
-  }
-
-  return next
 }
 
 function catalogItemFromActiveCreation(creation: CreationJob): CatalogItem | null {
