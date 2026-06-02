@@ -3,6 +3,7 @@ import type { ServerResponse } from "node:http"
 import { sendJsonText, stringifyJson } from "./static.ts"
 
 type CacheEntry = {
+  byteLength: number
   expiresAt: number
   json: string
   revision: number
@@ -33,7 +34,7 @@ export async function sendCachedJson(
   const now = Date.now()
   const existing = getReadResponseCacheEntry(key, revision, now)
   if (existing) {
-    sendJsonText(response, existing.json, existing.statusCode)
+    sendJsonText(response, existing.json, existing.statusCode, existing.byteLength)
     return
   }
 
@@ -83,6 +84,7 @@ async function buildReadResponseCacheEntry(
 ): Promise<CacheEntry> {
   const json = stringifyJson(await producer())
   const entry = {
+    byteLength: Buffer.byteLength(json),
     expiresAt: now + ttlMs,
     json,
     revision,

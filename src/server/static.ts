@@ -179,9 +179,10 @@ export function stringifyJson(body: unknown): string {
   return JSON.stringify(body)
 }
 
-export function sendJsonText(response: HttpResponse, body: string, statusCode = 200): void {
+export function sendJsonText(response: HttpResponse, body: string, statusCode = 200, byteLength = Buffer.byteLength(body)): void {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
+    "content-length": String(byteLength),
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type",
