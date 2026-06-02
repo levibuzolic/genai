@@ -177,6 +177,55 @@ type MediaItemIndexColumns = {
   updatedAt: string | null
 }
 
+type MediaItemProjectionRow = {
+  accountEmail: string | null
+  assetId: string | null
+  assetKind: string | null
+  collectionId: string | null
+  contentType: string | null
+  createModeId: string | null
+  createParamsJson: string | null
+  createdAt: number | null
+  createdAtIso: string | null
+  createdLocallyAt: string | null
+  downloadError: string | null
+  downloadedAt: string | null
+  duplicateGroupSize: number | null
+  duplicateOf: string | null
+  duration: number | null
+  error: string | null
+  externalTaskId: string | null
+  favorited: number | null
+  fileSize: number | null
+  id: string
+  inputUrl: string | null
+  localFile: string | null
+  modelId: string | null
+  negativePrompt: string | null
+  outputUrl: string | null
+  prompt: string | null
+  provider: string
+  remoteDeletedAt: string | null
+  remoteDeleteStatus: string | null
+  sha256: string | null
+  shared: number | null
+  size: number | null
+  sourceItemId: string | null
+  sourceKind: string | null
+  sourceUrl: string | null
+  status: string | null
+  templateId: string | null
+  templateLabel: string | null
+  thumbnailError: string | null
+  thumbnailFile: string | null
+  thumbnailGeneratedAt: string | null
+  timeToGenerateMs: number | null
+  type: string | null
+  updatedAt: string | null
+  userId: string | null
+  verifiedAt: string | null
+}
+
 export type PlayboxCollectionRecord = {
   id: string
   accountId: string | null
@@ -1074,13 +1123,118 @@ export function listCatalogItemsByPrompts(prompts: Iterable<string>, limit = 6):
   const promptsList = [...promptSet]
   const placeholders = promptsList.map(() => "?").join(",")
   const rows = db
-    .prepare(`SELECT item_json AS itemJson FROM media_items WHERE prompt IN (${placeholders}) ORDER BY created_at DESC, id LIMIT ?`)
-    .all(...promptsList, limit) as { itemJson: string }[]
-  const items = rows
-    .map((row) => parseJson(row.itemJson, null))
-    .filter((item): item is CatalogItem => isCatalogItem(item) && promptSet.has(normalizePromptLink(item.prompt)))
+    .prepare(
+      `SELECT ${mediaItemProjectionSelectSql()} FROM media_items WHERE prompt IN (${placeholders}) ORDER BY created_at DESC, id LIMIT ?`,
+    )
+    .all(...promptsList, limit) as MediaItemProjectionRow[]
+  const items = rows.map(catalogItemFromMediaItemProjection).filter((item) => promptSet.has(normalizePromptLink(item.prompt)))
 
   return items.slice(0, limit)
+}
+
+function mediaItemProjectionSelectSql(): string {
+  return `
+    id,
+    account_email AS accountEmail,
+    provider,
+    collection_id AS collectionId,
+    asset_id AS assetId,
+    asset_kind AS assetKind,
+    user_id AS userId,
+    type,
+    status,
+    prompt,
+    negative_prompt AS negativePrompt,
+    output_url AS outputUrl,
+    input_url AS inputUrl,
+    duration,
+    time_to_generate_ms AS timeToGenerateMs,
+    created_at AS createdAt,
+    created_at_iso AS createdAtIso,
+    external_task_id AS externalTaskId,
+    model_id AS modelId,
+    shared,
+    favorited,
+    error,
+    updated_at AS updatedAt,
+    local_file AS localFile,
+    size,
+    file_size AS fileSize,
+    sha256,
+    verified_at AS verifiedAt,
+    content_type AS contentType,
+    downloaded_at AS downloadedAt,
+    download_error AS downloadError,
+    thumbnail_file AS thumbnailFile,
+    thumbnail_generated_at AS thumbnailGeneratedAt,
+    thumbnail_error AS thumbnailError,
+    duplicate_of AS duplicateOf,
+    duplicate_group_size AS duplicateGroupSize,
+    create_mode_id AS createModeId,
+    create_params_json AS createParamsJson,
+    template_id AS templateId,
+    template_label AS templateLabel,
+    source_kind AS sourceKind,
+    source_item_id AS sourceItemId,
+    source_url AS sourceUrl,
+    created_locally_at AS createdLocallyAt,
+    remote_deleted_at AS remoteDeletedAt,
+    remote_delete_status AS remoteDeleteStatus
+  `
+}
+
+function catalogItemFromMediaItemProjection(row: MediaItemProjectionRow): CatalogItem {
+  const createParams = row.createParamsJson ? paramsFromUnknown(parseJson(row.createParamsJson, null)) : null
+
+  return {
+    id: row.id,
+    accountEmail: row.accountEmail,
+    provider: row.provider,
+    collectionId: row.collectionId,
+    assetId: row.assetId,
+    assetKind: row.assetKind,
+    userId: row.userId,
+    type: row.type,
+    prompt: row.prompt,
+    negativePrompt: row.negativePrompt,
+    status: row.status,
+    outputUrl: row.outputUrl,
+    inputUrl: row.inputUrl,
+    duration: row.duration,
+    createdAt: row.createdAt,
+    createdAtIso: row.createdAtIso,
+    externalTaskId: row.externalTaskId,
+    modelId: row.modelId,
+    model_id: row.modelId,
+    shared: row.shared === null ? null : Boolean(row.shared),
+    favorited: row.favorited === null ? null : Boolean(row.favorited),
+    error: row.error,
+    updatedAt: row.updatedAt,
+    localFile: row.localFile,
+    size: row.size,
+    fileSize: row.fileSize,
+    sha256: row.sha256,
+    verifiedAt: row.verifiedAt,
+    contentType: row.contentType,
+    downloadedAt: row.downloadedAt,
+    downloadError: row.downloadError,
+    timeToGenerateMs: row.timeToGenerateMs,
+    thumbnailFile: row.thumbnailFile,
+    thumbnailGeneratedAt: row.thumbnailGeneratedAt,
+    thumbnailError: row.thumbnailError,
+    duplicateOf: row.duplicateOf,
+    duplicateGroupSize: row.duplicateGroupSize,
+    createModeId: row.createModeId,
+    createParams,
+    templateId: row.templateId,
+    templateLabel: row.templateLabel,
+    sourceKind: row.sourceKind,
+    sourceItemId: row.sourceItemId,
+    sourceUrl: row.sourceUrl,
+    createdLocallyAt: row.createdLocallyAt,
+    remoteDeletedAt: row.remoteDeletedAt,
+    remoteDeleteStatus: row.remoteDeleteStatus,
+  }
 }
 
 function normalizePromptLink(prompt: unknown): string {
