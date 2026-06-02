@@ -34,6 +34,7 @@ import { getCreateModeDefinitions, loadCreateTemplateRegistry, prepareCreateSubm
 import { httpError } from "./errors.ts"
 import { readJsonObject, requireCreateSource, stringOrNull } from "./refinements.ts"
 import { parseGeneratePornJob } from "./schemas.ts"
+import { scheduleMissingThumbnailBackgroundJobForCatalog } from "./sync.ts"
 import type { CreateMode, CreateParams, CreationJob, CreationWorkflow, GeneratePornJob, TemplateSettings } from "./types.ts"
 
 export { buildCreateApiRequest, resolveCreateSource }
@@ -925,6 +926,7 @@ export async function downloadCreateJob(jobId: string): Promise<DownloadCreateJo
   catalog.lastSeenJobId ||= job.id
   catalog.updatedAt = new Date().toISOString()
   await saveCatalog(catalog)
+  scheduleMissingThumbnailBackgroundJobForCatalog(catalog, "creation-download-finished")
   saveCreationFromJob(job, {
     existing: creationState,
     downloadedItemId: nextItem.id,

@@ -2,6 +2,7 @@ import path from "node:path"
 
 import { fetchJobsPage } from "./api-client.ts"
 import { getSyncAccountEmails } from "./auth-state.ts"
+import { scheduleBackgroundJob } from "./background-worker.ts"
 import { listCreationJobs } from "./catalog-db.ts"
 import {
   applyCatalogThumbnail,
@@ -88,6 +89,7 @@ type AccountScanResult = {
 const FULL_COVERAGE_SYNC_INTERVAL_MS = 60 * 60 * 1000
 const EXPIRED_NO_MEDIA_ITEM_MS = 60 * 60 * 1000
 const CATALOG_PROGRESS_SAVE_BATCH_SIZE = 5
+export const MISSING_THUMBNAIL_BACKGROUND_JOB_ID = "missing-video-thumbnails"
 
 export const syncState: SyncState = {
   running: false,
@@ -459,6 +461,7 @@ export async function startSync({
       ? `Finished with ${syncState.errors.length} error${syncState.errors.length === 1 ? "" : "s"}.`
       : `Finished. Downloaded ${syncState.downloaded} new file${syncState.downloaded === 1 ? "" : "s"}.`,
   })
+  scheduleMissingThumbnailBackgroundJobForCatalog(catalog, "sync-finished")
 }
 
 async function drainDownloadQueue(options: {
@@ -719,6 +722,7 @@ export async function startCatalogDownload({ mode }: { mode: CatalogDownloadMode
       ? `Finished with ${syncState.errors.length} error${syncState.errors.length === 1 ? "" : "s"}.`
       : `Finished. Downloaded ${syncState.downloaded} file${syncState.downloaded === 1 ? "" : "s"}.`,
   })
+  scheduleMissingThumbnailBackgroundJobForCatalog(catalog, "catalog-download-finished")
 }
 
 export function finishSyncRun({
@@ -1009,6 +1013,7 @@ export async function startLibraryVerification(): Promise<void> {
     finishedAt,
     completeMessage: `Finished. Verified ${syncState.downloaded} file${syncState.downloaded === 1 ? "" : "s"}, found ${duplicateItems} duplicate item${duplicateItems === 1 ? "" : "s"} and ${orphanFiles.length} orphan file${orphanFiles.length === 1 ? "" : "s"}.`,
   })
+  scheduleMissingThumbnailBackgroundJobForCatalog(catalog, "library-verification-finished")
 }
 
 export function getThumbnailGenerationQueue(items: CatalogItem[]): CatalogItem[] {
@@ -1023,6 +1028,14 @@ export function getThumbnailGenerationQueue(items: CatalogItem[]): CatalogItem[]
 
     return !item.thumbnailFile
   })
+}
+
+export function scheduleMissingThumbnailBackgroundJobForCatalog(catalog: Catalog, reason = "missing-thumbnails"): boolean {
+  if (getThumbnailGenerationQueue(catalog.items).length === 0) {
+    return false
+  }
+
+  return scheduleBackgroundJob(MISSING_THUMBNAIL_BACKGROUND_JOB_ID, 0, reason)
 }
 
 export function getCatalogDownloadQueue(

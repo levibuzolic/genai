@@ -21,6 +21,21 @@ import {
   writeCatalog,
 } from "./helpers/server.js"
 
+async function waitFor(predicate, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs
+  let lastValue
+
+  while (Date.now() < deadline) {
+    lastValue = await predicate()
+    if (lastValue) {
+      return lastValue
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+
+  return lastValue
+}
+
 test("job response parser normalizes upstream aliases at the boundary", () => {
   const job = parseGeneratePornJob({
     id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -1009,6 +1024,50 @@ test("missing thumbnail background job creates posters for existing downloaded v
       generated: 1,
       errors: 0,
     })
+    assert.equal(item.thumbnailFile, `_thumbnails/2026-05-26/2026-05-26_video_${id}.jpg`)
+    assert.equal(item.thumbnailError, null)
+    assert.equal(existsSync(path.join(mediaDir, item.thumbnailFile)), true)
+  } finally {
+    restoreRunner()
+  }
+})
+
+test("missing thumbnail scheduler triggers the background job for catalog items waiting on thumbnails", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-scheduled-thumbs-"))
+  const id = "16161616-1616-4161-8161-161616161616"
+  const localFile = `2026-05-26/2026-05-26_video_${id}.mp4`
+  await mkdir(path.dirname(path.join(mediaDir, localFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, localFile), new Uint8Array([1, 2, 3]))
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/scheduled_00.mp4",
+        localFile,
+        createdAt: 1779769825,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+
+  const restoreRunner = setThumbnailProcessRunnerForTests(async (_command, args) => {
+    await writeFile(args.at(-1), new Uint8Array([6, 6, 6]))
+  })
+
+  try {
+    const server = await importServer(mediaDir, { BACKGROUND_WORKERS_ENABLED: "true" })
+    const scheduled = server.scheduleMissingThumbnailBackgroundJobForCatalog(await readCatalog(mediaDir), "test")
+
+    assert.equal(scheduled, true)
+
+    const item = await waitFor(async () => {
+      const catalog = await readCatalog(mediaDir)
+      return catalog.items.find((entry) => entry.id === id && entry.thumbnailFile)
+    })
+
     assert.equal(item.thumbnailFile, `_thumbnails/2026-05-26/2026-05-26_video_${id}.jpg`)
     assert.equal(item.thumbnailError, null)
     assert.equal(existsSync(path.join(mediaDir, item.thumbnailFile)), true)
