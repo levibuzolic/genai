@@ -14,7 +14,13 @@ import { loadCatalog, saveCatalog, sortItems } from "./catalog.ts"
 import { MEDIA_DIR, PLAYBOX_PAGE_LIMIT, SYNC_DELAY_MS } from "./config.ts"
 import { fetchPlayboxCollectionsPage } from "./playbox-api-client.ts"
 import { recordOrNull, stringOrNull } from "./refinements.ts"
-import { finishSyncRun, resetSyncState, shouldStopForCancellation, syncState } from "./sync.ts"
+import {
+  finishSyncRun,
+  resetSyncState,
+  scheduleMissingThumbnailBackgroundJobForCatalog,
+  shouldStopForCancellation,
+  syncState,
+} from "./sync.ts"
 import type { CatalogItem, PlayboxCollection } from "./types.ts"
 import { contentTypeFor, hashBuffer, sanitizePathPart, sleep } from "./utils.ts"
 
@@ -167,6 +173,7 @@ export async function startPlayboxSync(): Promise<void> {
       ? `Finished Playbox sync with ${syncState.errors.length} error${syncState.errors.length === 1 ? "" : "s"}.`
       : `Finished Playbox sync. Downloaded ${syncState.downloaded} file${syncState.downloaded === 1 ? "" : "s"}.`,
   })
+  scheduleMissingThumbnailBackgroundJobForCatalog(catalog, "playbox-sync-finished")
 }
 
 export function collectPlayboxAssets(collection: PlayboxCollection): PlayboxAssetCandidate[] {

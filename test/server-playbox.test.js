@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
@@ -6,7 +7,22 @@ import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 
 import { setThumbnailProcessRunnerForTests } from "../src/thumbnails.ts"
-import { importServer, readCatalog } from "./helpers/server.js"
+import { importServer, readCatalog, writeCatalog } from "./helpers/server.js"
+
+async function waitFor(predicate, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs
+  let lastValue
+
+  while (Date.now() < deadline) {
+    lastValue = await predicate()
+    if (lastValue) {
+      return lastValue
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+
+  return lastValue
+}
 
 test("Playbox sync stores collections, downloads primary media, and projects items into the catalog", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-playbox-sync-"))
@@ -176,6 +192,73 @@ test("Playbox sync is registered as an automatic background worker", async () =>
   assert.equal(worker.enabled, true)
   assert.equal(worker.intervalMs, 3600000)
   assert.equal(worker.label, "Playbox sync")
+})
+
+test("Playbox sync completion schedules missing thumbnail background work", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-playbox-thumbnail-schedule-"))
+  const token = fakeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 })
+  const id = "17171717-1717-4171-8171-171717171717"
+  const localFile = `2026-06-01/2026-06-01_video_${id}.mp4`
+  await mkdir(path.dirname(path.join(mediaDir, localFile)), { recursive: true })
+  await writeFile(path.join(mediaDir, localFile), Buffer.from("video bytes"))
+  await writeCatalog(mediaDir, {
+    items: [
+      {
+        id,
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/recent.mp4",
+        localFile,
+        createdAt: 1780272000,
+      },
+    ],
+    downloadedJobIds: [id],
+    lastSeenJobId: id,
+  })
+
+  const originalFetch = globalThis.fetch
+  const restoreRunner = setThumbnailProcessRunnerForTests(async (_command, args) => {
+    const output = args.at(-1)
+    await mkdir(path.dirname(output), { recursive: true })
+    await writeFile(output, Buffer.from("poster"))
+    return { code: 0, stderr: "" }
+  })
+
+  globalThis.fetch = async (url) => {
+    const href = String(url)
+    if (href === "https://api.playbox.com/api/model/collections?page=1&filter=ALL") {
+      return Response.json({
+        message: "Collections found",
+        data: [],
+        maxReached: true,
+        total: 0,
+        perPage: 30,
+        page: "1",
+      })
+    }
+
+    throw new Error(`Unexpected fetch ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      AUTO_SYNC_ENABLED: "true",
+      BACKGROUND_WORKERS_ENABLED: "true",
+      PLAYBOX_AUTHORIZATION: token,
+    })
+    await server.startPlayboxSync()
+
+    const item = await waitFor(async () => {
+      const catalog = await readCatalog(mediaDir)
+      return catalog.items.find((entry) => entry.id === id && entry.thumbnailFile)
+    })
+
+    assert.equal(item.thumbnailFile, `_thumbnails/2026-06-01/2026-06-01_video_${id}.jpg`)
+    assert.equal(existsSync(path.join(mediaDir, item.thumbnailFile)), true)
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreRunner()
+  }
 })
 
 function fakeJwt(payload) {
