@@ -1151,6 +1151,73 @@ test("creation job submit and download use mocked API and merge into catalog", a
   }
 })
 
+test("creation queue downloads completed creations into the catalog", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-auto-download-"))
+  const jobId = "19191919-1919-4191-8191-191919191919"
+  const originalFetch = globalThis.fetch
+  const restoreRunner = setThumbnailProcessRunnerForTests(async (_command, args) => {
+    await writeFile(args.at(-1), new Uint8Array([7, 7, 7]))
+  })
+
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/video" && options.method === "POST") {
+      return jsonResponse({ job_id: jobId })
+    }
+
+    if (href === `https://api.generateporn.ai/api/jobs/${jobId}`) {
+      return jsonResponse({
+        id: jobId,
+        type: "video",
+        prompt: "auto download this",
+        output_url: "https://assets.example/auto-download.mp4",
+        status: "done",
+        created_at: 1779893000,
+      })
+    }
+
+    if (href === "https://assets.example/auto-download.mp4") {
+      return new Response(new Uint8Array([1, 2, 3, 4]), {
+        status: 200,
+        headers: {
+          "content-type": "video/mp4",
+        },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+
+    await server.createMediaJob({
+      modeId: "text-to-video",
+      params: {
+        prompt: "auto download this",
+        quality: "720p-5",
+      },
+    })
+    await server.runCreationQueueBackgroundJob()
+    await server.pollCreateJob(jobId)
+    await server.runCreationQueueBackgroundJob()
+
+    const catalog = await readCatalog(mediaDir)
+    const item = catalog.items.find((entry) => entry.id === jobId)
+    const details = await server.getCreationDetails(jobId)
+
+    assert.equal(item.localFile, `2026-05-27/2026-05-27_video_${jobId}.mp4`)
+    assert.equal(item.thumbnailFile, `_thumbnails/2026-05-27/2026-05-27_video_${jobId}.jpg`)
+    assert.equal(details.creation.downloadedItemId, jobId)
+  } finally {
+    globalThis.fetch = originalFetch
+    restoreRunner()
+  }
+})
+
 test("creation history persists submitted jobs across server imports", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-history-persist-"))
   const jobId = "17171717-1717-4171-8171-171717171717"

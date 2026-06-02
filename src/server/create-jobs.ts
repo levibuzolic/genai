@@ -472,13 +472,43 @@ async function processCreationQueues(accountEmail?: string | null): Promise<Reco
     [...accounts].map((accountKey) => processCreationQueueForAccount(accountKey === "__default__" ? null : accountKey)),
   )
   dispatched = results.reduce((total, count) => total + count, 0)
+  const downloaded = await downloadCompletedCreations()
 
   scheduleNextQueuedCreationRun()
   return {
     accounts: accounts.size,
     dispatched,
+    downloaded,
     queued: listCreationJobs({ status: "all", limit: 1000 }).filter((creation) => creation.status === QUEUED_CREATION_STATUS).length,
   }
+}
+
+async function downloadCompletedCreations(): Promise<number> {
+  const downloadable = listCreationJobs({ status: "all", limit: 1000 })
+    .filter(isDownloadableCompletedCreation)
+    .toSorted(compareDownloadableCreations)
+
+  let downloaded = 0
+  for (const creation of downloadable) {
+    try {
+      await downloadCreateJob(creation.jobId || creation.id)
+      downloaded += 1
+    } catch {
+      // Keep the queue moving; the creation remains downloadable for the next run.
+    }
+  }
+
+  return downloaded
+}
+
+function isDownloadableCompletedCreation(creation: CreationJob): boolean {
+  return creation.status === "done" && Boolean(creation.outputUrl) && !creation.downloadedItemId
+}
+
+function compareDownloadableCreations(a: CreationJob, b: CreationJob): number {
+  return String(a.finishedAt || a.updatedAt || a.createdLocallyAt || "").localeCompare(
+    String(b.finishedAt || b.updatedAt || b.createdLocallyAt || ""),
+  )
 }
 
 async function processCreationQueueForAccount(accountEmail: string | null): Promise<number> {
