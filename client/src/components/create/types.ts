@@ -30,8 +30,10 @@ export type CreateStudioProps = {
   setModeId: (id: string) => void
   accountOptions: string[]
   selectedAccountEmail: string
+  autoAccountEmail: string
   setSelectedAccountEmail: (email: string) => void
   pendingGenerationCountsByAccount: Record<string, number>
+  queuedGenerationCountsByAccount: Record<string, number>
   pendingGenerationCount: number
   queuedGenerationCount: number
   generationConcurrencyLimit: number
@@ -57,8 +59,6 @@ export type CreateStudioProps = {
   onReset: () => void
   onClose: () => void
   templates: CreateTemplate[]
-  templateSearch: string
-  setTemplateSearch: (value: string) => void
   selectedTemplateId: string
   onApplyTemplate: (template: CreateTemplate) => void
   onClearTemplate: () => void

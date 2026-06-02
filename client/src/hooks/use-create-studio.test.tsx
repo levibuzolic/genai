@@ -66,6 +66,7 @@ describe("useCreateStudio", () => {
           negativePrompt: "template negative",
           quality: "720p-4",
         },
+        queue: true,
         templateId: templateWithDifferentSource.id,
       },
     ])
@@ -75,6 +76,7 @@ describe("useCreateStudio", () => {
     globalThis.fetch = vi.fn<(input: RequestInfo | URL) => Promise<Response>>(async (input) => {
       const url = String(input)
       if (url === "/api/create/modes") return jsonResponse({ modes: [multiModelVideoMode] })
+      if (url === "/api/create/jobs/job-1") return jsonResponse({ job: { status: "pending" } })
       throw new Error(`Unexpected fetch: ${url}`)
     })
 

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { CreateStudio, formatAccountOptionLabel } from "./CreateStudio"
+import { CreateStudio, formatAccountOptionLabel, formatAutoAccountOptionLabel } from "./CreateStudio"
 import type { CreateStudioProps } from "./types"
 
 afterEach(() => {
@@ -34,10 +34,12 @@ const baseProps = {
   setModeId: noop,
   accountOptions: ["primary@example.com", "backup@example.com"],
   selectedAccountEmail: "primary@example.com",
+  autoAccountEmail: "backup@example.com",
   setSelectedAccountEmail: noop,
   pendingGenerationCountsByAccount: { "primary@example.com": 2, "backup@example.com": 0 },
+  queuedGenerationCountsByAccount: { "primary@example.com": 1, "backup@example.com": 0 },
   pendingGenerationCount: 2,
-  queuedGenerationCount: 0,
+  queuedGenerationCount: 1,
   generationConcurrencyLimit: 2,
   prompt: "",
   setPrompt: noop,
@@ -61,8 +63,6 @@ const baseProps = {
   onReset: noop,
   onClose: noop,
   templates: [],
-  templateSearch: "",
-  setTemplateSearch: noop,
   selectedTemplateId: "",
   onApplyTemplate: noop,
   onClearTemplate: noop,
@@ -101,14 +101,29 @@ const catalogSourceModesFixture = [{ id: "custom-video", label: "Custom Video", 
 
 describe("CreateStudio", () => {
   it("formats pending generation counts in account labels", () => {
-    expect(formatAccountOptionLabel("primary@example.com", 2)).toBe("primary@example.com (2 pending)")
-    expect(formatAccountOptionLabel("backup@example.com", 0)).toBe("backup@example.com (0 pending)")
+    expect(formatAccountOptionLabel("primary@example.com", 2, 1)).toBe("primary@example.com (2 pending, 1 queued)")
+    expect(formatAutoAccountOptionLabel("backup@example.com", 0, 0)).toBe("Auto · backup@example.com (0 pending, 0 queued)")
   })
 
-  it("shows the selected account pending count in the account dropdown", () => {
+  it("shows the selected account pending and queued counts in the account dropdown", () => {
     render(<CreateStudio {...baseProps} />)
 
-    expect(screen.getByText("primary@example.com (2 pending)")).toBeTruthy()
+    expect(screen.getByText("primary@example.com (2 pending, 1 queued)")).toBeTruthy()
+  })
+
+  it("defaults account selection to Auto", () => {
+    render(<CreateStudio {...baseProps} selectedAccountEmail="" />)
+
+    expect(screen.getByText("Auto · backup@example.com (0 pending, 0 queued)")).toBeTruthy()
+  })
+
+  it("submits through the local creation queue", () => {
+    const onSubmit = vi.fn<CreateStudioProps["onSubmit"]>()
+    render(<CreateStudio {...baseProps} onSubmit={onSubmit} />)
+
+    fireEvent.click(screen.getByRole("button", { name: "Create" }))
+
+    expect(onSubmit).toHaveBeenCalledWith({ queue: true })
   })
 
   it("browses library images for collection sources", () => {

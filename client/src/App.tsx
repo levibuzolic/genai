@@ -90,6 +90,21 @@ function App() {
     () => getPendingGenerationCountsByAccount(creationHistory.creations, config?.pendingGenerationsByAccount),
     [config?.pendingGenerationsByAccount, creationHistory.creations],
   )
+  const queuedGenerationCountsByAccount = React.useMemo(
+    () => getQueuedGenerationCountsByAccount(creationHistory.creations),
+    [creationHistory.creations],
+  )
+  const autoCreateAccountEmail = React.useMemo(
+    () =>
+      getAutoCreateAccountEmail({
+        accounts: accountOptions,
+        defaultAccountEmail: config?.defaultAccountEmail || "",
+        pendingCounts: pendingGenerationCountsByAccount,
+        queuedCounts: queuedGenerationCountsByAccount,
+      }),
+    [accountOptions, config?.defaultAccountEmail, pendingGenerationCountsByAccount, queuedGenerationCountsByAccount],
+  )
+  const effectiveCreateAccountEmail = create.selectedAccountEmail || autoCreateAccountEmail
   const selectedItemIndex = selectedItem ? galleryItems.findIndex((item) => item.id === selectedItem.id) : -1
   const detailOpen = Boolean(selectedItem)
   const previousDetailItem = selectedItemIndex > 0 ? (galleryItems[selectedItemIndex - 1] ?? null) : null
@@ -100,9 +115,9 @@ function App() {
     setSelectedCreateAccountEmail((current) => {
       if (!accountOptions.length) return ""
       if (current && accountOptions.includes(current)) return current
-      return config?.defaultAccountEmail || accountOptions[0] || ""
+      return ""
     })
-  }, [accountOptions, config?.defaultAccountEmail, setSelectedCreateAccountEmail])
+  }, [accountOptions, setSelectedCreateAccountEmail])
 
   React.useEffect(() => {
     function onToast(event: Event) {
@@ -594,10 +609,12 @@ function App() {
             setModeId={create.setModeId}
             accountOptions={accountOptions}
             selectedAccountEmail={create.selectedAccountEmail}
+            autoAccountEmail={autoCreateAccountEmail}
             setSelectedAccountEmail={create.setSelectedAccountEmail}
             pendingGenerationCountsByAccount={pendingGenerationCountsByAccount}
-            pendingGenerationCount={getAccountPendingGenerationCount(pendingGenerationCountsByAccount, create.selectedAccountEmail)}
-            queuedGenerationCount={getQueuedGenerationCount(creationHistory.creations, create.selectedAccountEmail)}
+            queuedGenerationCountsByAccount={queuedGenerationCountsByAccount}
+            pendingGenerationCount={getAccountPendingGenerationCount(pendingGenerationCountsByAccount, effectiveCreateAccountEmail)}
+            queuedGenerationCount={getAccountQueuedGenerationCount(queuedGenerationCountsByAccount, effectiveCreateAccountEmail)}
             generationConcurrencyLimit={config?.mediaGenerationConcurrencyLimit || 2}
             prompt={create.prompt}
             setPrompt={create.setPrompt}
@@ -618,14 +635,12 @@ function App() {
             onUploadFile={create.acceptUploadFile}
             onClearSource={create.clearSource}
             onSubmit={async (options) => {
-              await create.submitCreateJob(options)
+              await create.submitCreateJob({ ...options, accountEmail: effectiveCreateAccountEmail })
               await creationHistory.loadCreations()
             }}
             onReset={create.resetCreateForm}
             onClose={() => navigateToLibrary({ replace: true })}
             templates={templates.templates}
-            templateSearch={create.templateSearch}
-            setTemplateSearch={create.setTemplateSearch}
             selectedTemplateId={create.selectedTemplateId}
             onApplyTemplate={create.applyTemplate}
             onClearTemplate={create.clearTemplate}
@@ -680,7 +695,7 @@ function getPendingGenerationCountsByAccount(
 ): Record<string, number> {
   const localCounts: Record<string, number> = {}
   for (const creation of creations) {
-    if (!creation.jobId || !isActiveCreationStatus(creation.status)) continue
+    if (!creation.jobId || !isActiveCreationStatus(creation.status) || isQueuedCreationStatus(creation.status)) continue
     const key = accountKey(creation.accountEmail)
     localCounts[key] = (localCounts[key] || 0) + 1
   }
@@ -695,6 +710,52 @@ function getPendingGenerationCountsByAccount(
 
 function getAccountPendingGenerationCount(counts: Record<string, number>, accountEmail: string): number {
   return counts[accountKey(accountEmail)] || 0
+}
+
+function getQueuedGenerationCountsByAccount(creations: { accountEmail?: string | null; status: string }[]): Record<string, number> {
+  const counts: Record<string, number> = {}
+  for (const creation of creations) {
+    if (!isQueuedCreationStatus(creation.status)) continue
+    const key = accountKey(creation.accountEmail)
+    counts[key] = (counts[key] || 0) + 1
+  }
+
+  return counts
+}
+
+function getAccountQueuedGenerationCount(counts: Record<string, number>, accountEmail: string): number {
+  return counts[accountKey(accountEmail)] || 0
+}
+
+function getAutoCreateAccountEmail({
+  accounts,
+  defaultAccountEmail,
+  pendingCounts,
+  queuedCounts,
+}: {
+  accounts: string[]
+  defaultAccountEmail: string
+  pendingCounts: Record<string, number>
+  queuedCounts: Record<string, number>
+}): string {
+  if (accounts.length === 0) return ""
+
+  let selected = accounts[0] || ""
+  let selectedLoad = getAccountLoad(selected, pendingCounts, queuedCounts)
+
+  for (const account of accounts) {
+    const load = getAccountLoad(account, pendingCounts, queuedCounts)
+    if (load < selectedLoad || (load === selectedLoad && account === defaultAccountEmail && selected !== defaultAccountEmail)) {
+      selected = account
+      selectedLoad = load
+    }
+  }
+
+  return selected
+}
+
+function getAccountLoad(accountEmail: string, pendingCounts: Record<string, number>, queuedCounts: Record<string, number>): number {
+  return getAccountPendingGenerationCount(pendingCounts, accountEmail) + getAccountQueuedGenerationCount(queuedCounts, accountEmail)
 }
 
 function buildRetryCreateOptions(item: CatalogItem): {
@@ -746,15 +807,13 @@ function createSourceFromCatalogItem(item: CatalogItem): CreationSource | null {
   return null
 }
 
-function getQueuedGenerationCount(creations: { accountEmail?: string | null; status: string }[], accountEmail: string): number {
-  return creations.filter(
-    (creation) => accountKey(creation.accountEmail) === accountKey(accountEmail) && creation.status.toLowerCase() === "queued",
-  ).length
-}
-
 function isActiveCreationStatus(status: string): boolean {
   const normalized = status.toLowerCase()
   return !["done", "failed", "error", "cancelled", "canceled", "draft"].includes(normalized)
+}
+
+function isQueuedCreationStatus(status: string): boolean {
+  return status.toLowerCase() === "queued"
 }
 
 function accountKey(accountEmail: string | null | undefined): string {

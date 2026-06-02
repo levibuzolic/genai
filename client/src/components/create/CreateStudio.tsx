@@ -1,8 +1,8 @@
 import { Loader2, Sparkles, X } from "lucide-react"
 import * as React from "react"
 
+import { ComboboxSelect, type ComboboxOption } from "@/components/common/ComboboxSelect"
 import { Field } from "@/components/common/Field"
-import { SelectControl } from "@/components/common/NativeSelect"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -17,13 +17,82 @@ import { UrlSourcePanel } from "./UrlSourcePanel"
 export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(function CreateStudio(props, ref) {
   const selectedMode = props.modes.find((mode) => mode.id === props.modeId)
   const visibleModeId = props.modeId === "nudify-video" ? "custom-video" : props.modeId
-  const modeOptions = props.selectedTemplateId
-    ? props.modes.filter((mode) => ["custom-image", "custom-video", "custom-image-video"].includes(mode.id))
-    : props.modes.filter((mode) => mode.id !== "nudify-video")
+  const modeOptions = React.useMemo(
+    () =>
+      props.selectedTemplateId
+        ? props.modes.filter((mode) => ["custom-image", "custom-video", "custom-image-video"].includes(mode.id))
+        : props.modes.filter((mode) => mode.id !== "nudify-video"),
+    [props.modes, props.selectedTemplateId],
+  )
   const showNudifyToggle = visibleModeId === "custom-video"
   const sourceRequired = selectedMode?.source?.required !== false
-  const shouldQueue = props.pendingGenerationCount >= props.generationConcurrencyLimit || props.queuedGenerationCount > 0
   const defaultPendingCount = getPendingGenerationCount(props.pendingGenerationCountsByAccount, "")
+  const defaultQueuedCount = getQueuedGenerationCount(props.queuedGenerationCountsByAccount, "")
+  const autoPendingCount = getPendingGenerationCount(props.pendingGenerationCountsByAccount, props.autoAccountEmail)
+  const autoQueuedCount = getQueuedGenerationCount(props.queuedGenerationCountsByAccount, props.autoAccountEmail)
+  const modeSelectOptions = React.useMemo(
+    () =>
+      modeOptions.map((mode) => ({
+        value: mode.id,
+        label: mode.disabled ? `${mode.label} (import required)` : mode.label,
+        disabled: Boolean(mode.disabled),
+        searchText: mode.id,
+      })) satisfies ComboboxOption[],
+    [modeOptions],
+  )
+  const accountSelectOptions = React.useMemo(
+    () =>
+      [
+        {
+          value: "",
+          label: formatAutoAccountOptionLabel(
+            props.autoAccountEmail || "Default",
+            props.autoAccountEmail ? autoPendingCount : defaultPendingCount,
+            props.autoAccountEmail ? autoQueuedCount : defaultQueuedCount,
+          ),
+          searchText: `auto default ${props.autoAccountEmail}`,
+        },
+        ...props.accountOptions.map((email) => ({
+          value: email,
+          label: formatAccountOptionLabel(
+            email,
+            getPendingGenerationCount(props.pendingGenerationCountsByAccount, email),
+            getQueuedGenerationCount(props.queuedGenerationCountsByAccount, email),
+          ),
+          searchText: email,
+        })),
+      ] satisfies ComboboxOption[],
+    [
+      autoPendingCount,
+      autoQueuedCount,
+      defaultPendingCount,
+      defaultQueuedCount,
+      props.accountOptions,
+      props.autoAccountEmail,
+      props.pendingGenerationCountsByAccount,
+      props.queuedGenerationCountsByAccount,
+    ],
+  )
+  const modelSelectOptions = React.useMemo(
+    () =>
+      props.modelField?.options?.map((option) => ({
+        value: option.value,
+        label: option.label,
+        description: option.tier || option.kind || "",
+        searchText: [option.value, option.modelId, option.protocol].filter(Boolean).join(" "),
+      })) || [],
+    [props.modelField?.options],
+  )
+  const qualitySelectOptions = React.useMemo(
+    () =>
+      props.qualityField?.options?.map((option) => ({
+        value: option.value,
+        label: option.label,
+        description: option.duration ? `${option.duration}s` : option.resolution || "",
+        searchText: [option.value, option.modelId, option.resolution].filter(Boolean).join(" "),
+      })) || [],
+    [props.qualityField?.options],
+  )
 
   return (
     <section id="createArea" ref={ref} className="create-studio createArea" aria-label="Create media">
@@ -33,9 +102,9 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
           <p id="createStatus">{props.createStatus}</p>
         </div>
         <div className="createHeaderActions">
-          <Button id="createSubmitButton" onClick={() => void props.onSubmit({ queue: shouldQueue })} disabled={props.createSubmitting}>
+          <Button id="createSubmitButton" onClick={() => void props.onSubmit({ queue: true })} disabled={props.createSubmitting}>
             {props.createSubmitting ? <Loader2 className="animate-spin" /> : <Sparkles />}
-            {shouldQueue ? "Queue" : "Create"}
+            Create
           </Button>
           <Button id="createResetButton" variant="outline" onClick={props.onReset}>
             Reset
@@ -50,56 +119,44 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
       <div className="createLayout">
         <section className="createPanel" aria-label="Creation controls">
           <div className="createModeGrid">
-            <Field label="Mode">
-              <SelectControl id="createModeSelect" value={visibleModeId} onChange={(value) => props.setModeId(value)}>
-                {modeOptions.map((mode) => (
-                  <option key={mode.id} value={mode.id} disabled={mode.disabled}>
-                    {mode.disabled ? `${mode.label} (import required)` : mode.label}
-                  </option>
-                ))}
-              </SelectControl>
-            </Field>
+            <ComboboxSelect
+              id="createModeSelect"
+              label="Mode"
+              value={visibleModeId}
+              options={modeSelectOptions}
+              onChange={(value) => props.setModeId(value)}
+              searchPlaceholder="Filter modes"
+            />
 
-            <Field label="Account">
-              <SelectControl
-                id="createAccountSelect"
-                value={props.selectedAccountEmail}
-                onChange={(value) => props.setSelectedAccountEmail(value)}
-              >
-                {props.accountOptions.length === 0 ? (
-                  <option value="">{formatAccountOptionLabel("Default", defaultPendingCount)}</option>
-                ) : (
-                  props.accountOptions.map((email) => (
-                    <option key={email} value={email}>
-                      {formatAccountOptionLabel(email, getPendingGenerationCount(props.pendingGenerationCountsByAccount, email))}
-                    </option>
-                  ))
-                )}
-              </SelectControl>
-            </Field>
+            <ComboboxSelect
+              id="createAccountSelect"
+              label="Account"
+              value={props.selectedAccountEmail}
+              options={accountSelectOptions}
+              onChange={(value) => props.setSelectedAccountEmail(value)}
+              searchPlaceholder="Filter accounts"
+            />
 
             {props.modelField && (
-              <Field id="createModelLabel" label={props.modelField.label || "Model"}>
-                <SelectControl id="createModelSelect" value={props.modelId} onChange={(value) => props.setModelId(value)}>
-                  {props.modelField.options?.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectControl>
-              </Field>
+              <ComboboxSelect
+                id="createModelSelect"
+                label={props.modelField.label || "Model"}
+                value={props.modelId}
+                options={modelSelectOptions}
+                onChange={(value) => props.setModelId(value)}
+                searchPlaceholder="Filter models"
+              />
             )}
 
             {props.qualityField && (
-              <Field id="createQualityLabel" label={props.qualityField.label || "Quality"}>
-                <SelectControl id="createQualitySelect" value={props.quality} onChange={(value) => props.setQuality(value)}>
-                  {props.qualityField.options?.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </SelectControl>
-              </Field>
+              <ComboboxSelect
+                id="createQualitySelect"
+                label={props.qualityField.label || "Quality"}
+                value={props.quality}
+                options={qualitySelectOptions}
+                onChange={(value) => props.setQuality(value)}
+                searchPlaceholder="Filter quality"
+              />
             )}
           </div>
 
@@ -170,10 +227,18 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
   )
 })
 
-export function formatAccountOptionLabel(label: string, pendingCount: number): string {
-  return `${label} (${pendingCount.toLocaleString()} pending)`
+export function formatAccountOptionLabel(label: string, pendingCount: number, queuedCount: number): string {
+  return `${label} (${pendingCount.toLocaleString()} pending, ${queuedCount.toLocaleString()} queued)`
+}
+
+export function formatAutoAccountOptionLabel(label: string, pendingCount: number, queuedCount: number): string {
+  return `Auto · ${formatAccountOptionLabel(label, pendingCount, queuedCount)}`
 }
 
 function getPendingGenerationCount(counts: Record<string, number>, accountEmail: string): number {
+  return counts[accountEmail || "__default__"] || 0
+}
+
+function getQueuedGenerationCount(counts: Record<string, number>, accountEmail: string): number {
   return counts[accountEmail || "__default__"] || 0
 }

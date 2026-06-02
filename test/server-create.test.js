@@ -426,6 +426,64 @@ test("creation submits are accepted locally before upstream queue dispatch", asy
   }
 })
 
+test("creation submits are accepted locally before auth refresh", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-async-auth-"))
+  const jobId = "70707070-7070-4770-8770-707070707070"
+  const releaseRefresh = deferred()
+  const originalFetch = globalThis.fetch
+  let refreshes = 0
+  let upstreamRequests = 0
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      upstreamRequests += 1
+      return jsonResponse({ job_id: jobId })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir)
+    server.authBrowser.refreshHeadless = async () => {
+      refreshes += 1
+      await releaseRefresh.promise
+      server.acceptAuthorization(fakeBearerToken(), "auth-browser")
+      return { ...server.authBrowser.getStatus(), status: "connected" }
+    }
+
+    const queued = await server.createMediaJob({
+      modeId: "custom-image",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
+      params: {
+        prompt: "accept locally before auth",
+      },
+    })
+    const details = await server.getCreationDetails(queued.jobId)
+
+    assert.equal(queued.queued, true)
+    assert.equal(details.creation.status, "queued")
+    assert.equal(refreshes, 0)
+    assert.equal(upstreamRequests, 0)
+
+    const dispatched = server.runCreationQueueBackgroundJob()
+    await Promise.resolve()
+    assert.equal(refreshes, 1)
+    assert.equal(upstreamRequests, 0)
+
+    releaseRefresh.resolve()
+    await dispatched
+    assert.equal(upstreamRequests, 1)
+  } finally {
+    releaseRefresh.resolve()
+    globalThis.fetch = originalFetch
+  }
+})
+
 test("text-to-image creation submits without a source image", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-text-to-image-"))
   const jobId = "57575757-5757-4575-8575-575757575757"

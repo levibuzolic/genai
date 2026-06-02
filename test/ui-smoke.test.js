@@ -306,7 +306,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     assert.match(createOverlay.backdropFilter, /blur/)
     assert.ok(createOverlay.panelWidth > createOverlay.viewportWidth * 0.9)
     assert.ok(createOverlay.panelHeight > createOverlay.viewportHeight * 0.9)
-    assert.ok(createOverlay.historyWidth > createOverlay.controlWidth)
+    assert.ok(createOverlay.controlWidth > createOverlay.historyWidth)
     assert.equal(createOverlay.resultPanelCount, 0)
     assert.equal(createOverlay.negativePromptVisible, true)
     assert.equal(await page.locator("#libraryArea").isHidden(), false)

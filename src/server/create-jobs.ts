@@ -203,8 +203,6 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   const requestStartedAt = new Date().toISOString()
   const accountEmail = optionalAccountEmail(requestBody["accountEmail"])
 
-  await ensureAccountApiAuth(accountEmail)
-
   const submission = await prepareCreateSubmission(requestBody)
   const { mode, sourceRequest, params, template } = submission
 

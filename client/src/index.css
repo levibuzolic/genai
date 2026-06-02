@@ -124,6 +124,73 @@
   @apply px-0.5 text-[11px] font-medium text-muted-foreground;
 }
 
+.comboboxSelect {
+  @apply relative min-w-0;
+}
+
+.comboboxTrigger {
+  @apply h-9 w-full min-w-0 justify-start px-2.5 text-left shadow-none;
+}
+
+.comboboxLabel {
+  @apply shrink-0 text-[11px] font-medium text-muted-foreground;
+}
+
+.comboboxValue {
+  @apply min-w-0 flex-1 truncate text-sm;
+}
+
+.comboboxChevron {
+  @apply ml-auto size-3.5 shrink-0 text-muted-foreground;
+}
+
+.comboboxPopover {
+  @apply absolute top-[calc(100%+0.25rem)] left-0 z-50 grid w-full min-w-64 gap-1 rounded-md border bg-popover p-1.5 text-popover-foreground shadow-lg;
+  width: max(100%, min(28rem, calc(100vw - 2rem)));
+}
+
+.comboboxSearch {
+  @apply grid grid-cols-[auto_minmax(0,1fr)] items-center gap-1.5 border-b px-1 pb-1.5 text-muted-foreground;
+}
+
+.comboboxSearch svg {
+  @apply size-3.5;
+}
+
+.comboboxSearch input {
+  @apply h-8 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0;
+}
+
+.comboboxOptions {
+  @apply grid max-h-64 gap-0.5 overflow-y-auto;
+}
+
+.comboboxOption {
+  @apply grid min-h-8 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none hover:bg-accent focus-visible:bg-accent disabled:pointer-events-none disabled:opacity-50;
+}
+
+.comboboxOptionText {
+  @apply grid min-w-0 gap-0.5;
+}
+
+.comboboxOptionText > span,
+.comboboxOptionText small {
+  @apply truncate;
+}
+
+.comboboxOptionText small,
+.comboboxEmpty {
+  @apply text-xs text-muted-foreground;
+}
+
+.comboboxOption svg {
+  @apply size-3.5 text-muted-foreground;
+}
+
+.comboboxEmpty {
+  @apply px-2 py-3;
+}
+
 .summary-strip {
   @apply grid grid-cols-2 border-b md:grid-cols-5;
 }
@@ -463,12 +530,16 @@
   @apply z-10 flex shrink-0 items-center justify-between gap-3 bg-background px-4 py-2.5;
 }
 
+.createHeader > div:first-child {
+  @apply min-w-0;
+}
+
 .createHeader h2 {
   @apply text-sm font-semibold;
 }
 
 .createHeader p {
-  @apply mt-0.5 text-xs text-muted-foreground;
+  @apply mt-0.5 truncate text-xs text-muted-foreground;
 }
 
 .createHeaderActions {
@@ -480,11 +551,11 @@
 }
 
 .createLayout {
-  @apply grid gap-0 border-t xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(360px,430px)_minmax(520px,1fr)] xl:overflow-hidden;
+  @apply grid gap-0 border-t xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(620px,1fr)_minmax(320px,400px)] xl:overflow-hidden;
 }
 
 .createPanel {
-  @apply grid content-start gap-2.5 border-b bg-background p-3 xl:min-h-0 xl:overflow-y-auto xl:border-r xl:border-b-0;
+  @apply grid content-start gap-2.5 border-b bg-background p-3 xl:min-h-0 xl:overflow-y-auto xl:border-r xl:border-b-0 xl:p-4;
 }
 
 .sourcePanel,
@@ -493,11 +564,11 @@
 }
 
 .createModeGrid {
-  @apply grid gap-2 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2;
+  @apply grid gap-2 md:grid-cols-2 xl:grid-cols-4;
 }
 
 .createNudifyToggle {
-  @apply flex min-h-8 items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-sm;
+  @apply flex min-h-8 w-fit items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-sm;
 }
 
 .createNudifyToggle input {
@@ -556,11 +627,11 @@
 }
 
 .createPromptInput {
-  @apply min-h-28 resize-y;
+  @apply min-h-24 resize-y xl:min-h-32;
 }
 
 .createNegativePromptInput {
-  @apply min-h-16 resize-y;
+  @apply min-h-14 resize-y xl:min-h-20;
 }
 
 .uploadDropZone {
@@ -620,7 +691,7 @@
 }
 
 .creationHistory {
-  @apply min-h-0 overflow-y-auto bg-background p-3 xl:grid xl:grid-rows-[auto_auto_minmax(0,1fr)] xl:overflow-hidden;
+  @apply min-h-0 overflow-y-auto bg-background p-3 xl:grid xl:grid-rows-[auto_auto_minmax(0,1fr)] xl:overflow-hidden xl:p-3;
 }
 
 .creationHistoryHeader {
@@ -637,7 +708,7 @@
 }
 
 .creationHistorySections {
-  @apply mt-3 grid gap-4 xl:min-h-0 xl:items-start xl:overflow-y-auto xl:pr-1;
+  @apply mt-3 grid gap-3 xl:min-h-0 xl:items-start xl:overflow-y-auto xl:pr-1;
 }
 
 .creationHistoryGroup {
@@ -645,12 +716,7 @@
 }
 
 .creationHistoryGroup.is-recent {
-  @apply xl:grid-cols-2 xl:gap-x-3;
-}
-
-.creationHistoryGroup.is-recent .creationHistoryEyebrow,
-.creationHistoryGroup.is-recent .creationHistoryEmpty {
-  @apply xl:col-span-2;
+  @apply xl:grid-cols-1;
 }
 
 .creationHistoryEyebrow {
@@ -658,7 +724,7 @@
 }
 
 .creationHistoryRow {
-  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-1.5 border-b bg-transparent py-1.5 xl:min-h-11;
+  @apply grid min-h-12 grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-center gap-1.5 border-b bg-transparent py-1.5 xl:min-h-10 xl:gap-1;
 }
 
 .creationHistoryRow.is-active {
@@ -666,11 +732,11 @@
 }
 
 .creationHistoryMain {
-  @apply grid min-w-0 grid-cols-[42px_minmax(0,1fr)] items-center gap-2 rounded-md bg-transparent p-1 text-left hover:bg-accent xl:grid-cols-[36px_minmax(0,1fr)];
+  @apply grid min-w-0 grid-cols-[42px_minmax(0,1fr)] items-center gap-2 rounded-md bg-transparent p-1 text-left hover:bg-accent xl:grid-cols-[32px_minmax(0,1fr)] xl:gap-1.5;
 }
 
 .creationHistoryThumb {
-  @apply grid size-10 shrink-0 place-items-center overflow-hidden rounded-sm border bg-card text-muted-foreground xl:size-9;
+  @apply grid size-10 shrink-0 place-items-center overflow-hidden rounded-sm border bg-card text-muted-foreground xl:size-8;
 }
 
 .creationHistoryThumb img {
@@ -686,11 +752,11 @@
 }
 
 .creationHistoryTitle {
-  @apply truncate text-[13px] font-medium;
+  @apply truncate text-[13px] font-medium xl:text-xs;
 }
 
 .creationHistoryMeta {
-  @apply truncate text-xs text-muted-foreground;
+  @apply truncate text-xs text-muted-foreground xl:text-[11px];
 }
 
 .creationHistoryStatusBadge {
@@ -1062,8 +1128,123 @@
     @apply grid-cols-1;
   }
 
+  .createHeader {
+    @apply gap-2 px-3 py-2;
+  }
+
+  .createHeader h2 {
+    @apply text-xs;
+  }
+
+  .createHeader p {
+    @apply line-clamp-1 text-[11px];
+  }
+
+  .createHeaderActions {
+    @apply grid-cols-[minmax(4.75rem,auto)_auto_auto];
+  }
+
+  .createHeaderActions [data-slot="button"] {
+    @apply h-8 px-2 text-xs;
+  }
+
+  .createPanel {
+    @apply gap-2 p-2.5;
+  }
+
+  .createModeGrid {
+    @apply grid-cols-1 gap-1.5;
+  }
+
+  .comboboxTrigger {
+    @apply h-8 gap-2 px-2;
+  }
+
+  .comboboxLabel {
+    @apply w-16 text-[10px];
+  }
+
+  .comboboxValue {
+    @apply text-xs;
+  }
+
+  .comboboxPopover {
+    min-width: min(22rem, calc(100vw - 1rem));
+  }
+
+  .field {
+    @apply gap-1;
+  }
+
+  .field > label {
+    @apply text-[10px];
+  }
+
+  .createPromptInput {
+    @apply min-h-20 text-base;
+  }
+
+  .createNegativePromptInput {
+    @apply min-h-12 text-base;
+  }
+
+  .createNudifyToggle {
+    @apply min-h-8 px-2 py-1 text-xs;
+  }
+
+  .sourcePanel,
+  .templateTools,
+  .templateImport {
+    @apply gap-1.5;
+  }
+
+  .selectedSourcePreview {
+    @apply min-h-14 grid-cols-[48px_minmax(0,1fr)_auto] p-1.5;
+  }
+
+  .selectedSourcePreview img {
+    @apply h-11 w-12;
+  }
+
+  .uploadDropZone {
+    @apply min-h-16 grid-cols-[auto_minmax(0,1fr)] justify-items-start px-3 text-left;
+  }
+
+  .uploadDropZone span {
+    @apply col-start-2;
+  }
+
+  .templateTools {
+    @apply pt-2;
+  }
+
+  .templatePicker,
+  .templateSaveInline {
+    @apply gap-1.5;
+  }
+
+  .creationHistory {
+    @apply border-t p-2.5;
+  }
+
+  .creationHistorySections {
+    @apply mt-2 gap-2;
+  }
+
   .creationHistoryRow {
-    @apply grid-cols-1;
+    @apply min-h-10 grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] gap-1 py-1;
+  }
+
+  .creationHistoryMain {
+    @apply grid-cols-[32px_minmax(0,1fr)] gap-1.5 p-0.5;
+  }
+
+  .creationHistoryThumb {
+    @apply size-8;
+  }
+
+  .creationHistoryStatusBadge {
+    @apply max-w-16 text-[10px];
   }
 
   .templateBrowserLayout,

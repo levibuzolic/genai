@@ -86,7 +86,7 @@ export function CreationHistoryPanel({
   onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
   const active = creations.filter((creation) => creation.active)
-  const recent = creations.filter((creation) => !creation.active).slice(0, 8)
+  const recent = creations.filter((creation) => !creation.active).slice(0, 5)
 
   return (
     <section className="creationHistory" aria-label="Creation history">

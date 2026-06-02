@@ -42,12 +42,11 @@ export function useCreateStudio(onOpen?: () => void) {
   const [negativePrompt, setNegativePrompt] = React.useState("")
   const [modelId, setModelId] = React.useState("")
   const [quality, setQuality] = React.useState("")
-  const [status, setStatus] = React.useState("Choose a source and mode.")
+  const [status, setStatus] = React.useState("Pick source and mode.")
   const [submitting, setSubmitting] = React.useState(false)
   const [templateJobId, setTemplateJobId] = React.useState("")
   const [templateLabel, setTemplateLabel] = React.useState("")
   const [selectedTemplateId, setSelectedTemplateId] = React.useState("")
-  const [templateSearch, setTemplateSearch] = React.useState("")
   const [templateType, setTemplateType] = React.useState<CreateTemplateType>("video")
   const [isDraggingUpload, setIsDraggingUpload] = React.useState(false)
   const panelRef = React.useRef<HTMLElement | null>(null)
@@ -270,16 +269,16 @@ export function useCreateStudio(onOpen?: () => void) {
     }
   }, [acceptUploadFile, openCreator])
 
-  async function submitCreateJob({ queue = false }: { queue?: boolean } = {}) {
+  async function submitCreateJob({ queue = true, accountEmail = selectedAccountEmail }: { queue?: boolean; accountEmail?: string } = {}) {
     setSubmitting(true)
-    setStatus(queue ? "Adding creation to queue..." : "Submitting creation job...")
+    setStatus(queue ? "Queueing..." : "Submitting...")
     try {
       const request: CreateJobSubmitRequest = {
         modeId,
         source: buildCreateSourcePayload(),
         params: buildCreateParamsPayload(),
       }
-      if (selectedAccountEmail) request.accountEmail = selectedAccountEmail
+      if (accountEmail) request.accountEmail = accountEmail
       if (queue) request.queue = true
       if (selectedTemplateId) request.templateId = selectedTemplateId
       const response = await fetchJson<CreateJobSubmitResponse>("/api/create/jobs", {
@@ -290,13 +289,7 @@ export function useCreateStudio(onOpen?: () => void) {
       if (response.rateLimited) {
         dispatchCreateToast(response.error || "Upstream rate limit exceeded; retry queued.")
       }
-      setStatus(
-        response.rateLimited
-          ? "Rate limited. Retry queued."
-          : response.queued
-            ? "Queued. Waiting for an account slot..."
-            : "Submitted. Waiting for output...",
-      )
+      setStatus(response.rateLimited ? "Rate-limited; queued." : response.queued ? "Queued." : "Submitted.")
       window.setTimeout(() => {
         void pollCreateJob(response.jobId, response.pollMs || 2000)
       }, 0)
@@ -309,7 +302,7 @@ export function useCreateStudio(onOpen?: () => void) {
 
   async function pollCreateJob(jobId: string, pollMs: number) {
     const data = await fetchJson<CreateJobPollResponse>(`/api/create/jobs/${encodeURIComponent(jobId)}`)
-    setStatus(`Job ${data.job.status || "pending"}.`)
+    setStatus(formatCreateJobStatus(data.job.status))
     if (["done", "failed", "error"].includes(data.job.status || "")) return
     window.setTimeout(() => {
       void pollCreateJob(jobId, data.pollMs || pollMs)
@@ -317,7 +310,7 @@ export function useCreateStudio(onOpen?: () => void) {
   }
 
   async function importTemplate() {
-    setStatus("Importing template from history...")
+    setStatus("Importing template...")
     const response = await fetchJson<ImportCreateTemplateResponse>("/api/create/templates/import", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -326,7 +319,7 @@ export function useCreateStudio(onOpen?: () => void) {
     await loadModes()
     setModeId(modeIdForTemplate(response.template))
     setSelectedTemplateId(response.template.id)
-    setStatus(`Imported ${response.template.label}.`)
+    setStatus("Template imported.")
   }
 
   function applyTemplate(template: CreateTemplate) {
@@ -343,7 +336,7 @@ export function useCreateStudio(onOpen?: () => void) {
     if (negativePromptParam !== undefined) setNegativePrompt(negativePromptParam)
     if (modelParam !== undefined) setModelId(modelParam)
     if (qualityParam !== undefined) setQuality(qualityParam)
-    setStatus(`Using template ${template.label}. Overrides apply only to this run.`)
+    setStatus("Template applied.")
   }
 
   function clearTemplate() {
@@ -447,7 +440,7 @@ export function useCreateStudio(onOpen?: () => void) {
     setPrompt("")
     setNegativePrompt("")
     setModelId("")
-    setStatus("Choose a source and mode.")
+    setStatus("Pick source and mode.")
   }
 
   function clearSource() {
@@ -500,8 +493,6 @@ export function useCreateStudio(onOpen?: () => void) {
     setTemplateLabel,
     selectedTemplateId,
     setSelectedTemplateId,
-    templateSearch,
-    setTemplateSearch,
     templateType,
     setTemplateType,
     isDraggingUpload,
@@ -526,6 +517,11 @@ function dispatchCreateToast(message: string): void {
       },
     }),
   )
+}
+
+function formatCreateJobStatus(status: string | null | undefined): string {
+  const normalized = String(status || "pending").replace(/_/g, " ")
+  return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}.`
 }
 
 function paramAsString(value: CreateParams[string]): string | undefined {
