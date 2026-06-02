@@ -25,7 +25,7 @@ import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-share
 import { catalogMeta, catalogSchema, mediaItems } from "./db-schema.ts"
 import { httpError } from "./errors.ts"
 import { pngBufferToHighQualityJpeg } from "./media-conversion.ts"
-import { isCatalogItem } from "./refinements.ts"
+import { paramsFromUnknown } from "./refinements.ts"
 import { sendJson } from "./static.ts"
 import type {
   Catalog,
@@ -68,6 +68,55 @@ type CreateCatalogBackupOptions = {
 type BackupRetentionCandidate = CatalogBackupSummary & {
   path: string
   createdAtMs: number
+}
+type PublicCatalogItemRow = {
+  accountEmail: string | null
+  assetId: string | null
+  assetKind: string | null
+  collectionId: string | null
+  contentType: string | null
+  createModeId: string | null
+  createParamsJson: string | null
+  createdAt: number | null
+  createdAtIso: string | null
+  createdAtValue: string | null
+  createdLocallyAt: string | null
+  downloadError: string | null
+  downloadedAt: string | null
+  duplicateGroupSize: number | null
+  duplicateOf: string | null
+  duration: number | null
+  error: string | null
+  externalTaskId: string | null
+  favorited: number | null
+  fileSize: number | null
+  id: string
+  inputUrl: string | null
+  localFile: string | null
+  modelId: string | null
+  negativePrompt: string | null
+  outputUrl: string | null
+  prompt: string | null
+  provider: string
+  remoteDeletedAt: string | null
+  remoteDeleteStatus: string | null
+  sha256: string | null
+  shared: number | null
+  size: number | null
+  sourceItemId: string | null
+  sourceKind: string | null
+  sourceUrl: string | null
+  status: string | null
+  templateId: string | null
+  templateLabel: string | null
+  thumbnailError: string | null
+  thumbnailFile: string | null
+  thumbnailGeneratedAt: string | null
+  timeToGenerateMs: number | null
+  type: string | null
+  updatedAt: string | null
+  userId: string | null
+  verifiedAt: string | null
 }
 
 const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
@@ -268,7 +317,10 @@ export async function getItems(searchParams: URLSearchParams): Promise<ItemsResp
   const pageCount = Math.max(1, Math.ceil(total / pageSize))
   const currentPage = Math.min(page, pageCount)
   const start = (currentPage - 1) * pageSize
-  const pageItems = sortItemsForView([...activeItems, ...readCatalogItemPage(itemWhere, sort, start + pageSize)], sort).slice(start, start + pageSize)
+  const pageItems = sortItemsForView([...activeItems, ...readCatalogItemPage(itemWhere, sort, start + pageSize)], sort).slice(
+    start,
+    start + pageSize,
+  )
 
   return {
     items: pageItems.map(toPublicCatalogItem),
@@ -405,7 +457,9 @@ function readCatalogFacets(sql: string, params: Array<string | number>): Catalog
 }
 
 function readCatalogCount(sql: string, params: Array<string | number>): number {
-  const row = getCatalogDb().prepare(`SELECT COUNT(*) AS count FROM media_items WHERE ${sql}`).get(...params) as { count: number }
+  const row = getCatalogDb()
+    .prepare(`SELECT COUNT(*) AS count FROM media_items WHERE ${sql}`)
+    .get(...params) as { count: number }
   return Number(row.count || 0)
 }
 
@@ -413,10 +467,124 @@ function readCatalogItemPage(where: CatalogWhere, sort: string, limit: number): 
   if (limit <= 0) return []
 
   const rows = getCatalogDb()
-    .prepare(`SELECT item_json AS itemJson FROM media_items WHERE ${where.sql} ORDER BY ${catalogOrderBy(sort)} LIMIT ?`)
-    .all(...where.params, limit) as { itemJson: string }[]
+    .prepare(`SELECT ${publicCatalogItemSelectSql()} FROM media_items WHERE ${where.sql} ORDER BY ${catalogOrderBy(sort)} LIMIT ?`)
+    .all(...where.params, limit) as PublicCatalogItemRow[]
 
-  return rows.map((row) => parseJson(row.itemJson, null)).filter(isCatalogItem)
+  return rows.map(catalogItemFromPublicRow)
+}
+
+function readCatalogItemById(id: string): CatalogItem | null {
+  const row = getCatalogDb().prepare(`SELECT ${publicCatalogItemSelectSql()} FROM media_items WHERE id = ?`).get(id) as
+    | PublicCatalogItemRow
+    | undefined
+
+  return row ? catalogItemFromPublicRow(row) : null
+}
+
+function publicCatalogItemSelectSql(): string {
+  return `
+    id,
+    account_email AS accountEmail,
+    provider,
+    collection_id AS collectionId,
+    asset_id AS assetId,
+    asset_kind AS assetKind,
+    user_id AS userId,
+    type,
+    status,
+    prompt,
+    negative_prompt AS negativePrompt,
+    output_url AS outputUrl,
+    input_url AS inputUrl,
+    duration,
+    time_to_generate_ms AS timeToGenerateMs,
+    created_at AS createdAt,
+    created_at_value AS createdAtValue,
+    created_at_iso AS createdAtIso,
+    external_task_id AS externalTaskId,
+    model_id AS modelId,
+    shared,
+    favorited,
+    error,
+    updated_at AS updatedAt,
+    local_file AS localFile,
+    size,
+    file_size AS fileSize,
+    sha256,
+    verified_at AS verifiedAt,
+    content_type AS contentType,
+    downloaded_at AS downloadedAt,
+    download_error AS downloadError,
+    thumbnail_file AS thumbnailFile,
+    thumbnail_generated_at AS thumbnailGeneratedAt,
+    thumbnail_error AS thumbnailError,
+    duplicate_of AS duplicateOf,
+    duplicate_group_size AS duplicateGroupSize,
+    create_mode_id AS createModeId,
+    create_params_json AS createParamsJson,
+    template_id AS templateId,
+    template_label AS templateLabel,
+    source_kind AS sourceKind,
+    source_item_id AS sourceItemId,
+    source_url AS sourceUrl,
+    created_locally_at AS createdLocallyAt,
+    remote_deleted_at AS remoteDeletedAt,
+    remote_delete_status AS remoteDeleteStatus
+  `
+}
+
+function catalogItemFromPublicRow(row: PublicCatalogItemRow): CatalogItem {
+  const createParams = row.createParamsJson ? paramsFromUnknown(parseJson(row.createParamsJson, null)) : null
+
+  return {
+    id: row.id,
+    accountEmail: row.accountEmail,
+    provider: row.provider,
+    collectionId: row.collectionId,
+    assetId: row.assetId,
+    assetKind: row.assetKind,
+    userId: row.userId,
+    type: row.type,
+    prompt: row.prompt,
+    negativePrompt: row.negativePrompt,
+    status: row.status,
+    outputUrl: row.outputUrl,
+    inputUrl: row.inputUrl,
+    duration: row.duration,
+    createdAt: row.createdAt,
+    createdAtIso: row.createdAtIso,
+    externalTaskId: row.externalTaskId,
+    modelId: row.modelId,
+    model_id: row.modelId,
+    shared: row.shared === null ? null : Boolean(row.shared),
+    favorited: row.favorited === null ? null : Boolean(row.favorited),
+    error: row.error,
+    updatedAt: row.updatedAt,
+    localFile: row.localFile,
+    size: row.size,
+    fileSize: row.fileSize,
+    sha256: row.sha256,
+    verifiedAt: row.verifiedAt,
+    contentType: row.contentType,
+    downloadedAt: row.downloadedAt,
+    downloadError: row.downloadError,
+    timeToGenerateMs: row.timeToGenerateMs,
+    thumbnailFile: row.thumbnailFile,
+    thumbnailGeneratedAt: row.thumbnailGeneratedAt,
+    thumbnailError: row.thumbnailError,
+    duplicateOf: row.duplicateOf,
+    duplicateGroupSize: row.duplicateGroupSize,
+    createModeId: row.createModeId,
+    createParams,
+    templateId: row.templateId,
+    templateLabel: row.templateLabel,
+    sourceKind: row.sourceKind,
+    sourceItemId: row.sourceItemId,
+    sourceUrl: row.sourceUrl,
+    createdLocallyAt: row.createdLocallyAt,
+    remoteDeletedAt: row.remoteDeletedAt,
+    remoteDeleteStatus: row.remoteDeleteStatus,
+  }
 }
 
 function catalogOrderBy(sort: string): string {
@@ -444,7 +612,9 @@ function readExistingCatalogItemIds(ids: string[]): Set<string> {
   if (!uniqueIds.length) return new Set()
 
   const placeholders = uniqueIds.map(() => "?").join(",")
-  const rows = getCatalogDb().prepare(`SELECT id FROM media_items WHERE id IN (${placeholders})`).all(...uniqueIds) as { id: string }[]
+  const rows = getCatalogDb()
+    .prepare(`SELECT id FROM media_items WHERE id IN (${placeholders})`)
+    .all(...uniqueIds) as { id: string }[]
   return new Set(rows.map((row) => row.id))
 }
 
@@ -551,9 +721,8 @@ export async function getCatalogItem(id: string): Promise<CatalogItemResponse> {
     throw httpError("Item id is required.", 400)
   }
 
-  const row = getCatalogDb().prepare("SELECT item_json AS itemJson FROM media_items WHERE id = ?").get(id) as { itemJson: string } | undefined
-  const item = row ? parseJson(row.itemJson, null) : null
-  if (!isCatalogItem(item)) {
+  const item = readCatalogItemById(id)
+  if (!item) {
     throw httpError("Catalog item was not found.", 404)
   }
 

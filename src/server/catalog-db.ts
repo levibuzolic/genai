@@ -114,7 +114,13 @@ type PlayboxCollectionInsert = typeof playboxCollections.$inferInsert
 type PlayboxAssetInsert = typeof playboxAssets.$inferInsert
 
 type MediaItemIndexColumns = {
+  accountEmail: string | null
   provider: string
+  collectionId: string | null
+  assetId: string | null
+  assetKind: string | null
+  userId: string | null
+  type: string | null
   mediaKind: string
   status: string | null
   prompt: string | null
@@ -122,22 +128,52 @@ type MediaItemIndexColumns = {
   searchText: string | null
   localFile: string | null
   outputUrl: string | null
+  inputUrl: string | null
   downloadError: string | null
   remoteDeletedAt: string | null
+  remoteDeleteStatus: string | null
   size: number | null
+  fileSize: number | null
+  duration: number | null
+  timeToGenerateMs: number | null
+  duplicateGroupSize: number | null
   hasLocalFile: number
   hasOutputUrl: number
   hasDownloadError: number
   isDeleted: number
   isMissing: number
   isFavorited: number
+  shared: number | null
+  favorited: number | null
   isDuplicate: number
   isUnverified: number
   isImage: number
   isVideo: number
+  externalTaskId: string | null
+  modelId: string | null
+  error: string | null
+  sha256: string | null
+  verifiedAt: string | null
+  contentType: string | null
+  downloadedAt: string | null
+  thumbnailFile: string | null
+  thumbnailGeneratedAt: string | null
+  thumbnailError: string | null
+  duplicateOf: string | null
+  createModeId: string | null
+  createParamsJson: string | null
+  templateId: string | null
+  templateLabel: string | null
+  sourceKind: string | null
+  sourceItemId: string | null
+  sourceUrl: string | null
   renderStartedAt: number | null
   failureObservedAt: number | null
   createdAt: number
+  createdAtValue: string | null
+  createdAtIso: string | null
+  createdLocallyAt: string | null
+  lastPolledAt: number | null
   updatedAt: string | null
 }
 
@@ -169,7 +205,7 @@ export type PlayboxAssetRecord = {
   downloadError: string | null
 }
 
-const MEDIA_ITEM_INDEX_VERSION = 1
+const MEDIA_ITEM_INDEX_VERSION = 2
 const CREATION_JOB_INDEX_VERSION = 1
 const ACTIVE_MEDIA_STATUSES = new Set(["pending", "queued", "submitted", "processing", "running", "in_progress"])
 const FAILED_MEDIA_STATUSES = new Set(["failed", "error", "cancelled", "canceled"])
@@ -224,7 +260,13 @@ function ensureCatalogSchema(db: DatabaseSync): void {
     CREATE TABLE IF NOT EXISTS media_items (
       id TEXT PRIMARY KEY,
       item_json TEXT NOT NULL,
+      account_email TEXT,
       provider TEXT NOT NULL DEFAULT 'generateporn',
+      collection_id TEXT,
+      asset_id TEXT,
+      asset_kind TEXT,
+      user_id TEXT,
+      type TEXT,
       media_kind TEXT NOT NULL DEFAULT 'unknown',
       status TEXT,
       prompt TEXT,
@@ -232,22 +274,52 @@ function ensureCatalogSchema(db: DatabaseSync): void {
       search_text TEXT,
       local_file TEXT,
       output_url TEXT,
+      input_url TEXT,
       download_error TEXT,
       remote_deleted_at TEXT,
+      remote_delete_status TEXT,
       size INTEGER,
+      file_size INTEGER,
+      duration INTEGER,
+      time_to_generate_ms INTEGER,
+      duplicate_group_size INTEGER,
       has_local_file INTEGER NOT NULL DEFAULT 0,
       has_output_url INTEGER NOT NULL DEFAULT 0,
       has_download_error INTEGER NOT NULL DEFAULT 0,
       is_deleted INTEGER NOT NULL DEFAULT 0,
       is_missing INTEGER NOT NULL DEFAULT 0,
       is_favorited INTEGER NOT NULL DEFAULT 0,
+      shared INTEGER,
+      favorited INTEGER,
       is_duplicate INTEGER NOT NULL DEFAULT 0,
       is_unverified INTEGER NOT NULL DEFAULT 0,
       is_image INTEGER NOT NULL DEFAULT 0,
       is_video INTEGER NOT NULL DEFAULT 0,
+      external_task_id TEXT,
+      model_id TEXT,
+      error TEXT,
+      sha256 TEXT,
+      verified_at TEXT,
+      content_type TEXT,
+      downloaded_at TEXT,
+      thumbnail_file TEXT,
+      thumbnail_generated_at TEXT,
+      thumbnail_error TEXT,
+      duplicate_of TEXT,
+      create_mode_id TEXT,
+      create_params_json TEXT,
+      template_id TEXT,
+      template_label TEXT,
+      source_kind TEXT,
+      source_item_id TEXT,
+      source_url TEXT,
       render_started_at INTEGER,
       failure_observed_at INTEGER,
       created_at INTEGER,
+      created_at_value TEXT,
+      created_at_iso TEXT,
+      created_locally_at TEXT,
+      last_polled_at INTEGER,
       updated_at TEXT
     );
 
@@ -349,7 +421,13 @@ function ensureCatalogSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS playbox_assets_collection_id_idx ON playbox_assets(collection_id);
     CREATE INDEX IF NOT EXISTS playbox_assets_kind_idx ON playbox_assets(kind);
   `)
+  ensureCatalogColumn(db, "media_items", "account_email", "TEXT")
   ensureCatalogColumn(db, "media_items", "provider", "TEXT NOT NULL DEFAULT 'generateporn'")
+  ensureCatalogColumn(db, "media_items", "collection_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "asset_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "asset_kind", "TEXT")
+  ensureCatalogColumn(db, "media_items", "user_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "type", "TEXT")
   ensureCatalogColumn(db, "media_items", "media_kind", "TEXT NOT NULL DEFAULT 'unknown'")
   ensureCatalogColumn(db, "media_items", "status", "TEXT")
   ensureCatalogColumn(db, "media_items", "prompt", "TEXT")
@@ -357,21 +435,51 @@ function ensureCatalogSchema(db: DatabaseSync): void {
   ensureCatalogColumn(db, "media_items", "search_text", "TEXT")
   ensureCatalogColumn(db, "media_items", "local_file", "TEXT")
   ensureCatalogColumn(db, "media_items", "output_url", "TEXT")
+  ensureCatalogColumn(db, "media_items", "input_url", "TEXT")
   ensureCatalogColumn(db, "media_items", "download_error", "TEXT")
   ensureCatalogColumn(db, "media_items", "remote_deleted_at", "TEXT")
+  ensureCatalogColumn(db, "media_items", "remote_delete_status", "TEXT")
   ensureCatalogColumn(db, "media_items", "size", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "file_size", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "duration", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "time_to_generate_ms", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "duplicate_group_size", "INTEGER")
   ensureCatalogColumn(db, "media_items", "has_local_file", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "has_output_url", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "has_download_error", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "is_deleted", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "is_missing", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "is_favorited", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "shared", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "favorited", "INTEGER")
   ensureCatalogColumn(db, "media_items", "is_duplicate", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "is_unverified", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "is_image", "INTEGER NOT NULL DEFAULT 0")
   ensureCatalogColumn(db, "media_items", "is_video", "INTEGER NOT NULL DEFAULT 0")
+  ensureCatalogColumn(db, "media_items", "external_task_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "model_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "error", "TEXT")
+  ensureCatalogColumn(db, "media_items", "sha256", "TEXT")
+  ensureCatalogColumn(db, "media_items", "verified_at", "TEXT")
+  ensureCatalogColumn(db, "media_items", "content_type", "TEXT")
+  ensureCatalogColumn(db, "media_items", "downloaded_at", "TEXT")
+  ensureCatalogColumn(db, "media_items", "thumbnail_file", "TEXT")
+  ensureCatalogColumn(db, "media_items", "thumbnail_generated_at", "TEXT")
+  ensureCatalogColumn(db, "media_items", "thumbnail_error", "TEXT")
+  ensureCatalogColumn(db, "media_items", "duplicate_of", "TEXT")
+  ensureCatalogColumn(db, "media_items", "create_mode_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "create_params_json", "TEXT")
+  ensureCatalogColumn(db, "media_items", "template_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "template_label", "TEXT")
+  ensureCatalogColumn(db, "media_items", "source_kind", "TEXT")
+  ensureCatalogColumn(db, "media_items", "source_item_id", "TEXT")
+  ensureCatalogColumn(db, "media_items", "source_url", "TEXT")
   ensureCatalogColumn(db, "media_items", "render_started_at", "INTEGER")
   ensureCatalogColumn(db, "media_items", "failure_observed_at", "INTEGER")
+  ensureCatalogColumn(db, "media_items", "created_at_value", "TEXT")
+  ensureCatalogColumn(db, "media_items", "created_at_iso", "TEXT")
+  ensureCatalogColumn(db, "media_items", "created_locally_at", "TEXT")
+  ensureCatalogColumn(db, "media_items", "last_polled_at", "INTEGER")
   db.exec(`
     CREATE INDEX IF NOT EXISTS media_items_provider_created_at_idx ON media_items(provider, created_at DESC);
     CREATE INDEX IF NOT EXISTS media_items_media_kind_created_at_idx ON media_items(media_kind, created_at DESC);
@@ -408,7 +516,13 @@ function backfillMediaItemIndexColumns(db: DatabaseSync): void {
   const rows = db.prepare("SELECT id, item_json AS itemJson FROM media_items").all() as { id: string; itemJson: string }[]
   const update = db.prepare(`
     UPDATE media_items
-    SET provider = ?,
+    SET account_email = ?,
+        provider = ?,
+        collection_id = ?,
+        asset_id = ?,
+        asset_kind = ?,
+        user_id = ?,
+        type = ?,
         media_kind = ?,
         status = ?,
         prompt = ?,
@@ -416,22 +530,52 @@ function backfillMediaItemIndexColumns(db: DatabaseSync): void {
         search_text = ?,
         local_file = ?,
         output_url = ?,
+        input_url = ?,
         download_error = ?,
         remote_deleted_at = ?,
+        remote_delete_status = ?,
         size = ?,
+        file_size = ?,
+        duration = ?,
+        time_to_generate_ms = ?,
+        duplicate_group_size = ?,
         has_local_file = ?,
         has_output_url = ?,
         has_download_error = ?,
         is_deleted = ?,
         is_missing = ?,
         is_favorited = ?,
+        shared = ?,
+        favorited = ?,
         is_duplicate = ?,
         is_unverified = ?,
         is_image = ?,
         is_video = ?,
+        external_task_id = ?,
+        model_id = ?,
+        error = ?,
+        sha256 = ?,
+        verified_at = ?,
+        content_type = ?,
+        downloaded_at = ?,
+        thumbnail_file = ?,
+        thumbnail_generated_at = ?,
+        thumbnail_error = ?,
+        duplicate_of = ?,
+        create_mode_id = ?,
+        create_params_json = ?,
+        template_id = ?,
+        template_label = ?,
+        source_kind = ?,
+        source_item_id = ?,
+        source_url = ?,
         render_started_at = ?,
         failure_observed_at = ?,
         created_at = ?,
+        created_at_value = ?,
+        created_at_iso = ?,
+        created_locally_at = ?,
+        last_polled_at = ?,
         updated_at = ?
     WHERE id = ?
   `)
@@ -513,9 +657,17 @@ function mediaItemIndexColumns(item: CatalogItem): MediaItemIndexColumns {
   const downloadError = stringOrNull(item.downloadError)
   const renderStartedAt = mediaItemRenderStartedAtMs(item)
   const failureObservedAt = mediaItemFailureObservedAtMs(item)
+  const size = finiteNumberOrNull(item.size ?? item.fileSize)
+  const createdAt = Math.trunc(timestampMs(item.createdAt) || 0)
 
   return {
+    accountEmail: stringOrNull(item.accountEmail),
     provider: stringOrNull(item.provider) || "generateporn",
+    collectionId: stringOrNull(item.collectionId),
+    assetId: stringOrNull(item.assetId),
+    assetKind: stringOrNull(item.assetKind),
+    userId: stringOrNull(item.userId),
+    type: stringOrNull(item.type),
     mediaKind: isImage ? "image" : isVideo ? "video" : "unknown",
     status: stringOrNull(item.status),
     prompt: stringOrNull(item.prompt),
@@ -523,29 +675,65 @@ function mediaItemIndexColumns(item: CatalogItem): MediaItemIndexColumns {
     searchText: mediaItemSearchText(item),
     localFile,
     outputUrl,
+    inputUrl: stringOrNull(item.inputUrl),
     downloadError,
     remoteDeletedAt: stringOrNull(item.remoteDeletedAt),
-    size: finiteNumberOrNull(item.size ?? item.fileSize),
+    remoteDeleteStatus: stringOrNull(item.remoteDeleteStatus),
+    size,
+    fileSize: finiteNumberOrNull(item.fileSize),
+    duration: finiteNumberOrNull(item.duration),
+    timeToGenerateMs: finiteNumberOrNull(item.timeToGenerateMs),
+    duplicateGroupSize: finiteNumberOrNull(item.duplicateGroupSize),
     hasLocalFile: bit(Boolean(localFile)),
     hasOutputUrl: bit(Boolean(outputUrl)),
     hasDownloadError: bit(Boolean(downloadError)),
     isDeleted: bit(isDeletedCatalogItem(item) || isExpiredFailedMediaGenerationItem(item)),
     isMissing: bit(isMissingMediaItem(item)),
     isFavorited: bit(Boolean(item.favorited)),
+    shared: item.shared === null || item.shared === undefined ? null : bit(Boolean(item.shared)),
+    favorited: item.favorited === null || item.favorited === undefined ? null : bit(Boolean(item.favorited)),
     isDuplicate: bit(Number(item.duplicateGroupSize || 0) > 1),
     isUnverified: bit(Boolean(localFile) && !item.sha256),
     isImage: bit(isImage),
     isVideo: bit(isVideo),
+    externalTaskId: stringOrNull(item.externalTaskId),
+    modelId: stringOrNull(item.modelId ?? item.model_id),
+    error: stringOrNull(item.error),
+    sha256: stringOrNull(item.sha256),
+    verifiedAt: stringOrNull(item.verifiedAt),
+    contentType: stringOrNull(item.contentType),
+    downloadedAt: stringOrNull(item.downloadedAt),
+    thumbnailFile: stringOrNull(item.thumbnailFile),
+    thumbnailGeneratedAt: stringOrNull(item.thumbnailGeneratedAt),
+    thumbnailError: stringOrNull(item.thumbnailError),
+    duplicateOf: stringOrNull(item.duplicateOf),
+    createModeId: stringOrNull(item.createModeId),
+    createParamsJson: stringifyNullable(item.createParams),
+    templateId: stringOrNull(item.templateId),
+    templateLabel: stringOrNull(item.templateLabel),
+    sourceKind: stringOrNull(item.sourceKind),
+    sourceItemId: stringOrNull(item.sourceItemId),
+    sourceUrl: stringOrNull(item.sourceUrl),
     renderStartedAt,
     failureObservedAt,
-    createdAt: Math.trunc(finiteNumberOrNull(item.createdAt) || 0),
+    createdAt,
+    createdAtValue: textScalarOrNull(item.createdAt),
+    createdAtIso: stringOrNull(item.createdAtIso),
+    createdLocallyAt: stringOrNull(item.createdLocallyAt),
+    lastPolledAt: timestampMs(item.lastPolledAt ?? item.last_polled_at),
     updatedAt: stringOrNull(item.updatedAt),
   }
 }
 
 function mediaItemIndexUpdateArgs(index: MediaItemIndexColumns): Array<string | number | null> {
   return [
+    index.accountEmail,
     index.provider,
+    index.collectionId,
+    index.assetId,
+    index.assetKind,
+    index.userId,
+    index.type,
     index.mediaKind,
     index.status,
     index.prompt,
@@ -553,22 +741,52 @@ function mediaItemIndexUpdateArgs(index: MediaItemIndexColumns): Array<string | 
     index.searchText,
     index.localFile,
     index.outputUrl,
+    index.inputUrl,
     index.downloadError,
     index.remoteDeletedAt,
+    index.remoteDeleteStatus,
     index.size,
+    index.fileSize,
+    index.duration,
+    index.timeToGenerateMs,
+    index.duplicateGroupSize,
     index.hasLocalFile,
     index.hasOutputUrl,
     index.hasDownloadError,
     index.isDeleted,
     index.isMissing,
     index.isFavorited,
+    index.shared,
+    index.favorited,
     index.isDuplicate,
     index.isUnverified,
     index.isImage,
     index.isVideo,
+    index.externalTaskId,
+    index.modelId,
+    index.error,
+    index.sha256,
+    index.verifiedAt,
+    index.contentType,
+    index.downloadedAt,
+    index.thumbnailFile,
+    index.thumbnailGeneratedAt,
+    index.thumbnailError,
+    index.duplicateOf,
+    index.createModeId,
+    index.createParamsJson,
+    index.templateId,
+    index.templateLabel,
+    index.sourceKind,
+    index.sourceItemId,
+    index.sourceUrl,
     index.renderStartedAt,
     index.failureObservedAt,
     index.createdAt,
+    index.createdAtValue,
+    index.createdAtIso,
+    index.createdLocallyAt,
+    index.lastPolledAt,
     index.updatedAt,
   ]
 }
@@ -685,6 +903,12 @@ function timestampMs(value: unknown): number | null {
 function finiteNumberOrNull(value: unknown): number | null {
   const numeric = Number(value)
   return Number.isFinite(numeric) ? numeric : null
+}
+
+function textScalarOrNull(value: unknown): string | null {
+  if (typeof value === "string" && value) return value
+  if (typeof value === "number" && Number.isFinite(value)) return String(value)
+  return null
 }
 
 function bit(value: boolean): number {
