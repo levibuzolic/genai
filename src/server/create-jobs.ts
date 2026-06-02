@@ -42,6 +42,7 @@ export { buildCreateApiRequest, resolveCreateSource }
 const DEFAULT_MEDIA_GENERATION_CONCURRENCY_LIMIT = 2
 const MEDIA_GENERATION_CONCURRENCY_LIMIT_META_KEY = "mediaGenerationConcurrencyLimit"
 const QUEUED_CREATION_STATUS = "queued"
+const COMPLETED_CREATION_DOWNLOAD_BATCH_SIZE = 25
 export const CREATION_QUEUE_BACKGROUND_JOB_ID = "creation-queue"
 const RATE_LIMIT_INITIAL_BACKOFF_MS = 60_000
 const RATE_LIMIT_MAX_BACKOFF_MS = 60 * 60 * 1000
@@ -487,6 +488,7 @@ async function downloadCompletedCreations(): Promise<number> {
   const downloadable = listCreationJobs({ status: "all", limit: 1000 })
     .filter(isDownloadableCompletedCreation)
     .toSorted(compareDownloadableCreations)
+    .slice(0, COMPLETED_CREATION_DOWNLOAD_BATCH_SIZE)
 
   let downloaded = 0
   for (const creation of downloadable) {
@@ -506,8 +508,8 @@ function isDownloadableCompletedCreation(creation: CreationJob): boolean {
 }
 
 function compareDownloadableCreations(a: CreationJob, b: CreationJob): number {
-  return String(a.finishedAt || a.updatedAt || a.createdLocallyAt || "").localeCompare(
-    String(b.finishedAt || b.updatedAt || b.createdLocallyAt || ""),
+  return String(b.finishedAt || b.updatedAt || b.createdLocallyAt || "").localeCompare(
+    String(a.finishedAt || a.updatedAt || a.createdLocallyAt || ""),
   )
 }
 
