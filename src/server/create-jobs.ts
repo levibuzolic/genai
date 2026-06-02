@@ -10,7 +10,7 @@ import type {
   RefreshCreationsResponse,
 } from "../types/routes.ts"
 import { fetchGeneratePornApi, fetchJobsPage, getJobsApiBaseUrl } from "./api-client.ts"
-import { getAuthBrowserForAccount, getSyncAccountEmails, hasApiAuth, normalizeAccountEmail } from "./auth-state.ts"
+import { getAuthBrowserForAccount, getDefaultAccountEmail, getSyncAccountEmails, hasApiAuth, normalizeAccountEmail } from "./auth-state.ts"
 import { scheduleBackgroundJob } from "./background-worker.ts"
 import {
   addCreationEvent,
@@ -59,7 +59,11 @@ async function createWorkflowJob(
     mode: CreateMode
     steps: TemplateSettings[]
   },
-  { accountEmail, attemptId, requestStartedAt }: { accountEmail: string | null; attemptId: string; requestStartedAt: string },
+  {
+    requestedAccountEmail,
+    attemptId,
+    requestStartedAt,
+  }: { requestedAccountEmail: string | null; attemptId: string; requestStartedAt: string },
 ): Promise<CreateJobSubmitResponse> {
   const source = await resolveCreateSource(requireCreateSource(sourceRequest))
   const firstStep = steps[0]
@@ -74,6 +78,7 @@ async function createWorkflowJob(
 
   const liveRequest = buildCreateApiRequest(firstMode, source, firstStep.params || {})
   queuedRequestBodies.set(attemptId, liveRequest.body)
+  const accountEmail = resolveCreateAccountEmail(requestedAccountEmail)
   const workflow = {
     templateId: template?.id || null,
     currentStep: 0,
@@ -204,7 +209,7 @@ async function submitWorkflowCreation(creation: CreationJob & { workflow: Creati
 export async function createMediaJob(requestBody: Record<string, unknown>): Promise<CreateJobSubmitResponse> {
   const attemptId = `local-${randomUUID()}`
   const requestStartedAt = new Date().toISOString()
-  const accountEmail = optionalAccountEmail(requestBody["accountEmail"])
+  const requestedAccountEmail = optionalAccountEmail(requestBody["accountEmail"])
 
   const submission = await prepareCreateSubmission(requestBody)
   const { mode, sourceRequest, params, template } = submission
@@ -226,7 +231,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
         steps: workflowSteps,
       },
       {
-        accountEmail,
+        requestedAccountEmail,
         attemptId,
         requestStartedAt,
       },
@@ -236,6 +241,7 @@ export async function createMediaJob(requestBody: Record<string, unknown>): Prom
   const source = mode.source?.required === false ? null : await resolveCreateSource(requireCreateSource(sourceRequest))
   const liveRequest = buildCreateApiRequest(mode, source, params)
   queuedRequestBodies.set(attemptId, liveRequest.body)
+  const accountEmail = resolveCreateAccountEmail(requestedAccountEmail)
   const baseRecord = {
     id: attemptId,
     accountEmail,
@@ -536,6 +542,46 @@ function countPendingGenerations(accountEmail: string | null): number {
   return listCreationJobs({ status: "all", limit: 1000 }).filter(
     (creation) => accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail) && isPendingGeneration(creation),
   ).length
+}
+
+function countQueuedGenerations(accountEmail: string | null): number {
+  return listCreationJobs({ status: "all", limit: 1000 }).filter(
+    (creation) => accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail) && creation.status === QUEUED_CREATION_STATUS,
+  ).length
+}
+
+function resolveCreateAccountEmail(requestedAccountEmail: string | null): string | null {
+  if (requestedAccountEmail) {
+    return requestedAccountEmail
+  }
+
+  const accounts = getSyncAccountEmails()
+  if (accounts.length === 0) {
+    return null
+  }
+
+  const defaultAccountEmail = getDefaultAccountEmail()
+  let selected = accounts[0] ?? null
+  let selectedLoad = getCreateAccountLoad(selected)
+
+  for (const accountEmail of accounts) {
+    const load = getCreateAccountLoad(accountEmail)
+    if (
+      load < selectedLoad ||
+      (load === selectedLoad &&
+        accountQueueKey(accountEmail) === accountQueueKey(defaultAccountEmail) &&
+        accountQueueKey(selected) !== accountQueueKey(defaultAccountEmail))
+    ) {
+      selected = accountEmail
+      selectedLoad = load
+    }
+  }
+
+  return selected
+}
+
+function getCreateAccountLoad(accountEmail: string | null): number {
+  return countPendingGenerations(accountEmail) + countQueuedGenerations(accountEmail)
 }
 
 function isPendingGeneration(creation: CreationJob): boolean {

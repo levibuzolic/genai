@@ -632,6 +632,38 @@ test("creation requests queue per account when the configured generation limit i
   }
 })
 
+test("auto account creation requests balance across queued account load", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-auto-account-"))
+  const server = await importServer(mediaDir)
+  server.acceptAuthorization(fakeBearerToken({ account: "primary" }), "auth-browser", "primary@example.com")
+  server.acceptAuthorization(fakeBearerToken({ account: "backup" }), "auth-browser", "backup@example.com")
+
+  const queued = []
+  for (const prompt of ["first", "second", "third", "fourth"]) {
+    queued.push(
+      await server.createMediaJob({
+        modeId: "text-to-image",
+        params: { prompt },
+      }),
+    )
+  }
+
+  const counts = new Map()
+  for (const creation of queued) {
+    const details = await server.getCreationDetails(creation.jobId)
+    const accountEmail = details.creation.accountEmail
+    counts.set(accountEmail, (counts.get(accountEmail) || 0) + 1)
+  }
+
+  assert.deepEqual(
+    counts,
+    new Map([
+      ["primary@example.com", 2],
+      ["backup@example.com", 2],
+    ]),
+  )
+})
+
 test("rate limited creation responses show queued retry with exponential backoff", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-rate-limit-"))
   const jobId = "73737373-7373-4737-8737-737373737373"
