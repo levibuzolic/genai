@@ -20,6 +20,36 @@ import {
   writeCatalog,
 } from "./helpers/server.js"
 
+test("catalog saves large media collections without exceeding SQLite variable limits", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-large-save-"))
+  const server = await importServer(mediaDir)
+  const items = Array.from({ length: 1300 }, (_, index) => {
+    const id = `large-save-${String(index).padStart(4, "0")}`
+    return {
+      id,
+      type: "video",
+      status: "done",
+      prompt: `large save ${index}`,
+      outputUrl: `https://assets.example/${id}.mp4`,
+      localFile: `2026-06-01/${id}.mp4`,
+      thumbnailFile: `_thumbnails/2026-06-01/${id}.jpg`,
+      createdAt: 1780272000000 + index,
+    }
+  })
+
+  await server.saveCatalog({
+    items,
+    downloadedJobIds: items.map((item) => item.id),
+    orphanFiles: [],
+    lastSeenJobId: items[0].id,
+    updatedAt: new Date().toISOString(),
+  })
+
+  const catalog = await readCatalog(mediaDir)
+  assert.equal(catalog.items.length, 1300)
+  assert.equal(catalog.downloadedJobIds.length, 1300)
+})
+
 test("sync cancel endpoint stops before the next API page and preserves scanned catalog state", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-cancel-api-"))
   const id = "99999999-9999-4999-8999-999999999999"

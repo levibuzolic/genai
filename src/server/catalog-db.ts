@@ -113,6 +113,10 @@ type PlayboxAssetRow = typeof playboxAssets.$inferSelect
 type PlayboxCollectionInsert = typeof playboxCollections.$inferInsert
 type PlayboxAssetInsert = typeof playboxAssets.$inferInsert
 
+const MEDIA_ITEM_INSERT_BATCH_SIZE = 16
+const DOWNLOADED_JOB_ID_INSERT_BATCH_SIZE = 400
+const ORPHAN_FILE_INSERT_BATCH_SIZE = 100
+
 type MediaItemIndexColumns = {
   accountEmail: string | null
   provider: string
@@ -1258,13 +1262,13 @@ export function writeCatalogToDb(catalog: Catalog): void {
           itemJson: JSON.stringify(item),
           ...mediaItemIndexColumns(item),
         }))
-      if (itemRows.length) {
-        tx.insert(mediaItems).values(itemRows).run()
+      for (const batch of chunkRows(itemRows, MEDIA_ITEM_INSERT_BATCH_SIZE)) {
+        tx.insert(mediaItems).values(batch).run()
       }
 
       const downloadedRows = normalized.downloadedJobIds.map((id, position) => ({ id, position }))
-      if (downloadedRows.length) {
-        tx.insert(downloadedJobIds).values(downloadedRows).run()
+      for (const batch of chunkRows(downloadedRows, DOWNLOADED_JOB_ID_INSERT_BATCH_SIZE)) {
+        tx.insert(downloadedJobIds).values(batch).run()
       }
 
       const orphanRows = normalized.orphanFiles
@@ -1273,8 +1277,8 @@ export function writeCatalogToDb(catalog: Catalog): void {
           localFile: file.localFile,
           fileJson: JSON.stringify(file),
         }))
-      if (orphanRows.length) {
-        tx.insert(orphanFiles).values(orphanRows).run()
+      for (const batch of chunkRows(orphanRows, ORPHAN_FILE_INSERT_BATCH_SIZE)) {
+        tx.insert(orphanFiles).values(batch).run()
       }
 
       upsertCatalogMeta(tx, "lastSeenJobId", normalized.lastSeenJobId || null)
@@ -1285,6 +1289,14 @@ export function writeCatalogToDb(catalog: Catalog): void {
     { behavior: "immediate" },
   )
   bumpCatalogDbRevision()
+}
+
+function chunkRows<T>(rows: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < rows.length; index += size) {
+    chunks.push(rows.slice(index, index + size))
+  }
+  return chunks
 }
 
 export function readCatalogMeta(key: string): unknown {

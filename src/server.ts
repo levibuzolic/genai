@@ -762,6 +762,7 @@ export {
   playboxAuthBrowser,
   resolveCreateSource,
   saveCreateTemplateRegistry,
+  saveCatalog,
   setMediaGenerationConcurrencyLimit,
   saveCreateTemplateFromCreation,
   saveCreateTemplateFromRequest,
