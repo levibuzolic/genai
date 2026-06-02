@@ -990,7 +990,16 @@ test("creation job submit and download use mocked API and merge into catalog", a
   const sourceDataUrl = imageDataUrl()
   let submitBody = null
   await writeCatalog(mediaDir, {
-    items: [],
+    items: [
+      {
+        id: "older-existing-item",
+        type: "video",
+        status: "done",
+        outputUrl: "https://assets.example/older.mp4",
+        localFile: "2026-05-01/older.mp4",
+        createdAt: 1777600000000,
+      },
+    ],
     downloadedJobIds: [],
     lastSeenJobId: null,
   })
@@ -1054,6 +1063,8 @@ test("creation job submit and download use mocked API and merge into catalog", a
     })
     await server.runCreationQueueBackgroundJob()
     const pendingView = await server.getItems(new URLSearchParams())
+    await server.pollCreateJob(jobId)
+    const completedView = await server.getItems(new URLSearchParams())
     const downloaded = await server.downloadCreateJob(jobId)
     const catalog = await readCatalog(mediaDir)
     const item = catalog.items.find((entry) => entry.id === jobId)
@@ -1065,6 +1076,11 @@ test("creation job submit and download use mocked API and merge into catalog", a
       pendingView.items.some((entry) => entry.id === jobId && entry.status === "pending" && entry.createModeId === "custom-video"),
       true,
     )
+    assert.equal(
+      completedView.items.some((entry) => entry.id === jobId && entry.status === "done" && entry.outputUrl && !entry.localFile),
+      true,
+    )
+    assert.equal(completedView.items[0].id, jobId)
     assert.equal(submitBody.image_base64.startsWith("data:image/jpeg;base64,"), true)
     assert.notEqual(submitBody.image_base64, sourceDataUrl)
     assert.equal(submitBody.input_url, undefined)

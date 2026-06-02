@@ -780,8 +780,8 @@ function catalogItemFromActiveCreation(creation: CreationJob): CatalogItem | nul
     negativePrompt: typeof creation.params["negativePrompt"] === "string" ? creation.params["negativePrompt"] : "",
     outputUrl: creation.outputUrl,
     inputUrl: creation.inputUrl,
-    createdAt: creation.createdAt,
-    createdAtIso: creation.createdAtIso,
+    createdAt: toEpochMs(creation.createdAt) ?? toEpochMs(creation.createdLocallyAt) ?? creation.createdAt,
+    createdAtIso: creation.createdAtIso || creation.createdLocallyAt,
     externalTaskId: creation.externalTaskId,
     modelId: typeof creation.params["modelId"] === "string" ? creation.params["modelId"] : null,
     duration: durationFromCreateParams(creation.params),
@@ -801,7 +801,7 @@ function catalogItemFromActiveCreation(creation: CreationJob): CatalogItem | nul
 function isVisibleCreationCatalogProjection(creation: CreationJob): boolean {
   if (isActiveCreationStatus(creation.status)) return true
   if (creation.downloadedItemId) return false
-  return isTerminalCreationStatus(creation.status) && !creation.outputUrl
+  return isTerminalCreationStatus(creation.status)
 }
 
 function mediaTypeFromCreateMode(modeId: string | null): string {
