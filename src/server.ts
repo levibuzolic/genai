@@ -25,7 +25,7 @@ import {
   startBackgroundWorkers,
   triggerBackgroundJob,
 } from "./server/background-worker.ts"
-import { closeCatalogDb } from "./server/catalog-db.ts"
+import { closeCatalogDb, getCatalogDbRevision } from "./server/catalog-db.ts"
 import {
   applyDuplicateMetadata,
   buildFacets,
@@ -103,6 +103,7 @@ import {
 } from "./server/playbox-auth-import.ts"
 import { getPlayboxAuthStatus, playboxAuthBrowser, resetPlayboxAuthRuntimeState } from "./server/playbox-auth-state.ts"
 import { startPlayboxSync } from "./server/playbox-sync.ts"
+import { clearReadResponseCache, sendCachedJson, warmCachedJson } from "./server/read-cache.ts"
 import { logHttpNotFound, readJsonBody, sendJson, serveMedia, serveStatic } from "./server/static.ts"
 import {
   autoSyncState,
@@ -137,6 +138,34 @@ const VITE_REDIRECT_CACHE_MS = 5000
 let viteRedirectCache: { checkedAt: number; url: string | null } = { checkedAt: 0, url: null }
 let viteRedirectProbe: Promise<string | null> | null = null
 
+function cachedReadOptions(url: URL, options: { ttlMs?: number } = {}): { key: string; revision: number; ttlMs?: number } {
+  return {
+    key: `${url.pathname}${url.search}`,
+    revision: getCatalogDbRevision(),
+    ...options,
+  }
+}
+
+async function warmStartupReadCaches(): Promise<void> {
+  const warmups: Array<[string, () => Promise<unknown> | unknown]> = [
+    ["/api/items?sort=newest&pageSize=12", () => getItems(new URLSearchParams("sort=newest&pageSize=12"))],
+    ["/api/items?sort=newest&pageSize=48", () => getItems(new URLSearchParams("sort=newest&pageSize=48"))],
+    [
+      "/api/items?provider=generateporn&media=image&status=all&sort=newest&pageSize=120",
+      () => getItems(new URLSearchParams("provider=generateporn&media=image&status=all&sort=newest&pageSize=120")),
+    ],
+    ["/api/items?status=missing&sort=newest&pageSize=48", () => getItems(new URLSearchParams("status=missing&sort=newest&pageSize=48"))],
+    ["/api/create/templates", () => getCreateTemplateRegistryResponse()],
+    ["/api/creations", () => getCreations(new URLSearchParams())],
+    ["/api/creations?status=active", () => getCreations(new URLSearchParams("status=active"))],
+  ]
+
+  for (const [routePath, producer] of warmups) {
+    const url = new URL(routePath, "http://localhost")
+    await warmCachedJson(cachedReadOptions(url), producer)
+  }
+}
+
 reloadConfigFromEnv()
 closeCatalogDb()
 resetAuthRuntimeState()
@@ -144,6 +173,7 @@ resetPlayboxAuthRuntimeState()
 resetPlayboxImportedAuthRuntimeState()
 resetSyncRuntimeState()
 resetBackgroundWorkers()
+clearReadResponseCache()
 registerBackgroundJobs()
 await mkdir(MEDIA_DIR, { recursive: true })
 
@@ -160,26 +190,28 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/config") {
-      const authAccounts = getAuthAccountStatuses()
-      return sendJson(response, {
-        mediaDir: MEDIA_DIR,
-        hasCookie: Boolean(process.env["GENERATEPORN_COOKIE"]),
-        hasAuthorization: Boolean(getActiveAuthorization() || authAccounts.some((account) => account.hasAuthorization)),
-        authorizationExpiresAt: getAuthExpiresAt(),
-        authorizationSource: authState.source,
-        authBrowser: authBrowser.getStatus(),
-        playbox: {
-          ...getPlayboxAuthStatus(),
-          importedSession: getPlayboxImportedAuthStatus(),
-        },
-        authAccounts,
-        defaultAccountEmail: getDefaultAccountEmail(),
-        mediaGenerationConcurrencyLimit: getMediaGenerationConcurrencyLimit(),
-        pendingGenerationsByAccount: getPendingGenerationCountsByAccount(),
-        backgroundWorkers: getBackgroundWorkerStatus(),
-        autoSync: getAutoSyncStatus(),
-        thumbnailDir: THUMBNAIL_DIR,
-        pageLimit: PAGE_LIMIT,
+      return sendCachedJson(response, cachedReadOptions(url, { ttlMs: 1000 }), () => {
+        const authAccounts = getAuthAccountStatuses()
+        return {
+          mediaDir: MEDIA_DIR,
+          hasCookie: Boolean(process.env["GENERATEPORN_COOKIE"]),
+          hasAuthorization: Boolean(getActiveAuthorization() || authAccounts.some((account) => account.hasAuthorization)),
+          authorizationExpiresAt: getAuthExpiresAt(),
+          authorizationSource: authState.source,
+          authBrowser: authBrowser.getStatus(),
+          playbox: {
+            ...getPlayboxAuthStatus(),
+            importedSession: getPlayboxImportedAuthStatus(),
+          },
+          authAccounts,
+          defaultAccountEmail: getDefaultAccountEmail(),
+          mediaGenerationConcurrencyLimit: getMediaGenerationConcurrencyLimit(),
+          pendingGenerationsByAccount: getPendingGenerationCountsByAccount(),
+          backgroundWorkers: getBackgroundWorkerStatus(),
+          autoSync: getAutoSyncStatus(),
+          thumbnailDir: THUMBNAIL_DIR,
+          pageLimit: PAGE_LIMIT,
+        }
       })
     }
 
@@ -205,7 +237,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/create/templates") {
-      return sendJson(response, await getCreateTemplateRegistryResponse())
+      return sendCachedJson(response, cachedReadOptions(url), () => getCreateTemplateRegistryResponse())
     }
 
     if (request.method === "POST" && url.pathname === "/api/create/templates") {
@@ -255,12 +287,12 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/creations") {
-      return sendJson(response, await getCreations(url.searchParams))
+      return sendCachedJson(response, cachedReadOptions(url), () => getCreations(url.searchParams))
     }
 
     const creationMatch = url.pathname.match(/^\/api\/creations\/([^/]+)$/)
     if (request.method === "GET" && creationMatch) {
-      return sendJson(response, await getCreationDetails(creationMatch[1] || ""))
+      return sendCachedJson(response, cachedReadOptions(url), () => getCreationDetails(creationMatch[1] || ""))
     }
 
     const creationDuplicateMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/duplicate$/)
@@ -356,12 +388,12 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/items") {
-      return sendJson(response, await getItems(url.searchParams))
+      return sendCachedJson(response, cachedReadOptions(url), () => getItems(url.searchParams))
     }
 
     const catalogItemMatch = url.pathname.match(/^\/api\/items\/([^/]+)$/)
     if (request.method === "GET" && catalogItemMatch) {
-      return sendJson(response, await getCatalogItem(decodeURIComponent(catalogItemMatch[1] || "")))
+      return sendCachedJson(response, cachedReadOptions(url), () => getCatalogItem(decodeURIComponent(catalogItemMatch[1] || "")))
     }
 
     if (request.method === "DELETE" && catalogItemMatch) {
@@ -513,6 +545,7 @@ if (isCliEntry()) {
       return undefined
     })
     startAuthAccountAutoRefresh()
+    void warmStartupReadCaches().catch(handleBackgroundError)
     void refreshPlayboxImportedAuthorization().then((ok) => {
       if (!ok) {
         console.log("Playbox imported auth session is not active. Open Settings > Playbox Auth to import or refresh it.")

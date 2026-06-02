@@ -172,13 +172,21 @@ export async function readJsonBody(request: HttpRequest): Promise<Record<string,
 }
 
 export function sendJson(response: HttpResponse, body: unknown, statusCode = 200): void {
+  sendJsonText(response, stringifyJson(body), statusCode)
+}
+
+export function stringifyJson(body: unknown): string {
+  return JSON.stringify(body)
+}
+
+export function sendJsonText(response: HttpResponse, body: string, statusCode = 200): void {
   response.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
     "access-control-allow-headers": "content-type",
   })
-  response.end(`${JSON.stringify(body, null, 2)}\n`)
+  response.end(body)
 }
 
 export function logHttpNotFound(message: string, details: Record<string, unknown> = {}): void {

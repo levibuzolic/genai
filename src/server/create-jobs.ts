@@ -15,7 +15,9 @@ import { scheduleBackgroundJob } from "./background-worker.ts"
 import {
   addCreationEvent,
   findCreationJob,
+  getPendingCreationCountsByAccount,
   listCreationEvents,
+  listCreationJobSummaries,
   listCreationJobs,
   readCatalogMeta,
   saveCreationJob,
@@ -443,14 +445,7 @@ export async function runCreationQueueBackgroundJob(): Promise<Record<string, un
 }
 
 export function getPendingGenerationCountsByAccount(): Record<string, number> {
-  const counts: Record<string, number> = {}
-  for (const creation of listCreationJobs({ status: "all", limit: 1000 })) {
-    if (!isPendingGeneration(creation)) continue
-    const key = accountQueueKey(creation.accountEmail)
-    counts[key] = (counts[key] || 0) + 1
-  }
-
-  return counts
+  return getPendingCreationCountsByAccount()
 }
 
 async function processCreationQueues(accountEmail?: string | null): Promise<Record<string, unknown>> {
@@ -949,9 +944,7 @@ export async function getCreations(searchParams = new URLSearchParams()): Promis
   if (refresh && getSyncAccountEmails().length > 0) {
     await refreshActiveCreations()
   }
-  scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "creation-history")
-
-  const rows = listCreationJobs({ status })
+  const rows = listCreationJobSummaries({ status })
   const activeCount = rows.filter((row) => isActiveCreationStatus(row.status)).length
 
   return {

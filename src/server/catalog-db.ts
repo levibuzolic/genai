@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto"
 import { mkdir } from "node:fs/promises"
 import { DatabaseSync } from "node:sqlite"
 
-import { asc, desc, eq, or } from "drizzle-orm"
+import { asc, desc, eq, inArray, or } from "drizzle-orm"
 import { drizzle, type NodeSQLiteDatabase } from "drizzle-orm/node-sqlite"
 
 import type { PublicCreation } from "../types/routes.ts"
 import { CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
+import { CREATE_ACTIVE_STATUS_VALUES, CREATE_TERMINAL_STATUS_VALUES } from "./create-constants.ts"
 import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import {
   catalogMeta,
@@ -132,6 +133,7 @@ export type PlayboxAssetRecord = {
 
 let catalogDb: DatabaseSync | null = null
 let catalogOrm: CatalogOrm | null = null
+let catalogDbRevision = 0
 
 export function getCatalogDb(): DatabaseSync {
   if (catalogDb) {
@@ -155,6 +157,14 @@ function getCatalogOrm(): CatalogOrm {
   }
 
   return catalogOrm
+}
+
+export function getCatalogDbRevision(): number {
+  return catalogDbRevision
+}
+
+function bumpCatalogDbRevision(): void {
+  catalogDbRevision += 1
 }
 
 function ensureCatalogSchema(db: DatabaseSync): void {
@@ -295,6 +305,7 @@ export function savePlayboxCollection(collection: PlayboxCollectionRecord): Play
       set: updateRow,
     })
     .run()
+  bumpCatalogDbRevision()
 
   return collection
 }
@@ -323,6 +334,7 @@ export function savePlayboxAsset(asset: PlayboxAssetRecord): PlayboxAssetRecord 
       set: updateRow,
     })
     .run()
+  bumpCatalogDbRevision()
 
   return asset
 }
@@ -387,18 +399,31 @@ export function listCatalogItemsByPrompts(prompts: Iterable<string>, limit = 6):
   const promptSet = new Set([...prompts].map(normalizePromptLink).filter(Boolean))
   if (!promptSet.size) return []
 
-  return getCatalogOrm()
-    .select({ itemJson: mediaItems.itemJson })
-    .from(mediaItems)
-    .orderBy(desc(mediaItems.createdAt), mediaItems.id)
-    .all()
-    .map((row) => parseJson(row.itemJson, null))
-    .filter((item): item is CatalogItem => isCatalogItem(item) && promptSet.has(normalizePromptLink(item.prompt)))
-    .slice(0, limit)
+  const db = getCatalogDb()
+  const items = new Map<string, CatalogItem>()
+
+  for (const prompt of promptSet) {
+    const pattern = `%${escapeSqliteLike(`"prompt":${JSON.stringify(prompt)}`)}%`
+    const rows = db
+      .prepare("SELECT item_json AS itemJson FROM media_items WHERE item_json LIKE ? ESCAPE '\\' ORDER BY created_at DESC, id LIMIT ?")
+      .all(pattern, limit) as { itemJson: string }[]
+
+    for (const row of rows) {
+      const item = parseJson(row.itemJson, null)
+      if (!isCatalogItem(item) || !promptSet.has(normalizePromptLink(item.prompt))) continue
+      items.set(item.id, item)
+    }
+  }
+
+  return [...items.values()].toSorted((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).slice(0, limit)
 }
 
 function normalizePromptLink(prompt: unknown): string {
   return String(prompt || "").trim()
+}
+
+function escapeSqliteLike(value: string): string {
+  return value.replace(/[\\%_]/g, (match) => `\\${match}`)
 }
 
 export function writeCatalogToDb(catalog: Catalog): void {
@@ -445,6 +470,7 @@ export function writeCatalogToDb(catalog: Catalog): void {
     },
     { behavior: "immediate" },
   )
+  bumpCatalogDbRevision()
 }
 
 export function readCatalogMeta(key: string): unknown {
@@ -454,6 +480,7 @@ export function readCatalogMeta(key: string): unknown {
 
 export function writeCatalogMeta(key: string, value: unknown): void {
   upsertCatalogMeta(getCatalogOrm(), key, value)
+  bumpCatalogDbRevision()
 }
 
 function upsertCatalogMeta(db: CatalogOrm, key: string, value: unknown): void {
@@ -484,6 +511,7 @@ export function saveCreationJob(creation: CreationInput, event: CreationEventOpt
       set: updateRow,
     })
     .run()
+  bumpCatalogDbRevision()
 
   const eventStatus = event.eventStatus || (existing?.status !== next.status ? next.status : null)
   if (eventStatus && (event.eventMessage || existing?.status !== next.status || !existing)) {
@@ -520,6 +548,7 @@ export function addCreationEvent(creationId: string, status: string, message: st
       createdAt: new Date().toISOString(),
     })
     .run()
+  bumpCatalogDbRevision()
 }
 
 export function findCreationJob(id: string | null | undefined): CreationJob | null {
@@ -556,6 +585,106 @@ export function listCreationJobs({ status = "all", limit = 80 }: { status?: stri
     if (activeDelta) return activeDelta
     return String(b.updatedAt || b.createdLocallyAt || "").localeCompare(String(a.updatedAt || a.createdLocallyAt || ""))
   })
+}
+
+export function listCreationJobSummaries({ status = "all", limit = 80 }: { status?: string; limit?: number } = {}): CreationJob[] {
+  const selection = {
+    id: creationJobs.id,
+    accountEmail: creationJobs.accountEmail,
+    jobId: creationJobs.jobId,
+    status: creationJobs.status,
+    queueNotBefore: creationJobs.queueNotBefore,
+    queueAttempt: creationJobs.queueAttempt,
+    lastRateLimitedAt: creationJobs.lastRateLimitedAt,
+    modeId: creationJobs.modeId,
+    modeLabel: creationJobs.modeLabel,
+    mediaType: creationJobs.mediaType,
+    templateId: creationJobs.templateId,
+    templateLabel: creationJobs.templateLabel,
+    sourceJson: creationJobs.sourceJson,
+    paramsJson: creationJobs.paramsJson,
+    error: creationJobs.error,
+    inputUrl: creationJobs.inputUrl,
+    outputUrl: creationJobs.outputUrl,
+    externalTaskId: creationJobs.externalTaskId,
+    createdAt: creationJobs.createdAt,
+    createdAtIso: creationJobs.createdAtIso,
+    createdLocallyAt: creationJobs.createdLocallyAt,
+    submittedAt: creationJobs.submittedAt,
+    updatedAt: creationJobs.updatedAt,
+    finishedAt: creationJobs.finishedAt,
+    downloadedItemId: creationJobs.downloadedItemId,
+  }
+  const rows =
+    status === "active"
+      ? getCatalogOrm()
+          .select(selection)
+          .from(creationJobs)
+          .where(inArray(creationJobs.status, CREATE_ACTIVE_STATUS_VALUES))
+          .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+          .limit(limit)
+          .all()
+      : status === "finished"
+        ? getCatalogOrm()
+            .select(selection)
+            .from(creationJobs)
+            .where(inArray(creationJobs.status, CREATE_TERMINAL_STATUS_VALUES))
+            .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+            .limit(limit)
+            .all()
+        : status === "catalog-projection"
+          ? getCatalogOrm()
+              .select(selection)
+              .from(creationJobs)
+              .where(inArray(creationJobs.status, [...CREATE_ACTIVE_STATUS_VALUES, ...CREATE_TERMINAL_STATUS_VALUES]))
+              .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+              .limit(limit)
+              .all()
+        : getCatalogOrm()
+            .select(selection)
+            .from(creationJobs)
+            .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+            .limit(limit)
+            .all()
+  const creations = rows.map((row) =>
+    normalizeCreationJob({
+      ...row,
+      source: parseJson(row.sourceJson, null),
+      params: parseJson(row.paramsJson, {}),
+    }),
+  )
+  const filtered = creations.filter((row) => {
+    if (status === "active") return isActiveCreationStatus(row.status)
+    if (status === "finished") return isTerminalCreationStatus(row.status)
+    return true
+  })
+
+  return filtered.toSorted((a, b) => {
+    const activeDelta = Number(isActiveCreationStatus(b.status)) - Number(isActiveCreationStatus(a.status))
+    if (activeDelta) return activeDelta
+    return String(b.updatedAt || b.createdLocallyAt || "").localeCompare(String(a.updatedAt || a.createdLocallyAt || ""))
+  })
+}
+
+export function getPendingCreationCountsByAccount(): Record<string, number> {
+  const rows = getCatalogOrm()
+    .select({
+      accountEmail: creationJobs.accountEmail,
+      jobId: creationJobs.jobId,
+      status: creationJobs.status,
+    })
+    .from(creationJobs)
+    .all()
+  const counts: Record<string, number> = {}
+
+  for (const row of rows) {
+    if (!row.jobId || !isActiveCreationStatus(row.status)) continue
+
+    const key = row.accountEmail || "__default__"
+    counts[key] = (counts[key] || 0) + 1
+  }
+
+  return counts
 }
 
 export function listCreationEvents(
@@ -826,6 +955,7 @@ export async function saveCatalog(catalog: Catalog): Promise<void> {
 }
 
 export function closeCatalogDb(): void {
+  bumpCatalogDbRevision()
   if (!catalogDb) {
     return
   }

@@ -10,7 +10,15 @@ import { drizzle } from "drizzle-orm/node-sqlite"
 import { ensureVideoThumbnail } from "../thumbnails.ts"
 import type { BackupSummary, CatalogItemResponse, DeleteCatalogItemResponse, ItemsResponse, PublicCatalogItem } from "../types/routes.ts"
 import { deleteRemoteJob, setRemoteJobFavorite } from "./api-client.ts"
-import { closeCatalogDb, getCatalogDb, listCreationJobs, parseJson, readCatalogFromDb, saveCatalog } from "./catalog-db.ts"
+import {
+  closeCatalogDb,
+  getCatalogDb,
+  getCatalogDbRevision,
+  listCreationJobSummaries,
+  parseJson,
+  readCatalogFromDb,
+  saveCatalog,
+} from "./catalog-db.ts"
 import { BACKUP_DIR, CATALOG_DB_PATH, MEDIA_DIR } from "./config.ts"
 import { isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import { catalogMeta, catalogSchema, mediaItems } from "./db-schema.ts"
@@ -66,6 +74,7 @@ const RENDERING_MEDIA_MAX_AGE_MS = 60 * 60 * 1000
 const FAILED_MEDIA_VISIBLE_MS = 5 * 60 * 1000
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
+let readOnlyCatalogCache: { catalog: Catalog; revision: number } | null = null
 
 export async function downloadJob(job: GeneratePornJob): Promise<Partial<CatalogItem>> {
   const normalizedJob = normalizeJob(job)
@@ -387,7 +396,7 @@ function includeActiveCreationItems(items: CatalogItem[], provider: string): Cat
   const itemById = new Map(items.map((item) => [item.id, item]))
   const next = items.slice()
 
-  for (const creation of listCreationJobs({ status: "all", limit: 500 })) {
+  for (const creation of listCreationJobSummaries({ status: "catalog-projection", limit: 500 })) {
     const item = catalogItemFromActiveCreation(creation)
     if (!item || itemById.has(item.id)) continue
     itemById.set(item.id, item)
@@ -726,11 +735,18 @@ function mediaItemFailureObservedAtMs(item: CatalogItem): number | null {
 }
 
 export async function loadCatalog({ reconcileLocalFiles = true }: { reconcileLocalFiles?: boolean } = {}): Promise<Catalog> {
-  const catalog = readCatalogFromDb()
   if (!reconcileLocalFiles) {
+    const revision = getCatalogDbRevision()
+    if (readOnlyCatalogCache?.revision === revision) {
+      return readOnlyCatalogCache.catalog
+    }
+
+    const catalog = readCatalogFromDb()
+    readOnlyCatalogCache = { catalog, revision }
     return catalog
   }
 
+  const catalog = readCatalogFromDb()
   const changed = await reconcileCatalogWithLocalFiles(catalog)
 
   if (changed) {
