@@ -820,7 +820,7 @@ function sourceString(source: Record<string, unknown> | null, key: string): stri
 }
 
 export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
-  return {
+  return compactPublicCatalogItem({
     id: item.id,
     accountEmail: item.accountEmail ?? null,
     provider: item.provider ?? null,
@@ -869,7 +869,26 @@ export function toPublicCatalogItem(item: CatalogItem): PublicCatalogItem {
     remoteDeletedAt: typeof item.remoteDeletedAt === "string" ? item.remoteDeletedAt : null,
     remoteDeleteStatus: typeof item.remoteDeleteStatus === "string" ? item.remoteDeleteStatus : null,
     posterUrl: item.thumbnailFile ? mediaUrlForLocalFile(item.thumbnailFile) : null,
+  })
+}
+
+function compactPublicCatalogItem(item: PublicCatalogItem): PublicCatalogItem {
+  const compact: Record<string, unknown> = {
+    id: item.id,
+    posterUrl: item.posterUrl,
   }
+  if (item.provider === "playbox") {
+    compact["outputUrl"] = null
+    compact["inputUrl"] = null
+    compact["sourceUrl"] = null
+  }
+
+  for (const [key, value] of Object.entries(item)) {
+    if (key === "id" || key === "posterUrl" || value === null || value === undefined) continue
+    compact[key] = value
+  }
+
+  return compact as PublicCatalogItem
 }
 
 export async function deleteCatalogItemRemote(

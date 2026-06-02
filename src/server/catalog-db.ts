@@ -1710,7 +1710,29 @@ export function toPublicCreation(creation: CreationJob, { details = false }: { d
     publicCreation.workflow = creation.workflow
   }
 
-  return publicCreation
+  return compactPublicCreation(publicCreation)
+}
+
+function compactPublicCreation(creation: PublicCreation): PublicCreation {
+  const compact: Record<string, unknown> = {
+    id: creation.id,
+    accountEmail: creation.accountEmail,
+    source: creation.source,
+    active: creation.active,
+    params: creation.params,
+    status: creation.status,
+  }
+
+  for (const key of ["request", "response", "job", "workflow"] as const) {
+    if (Object.hasOwn(creation, key)) compact[key] = creation[key]
+  }
+
+  for (const [key, value] of Object.entries(creation)) {
+    if (key in compact || value === null || value === undefined) continue
+    compact[key] = value
+  }
+
+  return compact as PublicCreation
 }
 
 function publicCreationSource(source: Record<string, unknown> | null): CreateSource | null {
