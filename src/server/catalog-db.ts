@@ -357,6 +357,7 @@ function ensureCatalogSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS media_items_provider_created_at_idx ON media_items(provider, created_at DESC);
     CREATE INDEX IF NOT EXISTS media_items_media_kind_created_at_idx ON media_items(media_kind, created_at DESC);
     CREATE INDEX IF NOT EXISTS media_items_status_created_at_idx ON media_items(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS media_items_prompt_created_at_idx ON media_items(prompt, created_at DESC);
     CREATE INDEX IF NOT EXISTS media_items_size_idx ON media_items(size);
   `)
   ensureCatalogColumn(db, "creation_jobs", "template_id", "TEXT")
@@ -722,30 +723,20 @@ export function listCatalogItemsByPrompts(prompts: Iterable<string>, limit = 6):
   if (!promptSet.size) return []
 
   const db = getCatalogDb()
-  const items = new Map<string, CatalogItem>()
+  const promptsList = [...promptSet]
+  const placeholders = promptsList.map(() => "?").join(",")
+  const rows = db
+    .prepare(`SELECT item_json AS itemJson FROM media_items WHERE prompt IN (${placeholders}) ORDER BY created_at DESC, id LIMIT ?`)
+    .all(...promptsList, limit) as { itemJson: string }[]
+  const items = rows
+    .map((row) => parseJson(row.itemJson, null))
+    .filter((item): item is CatalogItem => isCatalogItem(item) && promptSet.has(normalizePromptLink(item.prompt)))
 
-  for (const prompt of promptSet) {
-    const pattern = `%${escapeSqliteLike(`"prompt":${JSON.stringify(prompt)}`)}%`
-    const rows = db
-      .prepare("SELECT item_json AS itemJson FROM media_items WHERE item_json LIKE ? ESCAPE '\\' ORDER BY created_at DESC, id LIMIT ?")
-      .all(pattern, limit) as { itemJson: string }[]
-
-    for (const row of rows) {
-      const item = parseJson(row.itemJson, null)
-      if (!isCatalogItem(item) || !promptSet.has(normalizePromptLink(item.prompt))) continue
-      items.set(item.id, item)
-    }
-  }
-
-  return [...items.values()].toSorted((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0)).slice(0, limit)
+  return items.slice(0, limit)
 }
 
 function normalizePromptLink(prompt: unknown): string {
   return String(prompt || "").trim()
-}
-
-function escapeSqliteLike(value: string): string {
-  return value.replace(/[\\%_]/g, (match) => `\\${match}`)
 }
 
 export function writeCatalogToDb(catalog: Catalog): void {

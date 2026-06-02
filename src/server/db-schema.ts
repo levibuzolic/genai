@@ -46,6 +46,7 @@ export const mediaItems = sqliteTable(
     index("media_items_provider_created_at_idx").on(table.provider, desc(table.createdAt)),
     index("media_items_media_kind_created_at_idx").on(table.mediaKind, desc(table.createdAt)),
     index("media_items_status_created_at_idx").on(table.status, desc(table.createdAt)),
+    index("media_items_prompt_created_at_idx").on(table.prompt, desc(table.createdAt)),
     index("media_items_size_idx").on(table.size),
   ],
 )
