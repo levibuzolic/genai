@@ -25,7 +25,7 @@ import {
   startBackgroundWorkers,
   triggerBackgroundJob,
 } from "./server/background-worker.ts"
-import { closeCatalogDb, getCatalogDbRevision } from "./server/catalog-db.ts"
+import { closeCatalogDb, getCatalogDbRevision, saveCreationJob } from "./server/catalog-db.ts"
 import {
   applyDuplicateMetadata,
   buildFacets,
@@ -101,7 +101,7 @@ import {
   refreshPlayboxImportedAuthorization,
   resetPlayboxImportedAuthRuntimeState,
 } from "./server/playbox-auth-import.ts"
-import { getPlayboxAuthStatus, playboxAuthBrowser, resetPlayboxAuthRuntimeState } from "./server/playbox-auth-state.ts"
+import { getPlayboxAuthStatus, resetPlayboxAuthRuntimeState } from "./server/playbox-auth-state.ts"
 import { startPlayboxSync } from "./server/playbox-sync.ts"
 import { clearReadResponseCache, sendCachedJson, warmCachedJson } from "./server/read-cache.ts"
 import { logHttpNotFound, readJsonBody, sendJson, serveMedia, serveStatic } from "./server/static.ts"
@@ -357,23 +357,6 @@ const server = http.createServer(async (request, response) => {
     if (request.method === "POST" && url.pathname === "/api/auth/accounts/remove") {
       const body = AuthAccountBodySchema.parse(await readJsonBody(request))
       return sendJson(response, await removeAuthAccount(body.email, { deleteProfile: body.deleteProfile }))
-    }
-
-    if (request.method === "GET" && url.pathname === "/api/playbox/auth/browser/status") {
-      return sendJson(response, playboxAuthBrowser.getStatus())
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/playbox/auth/browser/connect") {
-      return sendJson(response, await playboxAuthBrowser.connectVisible())
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/playbox/auth/browser/refresh") {
-      return sendJson(response, await playboxAuthBrowser.refreshHeadless())
-    }
-
-    if (request.method === "POST" && url.pathname === "/api/playbox/auth/browser/disconnect") {
-      const body = DisconnectBrowserBodySchema.parse(await readJsonBody(request))
-      return sendJson(response, await playboxAuthBrowser.disconnect({ deleteProfile: body.deleteProfile }))
     }
 
     if (request.method === "POST" && url.pathname === "/api/playbox/auth/import-curl") {
@@ -759,10 +742,10 @@ export {
   loadCreateTemplateRegistry,
   normalizeJob,
   pollCreateJob,
-  playboxAuthBrowser,
   resolveCreateSource,
   saveCreateTemplateRegistry,
   saveCatalog,
+  saveCreationJob,
   setMediaGenerationConcurrencyLimit,
   saveCreateTemplateFromCreation,
   saveCreateTemplateFromRequest,

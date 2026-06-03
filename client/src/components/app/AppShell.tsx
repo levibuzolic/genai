@@ -52,9 +52,6 @@ export function AppShell({
   onAuthConnect,
   onAuthRefresh,
   onAuthDisconnect,
-  onPlayboxAuthConnect,
-  onPlayboxAuthRefresh,
-  onPlayboxAuthDisconnect,
   onImportPlayboxCurl,
   onRefreshPlayboxImport,
   onClearPlayboxImport,
@@ -97,9 +94,6 @@ export function AppShell({
   onAuthConnect: () => void
   onAuthRefresh: () => void
   onAuthDisconnect: () => void
-  onPlayboxAuthConnect: () => void
-  onPlayboxAuthRefresh: () => void
-  onPlayboxAuthDisconnect: () => void
   onImportPlayboxCurl: (curl: string) => void
   onRefreshPlayboxImport: () => void
   onClearPlayboxImport: () => void
@@ -306,9 +300,6 @@ export function AppShell({
         onAuthConnect={onAuthConnect}
         onAuthRefresh={onAuthRefresh}
         onAuthDisconnect={onAuthDisconnect}
-        onPlayboxAuthConnect={onPlayboxAuthConnect}
-        onPlayboxAuthRefresh={onPlayboxAuthRefresh}
-        onPlayboxAuthDisconnect={onPlayboxAuthDisconnect}
         onImportPlayboxCurl={onImportPlayboxCurl}
         onRefreshPlayboxImport={onRefreshPlayboxImport}
         onClearPlayboxImport={onClearPlayboxImport}

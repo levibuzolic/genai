@@ -20,9 +20,7 @@ export let API_BASE_URL: string
 export let APP_LOGIN_URL: string
 export let PLAYBOX_API_BASE_URL: string
 export let PLAYBOX_AUTH_BASE_URL: string
-export let PLAYBOX_APP_URL: string
 export let PLAYBOX_PAGE_LIMIT: number
-export let PLAYBOX_CHROME_PATH: string | null
 export let PLAYBOX_AUTH_IMPORT_PATH: string
 export let PAGE_LIMIT: number
 export let CREATE_HISTORY_PAGE_LIMIT: number
@@ -31,7 +29,6 @@ export let CATALOG_DB_PATH: string
 export let BACKUP_DIR: string
 export let THUMBNAIL_DIR: string
 export let AUTH_BROWSER_PROFILE_DIR: string
-export let PLAYBOX_AUTH_BROWSER_PROFILE_DIR: string
 export let PUBLIC_DIR: string
 export let SYNC_DELAY_MS: number
 export let AUTH_BROWSER_REFRESH_MS: number
@@ -54,8 +51,6 @@ export function reloadConfigFromEnv(): void {
   APP_LOGIN_URL = process.env["GENERATEPORN_APP_URL"] || "https://app.generateporn.ai/"
   PLAYBOX_API_BASE_URL = process.env["PLAYBOX_API_URL"] || "https://api.playbox.com/api"
   PLAYBOX_AUTH_BASE_URL = process.env["PLAYBOX_AUTH_URL"] || "https://api.playbox.com/auth"
-  PLAYBOX_APP_URL = process.env["PLAYBOX_APP_URL"] || "https://www.playbox.com/collection"
-  PLAYBOX_CHROME_PATH = process.env["PLAYBOX_CHROME_PATH"] || null
   PAGE_LIMIT = Number(process.env["GENERATEPORN_PAGE_LIMIT"] || 1000)
   PLAYBOX_PAGE_LIMIT = Number(process.env["PLAYBOX_PAGE_LIMIT"] || PAGE_LIMIT)
   CREATE_HISTORY_PAGE_LIMIT = Number(process.env["GENERATEPORN_CREATE_HISTORY_PAGE_LIMIT"] || 20)
@@ -64,9 +59,6 @@ export function reloadConfigFromEnv(): void {
   BACKUP_DIR = path.join(MEDIA_DIR, "_catalog_backups")
   THUMBNAIL_DIR = getThumbnailDir(MEDIA_DIR)
   AUTH_BROWSER_PROFILE_DIR = path.resolve(process.env["AUTH_BROWSER_PROFILE_DIR"] || path.join(MEDIA_DIR, "_auth_browser_profile"))
-  PLAYBOX_AUTH_BROWSER_PROFILE_DIR = path.resolve(
-    process.env["PLAYBOX_AUTH_BROWSER_PROFILE_DIR"] || path.join(MEDIA_DIR, "_playbox_auth_browser_profile"),
-  )
   PLAYBOX_AUTH_IMPORT_PATH = path.resolve(process.env["PLAYBOX_AUTH_IMPORT_PATH"] || path.join(MEDIA_DIR, "_playbox_auth_session.json"))
   PUBLIC_DIR = path.join(ROOT_DIR, "public")
   SYNC_DELAY_MS = Number(process.env["SYNC_DELAY_MS"] || 150)

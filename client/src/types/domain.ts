@@ -45,7 +45,6 @@ export type PlayboxAuthStatus = {
   authorizationExpiresAt: string | null
   authorizationSource: string | null
   email?: string | null
-  authBrowser: AuthBrowserStatus
   importedSession?: PlayboxImportedAuthStatus
 }
 

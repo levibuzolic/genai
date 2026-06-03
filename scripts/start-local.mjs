@@ -12,6 +12,8 @@ const env = {
   VITE_PORT: vitePort,
   REDIRECT_STATIC_TO_VITE: process.env["REDIRECT_STATIC_TO_VITE"] || "true",
 }
+await runCleanup()
+
 const children = [
   spawn(process.execPath, ["src/server.ts"], {
     cwd: rootDir,
@@ -48,5 +50,22 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
         child.kill(signal)
       }
     }
+  })
+}
+
+async function runCleanup() {
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["scripts/kill-local-servers.mjs", "all"], {
+      cwd: rootDir,
+      env,
+      stdio: "inherit",
+    })
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve()
+      } else {
+        reject(new Error(`Port cleanup failed with exit code ${code ?? "unknown"}.`))
+      }
+    })
   })
 }

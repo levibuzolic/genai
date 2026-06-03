@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "dev:wifi": "vite --host 0.0.0.0",
-    "start:api": "REDIRECT_STATIC_TO_VITE=false node src/server.ts",
+    "dev": "node scripts/kill-local-servers.mjs vite && vite --host 127.0.0.1",
+    "dev:wifi": "node scripts/kill-local-servers.mjs vite && vite --host 0.0.0.0",
+    "start:api": "node scripts/kill-local-servers.mjs api && REDIRECT_STATIC_TO_VITE=false node src/server.ts",
     "typecheck": "tsc -b",
     "lint": "oxlint .",
     "lint:fix": "oxlint . --fix",

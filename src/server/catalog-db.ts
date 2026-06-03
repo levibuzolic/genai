@@ -1392,13 +1392,74 @@ export function findCreationJob(id: string | null | undefined): CreationJob | nu
   return row ? creationJobFromRow(row) : null
 }
 
-export function listCreationJobs({ status = "all", limit = 80 }: { status?: string; limit?: number } = {}): CreationJob[] {
-  const rows = getCatalogOrm()
+function creationHistoryRows({ limit }: { limit: number }): CreationJobRow[] {
+  const activeRows = getCatalogOrm()
     .select()
     .from(creationJobs)
-    .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+    .where(inArray(creationJobs.status, CREATE_ACTIVE_STATUS_VALUES))
+    .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.submittedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
     .limit(limit)
     .all()
+  const finishedRows = getCatalogOrm()
+    .select()
+    .from(creationJobs)
+    .where(inArray(creationJobs.status, CREATE_TERMINAL_STATUS_VALUES))
+    .orderBy(desc(creationJobs.finishedAt), desc(creationJobs.submittedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
+    .limit(limit)
+    .all()
+
+  return [...activeRows, ...finishedRows]
+}
+
+function sortCreationHistoryRows(creations: CreationJob[]): CreationJob[] {
+  return creations.toSorted(compareCreationHistoryRows)
+}
+
+function compareCreationHistoryRows(left: CreationJob, right: CreationJob): number {
+  const activeDelta = Number(isActiveCreationStatus(right.status)) - Number(isActiveCreationStatus(left.status))
+  if (activeDelta !== 0) return activeDelta
+
+  const timeDelta = creationHistoryTimeMs(right) - creationHistoryTimeMs(left)
+  if (timeDelta !== 0) return timeDelta
+
+  return left.id.localeCompare(right.id)
+}
+
+function creationHistoryTimeMs(creation: CreationJob): number {
+  const value = isActiveCreationStatus(creation.status)
+    ? creation.updatedAt || creation.submittedAt || creation.createdLocallyAt || creation.createdAtIso || creation.createdAt
+    : creation.finishedAt ||
+      creation.createdAtIso ||
+      creation.submittedAt ||
+      creation.createdLocallyAt ||
+      creation.updatedAt ||
+      creation.createdAt
+
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0
+  if (typeof value !== "string" || !value) return 0
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+export function listCreationJobs({ status = "all", limit = 80 }: { status?: string; limit?: number } = {}): CreationJob[] {
+  const rows =
+    status === "active"
+      ? getCatalogOrm()
+          .select()
+          .from(creationJobs)
+          .where(inArray(creationJobs.status, CREATE_ACTIVE_STATUS_VALUES))
+          .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.submittedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
+          .limit(limit)
+          .all()
+      : status === "finished"
+        ? getCatalogOrm()
+            .select()
+            .from(creationJobs)
+            .where(inArray(creationJobs.status, CREATE_TERMINAL_STATUS_VALUES))
+            .orderBy(desc(creationJobs.finishedAt), desc(creationJobs.submittedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
+            .limit(limit)
+            .all()
+        : creationHistoryRows({ limit })
   const creations = rows.map(creationJobFromRow)
   const filtered = creations.filter((row) => {
     if (status === "active") return isActiveCreationStatus(row.status)
@@ -1406,11 +1467,7 @@ export function listCreationJobs({ status = "all", limit = 80 }: { status?: stri
     return true
   })
 
-  return filtered.toSorted((a, b) => {
-    const activeDelta = Number(isActiveCreationStatus(b.status)) - Number(isActiveCreationStatus(a.status))
-    if (activeDelta) return activeDelta
-    return String(b.updatedAt || b.createdLocallyAt || "").localeCompare(String(a.updatedAt || a.createdLocallyAt || ""))
-  })
+  return sortCreationHistoryRows(filtered).slice(0, limit)
 }
 
 export function listCreationJobSummaries({ status = "all", limit = 80 }: { status?: string; limit?: number } = {}): CreationJob[] {
@@ -1452,7 +1509,7 @@ export function listCreationJobSummaries({ status = "all", limit = 80 }: { statu
           .select(selection)
           .from(creationJobs)
           .where(inArray(creationJobs.status, CREATE_ACTIVE_STATUS_VALUES))
-          .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+          .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.submittedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
           .limit(limit)
           .all()
       : status === "finished"
@@ -1460,7 +1517,7 @@ export function listCreationJobSummaries({ status = "all", limit = 80 }: { statu
             .select(selection)
             .from(creationJobs)
             .where(inArray(creationJobs.status, CREATE_TERMINAL_STATUS_VALUES))
-            .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+            .orderBy(desc(creationJobs.finishedAt), desc(creationJobs.submittedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
             .limit(limit)
             .all()
         : status === "catalog-projection"
@@ -1468,15 +1525,30 @@ export function listCreationJobSummaries({ status = "all", limit = 80 }: { statu
               .select(selection)
               .from(creationJobs)
               .where(inArray(creationJobs.status, [...CREATE_ACTIVE_STATUS_VALUES, ...CREATE_TERMINAL_STATUS_VALUES]))
-              .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
+              .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
               .limit(limit)
               .all()
-          : getCatalogOrm()
-              .select(selection)
-              .from(creationJobs)
-              .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.createdLocallyAt))
-              .limit(limit)
-              .all()
+          : [
+              ...getCatalogOrm()
+                .select(selection)
+                .from(creationJobs)
+                .where(inArray(creationJobs.status, CREATE_ACTIVE_STATUS_VALUES))
+                .orderBy(desc(creationJobs.updatedAt), desc(creationJobs.submittedAt), desc(creationJobs.createdLocallyAt), creationJobs.id)
+                .limit(limit)
+                .all(),
+              ...getCatalogOrm()
+                .select(selection)
+                .from(creationJobs)
+                .where(inArray(creationJobs.status, CREATE_TERMINAL_STATUS_VALUES))
+                .orderBy(
+                  desc(creationJobs.finishedAt),
+                  desc(creationJobs.submittedAt),
+                  desc(creationJobs.createdLocallyAt),
+                  creationJobs.id,
+                )
+                .limit(limit)
+                .all(),
+            ]
   const creations = rows.map((row) =>
     normalizeCreationJob({
       ...row,
@@ -1490,11 +1562,7 @@ export function listCreationJobSummaries({ status = "all", limit = 80 }: { statu
     return true
   })
 
-  return filtered.toSorted((a, b) => {
-    const activeDelta = Number(isActiveCreationStatus(b.status)) - Number(isActiveCreationStatus(a.status))
-    if (activeDelta) return activeDelta
-    return String(b.updatedAt || b.createdLocallyAt || "").localeCompare(String(a.updatedAt || a.createdLocallyAt || ""))
-  })
+  return sortCreationHistoryRows(filtered).slice(0, limit)
 }
 
 export function getPendingCreationCountsByAccount(): Record<string, number> {

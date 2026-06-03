@@ -186,7 +186,6 @@ export const MediaCard = React.memo(function MediaCard({
             .filter(Boolean)
             .join(" · ")}
         </div>
-        <p className="prompt">{item.prompt || "No prompt text"}</p>
         <div className="cardFooter">
           <div className="cardActions">
             {isImage && (

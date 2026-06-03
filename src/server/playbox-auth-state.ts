@@ -1,13 +1,5 @@
 import { getJwtExpiration, normalizeAuthorization } from "./auth-state.ts"
-import {
-  AUTH_BROWSER_REFRESH_MS,
-  PLAYBOX_API_BASE_URL,
-  PLAYBOX_APP_URL,
-  PLAYBOX_AUTH_BROWSER_PROFILE_DIR,
-  PLAYBOX_CHROME_PATH,
-} from "./config.ts"
 import { httpError } from "./errors.ts"
-import { createPlayboxChromeAuthBrowserService } from "./playbox-chrome-auth-browser.ts"
 
 type PlayboxAuthState = {
   authorization: string | null
@@ -25,21 +17,17 @@ export const playboxAuthState: PlayboxAuthState = {
   email: null,
 }
 
-export let playboxAuthBrowser = createPlayboxAuthBrowser()
-
 export function resetPlayboxAuthRuntimeState(): void {
-  playboxAuthBrowser.clearRefreshTimer()
   playboxAuthState.authorization = normalizeAuthorization(process.env["PLAYBOX_AUTHORIZATION"])
   playboxAuthState.expiresAt = getJwtExpiration(process.env["PLAYBOX_AUTHORIZATION"])
   playboxAuthState.receivedAt = process.env["PLAYBOX_AUTHORIZATION"] ? new Date().toISOString() : null
   playboxAuthState.source = process.env["PLAYBOX_AUTHORIZATION"] ? "env" : null
   playboxAuthState.email = null
-  playboxAuthBrowser = createPlayboxAuthBrowser()
 }
 
 export function acceptPlayboxAuthorization(
   value: unknown,
-  source = "browser",
+  source = "curl-import",
   session: { email?: string | null } = {},
 ): { authorization: string; expiresAt: string; source: string; email: string | null } {
   const authorization = normalizeAuthorization(value)
@@ -92,23 +80,7 @@ export function getPlayboxAuthStatus(): Record<string, unknown> {
     authorizationExpiresAt: playboxAuthState.expiresAt,
     authorizationSource: playboxAuthState.source,
     email: playboxAuthState.email,
-    authBrowser: playboxAuthBrowser.getStatus(),
   }
-}
-
-function createPlayboxAuthBrowser(): ReturnType<typeof createPlayboxChromeAuthBrowserService> {
-  return createPlayboxChromeAuthBrowserService({
-    profileDir: PLAYBOX_AUTH_BROWSER_PROFILE_DIR,
-    loginUrl: PLAYBOX_APP_URL,
-    usersMeUrl: getUsersMeUrl(),
-    chromePath: PLAYBOX_CHROME_PATH,
-    refreshIntervalMs: AUTH_BROWSER_REFRESH_MS,
-    onToken: (token, source, session) => acceptPlayboxAuthorization(token, source, session),
-  })
-}
-
-function getUsersMeUrl(): string {
-  return `${PLAYBOX_API_BASE_URL.replace(/\/+$/, "")}/users/me-new`
 }
 
 function normalizePlayboxEmail(value: unknown): string | null {

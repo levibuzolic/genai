@@ -12,7 +12,8 @@
 
 ## Commands
 
-- `pnpm dev` starts the Vite frontend dev server with API/media proxying.
+- `pnpm dev` starts only the Vite frontend dev server with API/media proxying.
+- `pnpm start` starts the full local app: backend API/static server plus Vite frontend server.
 - `pnpm typecheck` runs `tsc -b`.
 - `pnpm lint` runs Oxlint for frontend and backend code.
 - `pnpm format:check` checks Oxfmt formatting; `pnpm format` writes formatting changes.
@@ -23,6 +24,19 @@
 
 Do not rely on Vite alone for type safety. The build intentionally includes `pnpm typecheck`.
 
+## Server Start/Stop/Debug
+
+- For real UI/browser smoke work, run `pnpm start`, not `pnpm dev`. `pnpm start` runs `scripts/start-local.mjs`, which starts `src/server.ts` on `PORT` (default `6177`) and Vite on `VITE_PORT` (default `6173`).
+- `pnpm dev` is useful only when a backend is already running. A brief Vite proxy error can appear while `pnpm start` is still bringing the API up; persistent `connect ECONNREFUSED 127.0.0.1:6177` errors mean the frontend is up but the API server is not.
+- Start scripts clean stale listeners before binding: `pnpm start`/`pnpm start:wifi` clear API and Vite ports, `pnpm start:api` clears the API port, and `pnpm dev`/`pnpm dev:wifi` clear only the Vite port.
+- Open the app at `http://localhost:6173` or `http://127.0.0.1:6173`. The backend prints `Media library running at ...`, `API server listening at ...`, and `Media directory: ...` when it is ready.
+- Stop a foreground `pnpm start` with `Ctrl-C`/SIGINT. The start script forwards the signal to both child processes; do not leave Vite or `src/server.ts` running in the background after a smoke test.
+- If ports still look stuck, check listeners with `lsof -nP -iTCP:6173 -iTCP:6177 -sTCP:LISTEN`. Prefer stopping the foreground session you started over killing unrelated processes.
+- Use `pnpm start:api` only when you intentionally want just the backend/static server. It sets no Vite process; direct app visits may redirect to Vite unless `REDIRECT_STATIC_TO_VITE=false`.
+- Background sync starts automatically under the CLI server. For quieter debugging, set `AUTO_SYNC_ENABLED=false` before starting, or expect sync/download log noise while testing UI flows.
+- Quick API probes: `curl http://localhost:6177/api/config`, `curl http://localhost:6177/api/sync/status`, and `curl "http://localhost:6177/api/items?pageSize=1"` verify the backend independently of Vite.
+- Vite/build can rewrite hashed files in `public/` after `pnpm build`. Do not keep generated `public/index.html` asset-hash churn unless the task is intentionally updating built assets.
+
 ## Auth Browser
 
 - Backend-owned browser auth lives in `src/auth-browser.ts` and is wired through `/api/auth/browser/*` routes.
@@ -30,7 +44,7 @@ Do not rely on Vite alone for type safety. The build intentionally includes `pnp
 - After login, the server reuses the same persistent Chrome profile headlessly to refresh Clerk tokens.
 - The default profile path is `MEDIA_DIR/_auth_browser_profile`; override with `AUTH_BROWSER_PROFILE_DIR`.
 - Tokens stay in memory only. Treat the browser profile as sensitive because it contains session state.
-- Playbox can also import browser cookies from a copied cURL request; direct token forwarding endpoints are no longer supported.
+- Playbox uses imported browser cookies from a copied cURL request; direct token forwarding and Playbox browser-auth endpoints are no longer supported.
 
 ## Background Sync
 

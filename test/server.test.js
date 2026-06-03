@@ -169,6 +169,26 @@ test("server does not expose direct token capture endpoints", async () => {
   }
 })
 
+test("server does not expose Playbox browser auth endpoints", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-playbox-browser-auth-endpoints-"))
+  const imported = await importServer(mediaDir)
+  const listener = await listenOnRandomPort(imported.server)
+
+  try {
+    for (const route of [
+      "/api/playbox/auth/browser/status",
+      "/api/playbox/auth/browser/connect",
+      "/api/playbox/auth/browser/refresh",
+      "/api/playbox/auth/browser/disconnect",
+    ]) {
+      const response = await requestRaw(listener.port, route, {}, route.endsWith("/status") ? "GET" : "POST")
+      assert.equal(response.statusCode, 404)
+    }
+  } finally {
+    await listener.close()
+  }
+})
+
 test("primary auth browser account is listed alongside added accounts", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-auth-accounts-"))
   const server = await importServer(mediaDir)

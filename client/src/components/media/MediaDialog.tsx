@@ -1,4 +1,22 @@
-import { ChevronLeft, ChevronRight, Copy, ExternalLink, Heart, ImageIcon, Play, RotateCcw, Trash2, WandSparkles, X } from "lucide-react"
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Copy,
+  Cpu,
+  ExternalLink,
+  FileType,
+  HardDrive,
+  Heart,
+  ImageIcon,
+  Play,
+  RotateCcw,
+  Timer,
+  Trash2,
+  WandSparkles,
+  X,
+} from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
@@ -8,6 +26,15 @@ import { isFailedMediaItem, isImageItem, mediaUrlForItem } from "@/lib/media"
 import type { CatalogItem } from "@/types/domain"
 
 import { MediaPreview } from "./MediaPreview"
+
+function titleCase(value?: string | null): string {
+  if (!value) return "Media"
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ")
+}
 
 export function MediaDialog({
   item,
@@ -53,6 +80,20 @@ export function MediaDialog({
   const dialogOpen = open && Boolean(item)
   const modelId = item ? (item.modelId ?? item.model_id) : null
   const timeToGenerate = item?.timeToGenerateMs ? formatDuration(item.timeToGenerateMs / 1000) : null
+  const mediaKind = item ? titleCase(item.type) : "Media"
+  const statusLabel = item ? titleCase(isFailed ? "failed" : item.status || (item.localFile ? "downloaded" : "missing")) : ""
+  const storageLabel = item?.localFile ? "Local" : "Not local"
+  const providerLabel = isPlaybox ? "Playbox" : item?.provider ? titleCase(item.provider) : "Generated"
+  const detailFacts = item
+    ? [
+        { Icon: CalendarDays, label: "Created", value: formatDate(item.createdAtIso) },
+        { Icon: Clock3, label: "Duration", value: formatDuration(item.duration) },
+        { Icon: HardDrive, label: "Size", value: item.size ? formatBytes(item.size) : "" },
+        { Icon: Cpu, label: "Model", value: modelId },
+        { Icon: Timer, label: "Generated", value: timeToGenerate },
+        { Icon: FileType, label: "Source", value: item.sourceKind ? titleCase(item.sourceKind) : providerLabel },
+      ].filter((fact) => fact.value)
+    : []
 
   return (
     <Dialog open={dialogOpen} onOpenChange={onOpenChange}>
@@ -92,7 +133,16 @@ export function MediaDialog({
                 onVideoMutedChange={onVideoMutedChange}
               />
               <div className="detailPanel">
-                <div className="detailPanelHeader">
+                <header className="detailPanelHeader">
+                  <div className="detailHeading">
+                    <div className="detailKicker" aria-label="Media status">
+                      <span>{mediaKind}</span>
+                      <span>{statusLabel}</span>
+                      <span>{storageLabel}</span>
+                    </div>
+                    <h2 className="detailTitleText">{mediaKind} Details</h2>
+                    <p className="detailSubtitle">{[formatDate(item.createdAtIso), providerLabel, item.id].filter(Boolean).join(" · ")}</p>
+                  </div>
                   <Button
                     id="detailCloseButton"
                     size="icon-sm"
@@ -103,9 +153,45 @@ export function MediaDialog({
                   >
                     <X />
                   </Button>
+                </header>
+                <div className="dialogActions" aria-label="Media actions">
+                  <ButtonGroup className="detailActionGroup detailActionPrimary" aria-label="Create actions">
+                    {canUsePrompt && (
+                      <Button id="detailUsePromptButton" size="sm" onClick={() => onUsePrompt(item)}>
+                        <WandSparkles />
+                        Use prompt
+                      </Button>
+                    )}
+                    {canTryAgain && (
+                      <Button id="detailTryAgainButton" size="sm" variant="outline" onClick={() => onTryAgain(item)}>
+                        <RotateCcw />
+                        Try again
+                      </Button>
+                    )}
+                    {canUseImage && (
+                      <>
+                        <Button id="detailCreateButton" size="sm" variant="outline" onClick={() => onCreate(item)}>
+                          <ImageIcon />
+                          Edit image
+                        </Button>
+                        <Button id="detailAnimateButton" size="sm" variant="outline" onClick={() => onAnimate(item)}>
+                          <Play />
+                          Custom video
+                        </Button>
+                      </>
+                    )}
+                    {mediaUrl && !isPlaybox && (
+                      <Button id="detailOpenLink" className="openLink" size="sm" variant="outline" asChild>
+                        <a href={mediaUrl} target="_blank" rel="noreferrer">
+                          <ExternalLink />
+                          Open
+                        </a>
+                      </Button>
+                    )}
+                  </ButtonGroup>
                 </div>
                 <div className="detailPanelContent">
-                  <section>
+                  <section className="detailSection detailPromptSection">
                     <div className="detailSectionHeader">
                       <h3>Prompt</h3>
                       <Button
@@ -124,87 +210,47 @@ export function MediaDialog({
                       {item.prompt || "No prompt text"}
                     </p>
                   </section>
-                  {modelId && (
-                    <section id="detailModelSection">
-                      <h3>Model ID</h3>
-                      <p id="detailModelId" className="detailText">
-                        {modelId}
-                      </p>
-                    </section>
-                  )}
-                  {timeToGenerate && (
-                    <section id="detailTimeToGenerateSection">
-                      <h3>Time to generate</h3>
-                      <p id="detailTimeToGenerate" className="detailText">
-                        {timeToGenerate}
-                      </p>
+                  {detailFacts.length > 0 && (
+                    <section className="detailSection" aria-label="Media facts">
+                      <div className="detailFactGrid">
+                        {detailFacts.map(({ Icon, label, value }) => (
+                          <div className="detailFact" key={label}>
+                            <Icon aria-hidden="true" />
+                            <span>{label}</span>
+                            <strong>{value}</strong>
+                          </div>
+                        ))}
+                      </div>
                     </section>
                   )}
                   {item.negativePrompt && (
-                    <section id="negativePromptSection">
+                    <section id="negativePromptSection" className="detailSection">
                       <h3>Negative prompt</h3>
                       <p id="detailNegativePrompt" className="detailText">
                         {item.negativePrompt}
                       </p>
                     </section>
                   )}
-                  <div className="dialogActions" aria-label="Media actions">
-                    <ButtonGroup className="detailActionGroup" aria-label="Create actions">
-                      {canUsePrompt && (
-                        <Button id="detailUsePromptButton" size="sm" onClick={() => onUsePrompt(item)}>
-                          <WandSparkles />
-                          Use prompt
-                        </Button>
-                      )}
-                      {canTryAgain && (
-                        <Button id="detailTryAgainButton" size="sm" variant="outline" onClick={() => onTryAgain(item)}>
-                          <RotateCcw />
-                          Try again
-                        </Button>
-                      )}
-                      {canUseImage && (
-                        <>
-                          <Button id="detailCreateButton" size="sm" variant="outline" onClick={() => onCreate(item)}>
-                            <ImageIcon />
-                            Create
-                          </Button>
-                          <Button id="detailAnimateButton" size="sm" variant="outline" onClick={() => onAnimate(item)}>
-                            <Play />
-                            Animate
-                          </Button>
-                        </>
-                      )}
-                      {mediaUrl && !isPlaybox && (
-                        <Button id="detailOpenLink" className="openLink" size="sm" variant="outline" asChild>
-                          <a href={mediaUrl} target="_blank" rel="noreferrer">
-                            <ExternalLink />
-                            Open
-                          </a>
-                        </Button>
-                      )}
-                    </ButtonGroup>
-
-                    <ButtonGroup className="detailActionGroup detailActionSecondary" aria-label="Copy actions">
-                      <Button id="detailCopyIdButton" size="sm" variant="ghost" onClick={() => onCopy(item.id, "ID copied")}>
-                        ID
+                  <ButtonGroup className="detailActionGroup detailActionSecondary" aria-label="Copy actions">
+                    <Button id="detailCopyIdButton" size="sm" variant="ghost" onClick={() => onCopy(item.id, "ID copied")}>
+                      ID
+                    </Button>
+                    {item.outputUrl && (
+                      <Button id="detailCopyUrlButton" size="sm" variant="ghost" onClick={() => onCopy(item.outputUrl, "URL copied")}>
+                        URL
                       </Button>
-                      {item.outputUrl && (
-                        <Button id="detailCopyUrlButton" size="sm" variant="ghost" onClick={() => onCopy(item.outputUrl, "URL copied")}>
-                          URL
-                        </Button>
-                      )}
-                      {!isFailed && (
-                        <Button id="detailFavoriteButton" size="sm" variant="ghost" onClick={() => onToggleFavorite(item)}>
-                          <Heart className={item.favorited ? "fill-current" : undefined} />
-                          {item.favorited ? "Unfavorite" : "Favorite"}
-                        </Button>
-                      )}
-                      <Button id="detailDeleteRemoteButton" size="sm" variant="ghost" onClick={() => onDeleteRemote(item)}>
-                        <Trash2 />
-                        Delete
+                    )}
+                    {!isFailed && (
+                      <Button id="detailFavoriteButton" size="sm" variant="ghost" onClick={() => onToggleFavorite(item)}>
+                        <Heart className={item.favorited ? "fill-current" : undefined} />
+                        {item.favorited ? "Unfavorite" : "Favorite"}
                       </Button>
-                    </ButtonGroup>
-                  </div>
+                    )}
+                    <Button id="detailDeleteRemoteButton" size="sm" variant="ghost" onClick={() => onDeleteRemote(item)}>
+                      <Trash2 />
+                      Delete
+                    </Button>
+                  </ButtonGroup>
                 </div>
                 <div className="detailNav" aria-label="Gallery navigation">
                   <Button

@@ -1263,6 +1263,71 @@ test("creation history persists submitted jobs across server imports", async () 
   }
 })
 
+test("creation history API orders active first and completed jobs by finish time", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-history-order-"))
+  const server = await importServer(mediaDir)
+
+  server.saveCreationJob({
+    id: "old-refreshed",
+    jobId: "old-refreshed",
+    status: "done",
+    modeId: "custom-video",
+    modeLabel: "Custom Video",
+    params: { prompt: "old refreshed" },
+    createdAtIso: "2026-05-29T23:42:47.000Z",
+    createdLocallyAt: "2026-05-29T23:42:23.695Z",
+    submittedAt: "2026-05-29T23:42:23.695Z",
+    updatedAt: "2026-06-03T11:39:52.393Z",
+    finishedAt: "2026-05-29T23:51:17.066Z",
+  })
+  server.saveCreationJob({
+    id: "newly-finished",
+    jobId: "newly-finished",
+    status: "done",
+    modeId: "custom-video",
+    modeLabel: "Custom Video",
+    params: { prompt: "newly finished" },
+    createdAtIso: "2026-06-03T11:23:24.000Z",
+    createdLocallyAt: "2026-06-03T10:55:05.630Z",
+    submittedAt: "2026-06-03T11:23:23.030Z",
+    updatedAt: "2026-06-03T11:33:33.273Z",
+    finishedAt: "2026-06-03T11:29:52.086Z",
+  })
+  server.saveCreationJob({
+    id: "active-pending",
+    jobId: "active-pending",
+    status: "pending",
+    modeId: "custom-video",
+    modeLabel: "Custom Video",
+    params: { prompt: "active pending" },
+    createdLocallyAt: "2026-06-03T10:55:14.880Z",
+    submittedAt: "2026-06-03T11:33:25.917Z",
+    updatedAt: "2026-06-03T11:33:31.929Z",
+  })
+  server.saveCreationJob({
+    id: "active-queued",
+    status: "queued",
+    modeId: "custom-video",
+    modeLabel: "Custom Video",
+    params: { prompt: "active queued" },
+    createdLocallyAt: "2026-06-03T11:37:53.687Z",
+    submittedAt: "2026-06-03T11:37:53.687Z",
+    updatedAt: "2026-06-03T11:37:53.687Z",
+  })
+
+  const history = await server.getCreations(new URLSearchParams())
+  const finished = await server.getCreations(new URLSearchParams("status=finished"))
+
+  assert.deepEqual(
+    history.creations.slice(0, 4).map((creation) => creation.id),
+    ["active-queued", "active-pending", "newly-finished", "old-refreshed"],
+  )
+  assert.deepEqual(
+    finished.creations.slice(0, 2).map((creation) => creation.id),
+    ["newly-finished", "old-refreshed"],
+  )
+})
+
 test("failed creation submissions are recorded with reusable settings", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-history-failed-"))
   const originalFetch = globalThis.fetch

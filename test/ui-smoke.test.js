@@ -51,7 +51,7 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
       timeout: 5000,
     })
     await page.evaluate(() => window.scrollTo(0, 0))
-    await page.waitForFunction(() => document.querySelector(".card")?.textContent?.includes("Fixture prompt 0"), { timeout: 5000 })
+    await page.waitForSelector(".card .copyPromptButton:not([disabled])", { timeout: 5000 })
     assert.equal(await page.locator("#emptyState").count(), 0)
     assert.deepEqual(await visibleTopActions(page), ["Sync", "View", "Settings"])
     assert.deepEqual(await page.locator(".summaryCard span").allTextContents(), [
@@ -69,7 +69,9 @@ test("browser UI smoke covers filters, menus, lazy media, and stable card render
     await page.waitForSelector(".card", { timeout: 10000 })
     await page.locator("#playboxViewButton").click()
     await page.waitForFunction(() => document.querySelector("#libraryStatus")?.textContent === "1 of 1 loaded", { timeout: 5000 })
-    assert.equal(await page.locator(".card").first().locator(".prompt").textContent(), "Playbox fixture prompt")
+    assert.equal(await page.locator(".card").first().locator(".prompt").count(), 0)
+    await page.locator(".copyPromptButton").first().click()
+    assert.equal(await page.evaluate(() => navigator.clipboard.readText()), "Playbox fixture prompt")
     assert.equal(page.url(), `${baseUrl}/playbox`)
     await page.locator("#libraryViewButton").click()
     await page.waitForFunction(() => document.querySelector("#libraryStatus")?.textContent === "48 of 51 loaded", { timeout: 5000 })

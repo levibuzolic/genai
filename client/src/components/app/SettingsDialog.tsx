@@ -34,9 +34,6 @@ export function SettingsDialog({
   onAuthConnect,
   onAuthRefresh,
   onAuthDisconnect,
-  onPlayboxAuthConnect,
-  onPlayboxAuthRefresh,
-  onPlayboxAuthDisconnect,
   onImportPlayboxCurl,
   onRefreshPlayboxImport,
   onClearPlayboxImport,
@@ -66,9 +63,6 @@ export function SettingsDialog({
   onAuthConnect: () => void
   onAuthRefresh: () => void
   onAuthDisconnect: () => void
-  onPlayboxAuthConnect: () => void
-  onPlayboxAuthRefresh: () => void
-  onPlayboxAuthDisconnect: () => void
   onImportPlayboxCurl: (curl: string) => void
   onRefreshPlayboxImport: () => void
   onClearPlayboxImport: () => void
@@ -88,15 +82,9 @@ export function SettingsDialog({
   const authorizationExpiry = config?.authorizationExpiresAt || authBrowser?.expiresAt
   const accounts = config?.authAccounts || []
   const playbox = config?.playbox
-  const playboxAuthBrowser = playbox?.authBrowser
   const playboxImportedSession = playbox?.importedSession
   const hasPlayboxAuthorization = Boolean(playbox?.hasAuthorization)
-  const playboxAuthStatus = playboxAuthBrowser?.status || (hasPlayboxAuthorization ? "connected" : "missing")
-  const playboxAuthMessage =
-    playboxAuthBrowser?.message || (hasPlayboxAuthorization ? "Playbox token is active." : "Connect Playbox to sync.")
-  const playboxAuthorizationExpiry = playbox?.authorizationExpiresAt || playboxAuthBrowser?.expiresAt
-  const playboxConnectLabel =
-    hasPlayboxAuthorization || playboxAuthBrowser?.hasProfile || playboxAuthBrowser?.lastError ? "Reconnect Playbox" : "Connect Playbox"
+  const playboxAuthorizationExpiry = playbox?.authorizationExpiresAt
   const [accountEmailDraft, setAccountEmailDraft] = React.useState("")
   const [playboxCurlDraft, setPlayboxCurlDraft] = React.useState("")
   const [generationLimitDraft, setGenerationLimitDraft] = React.useState(() => String(config?.mediaGenerationConcurrencyLimit || 2))
@@ -179,39 +167,6 @@ export function SettingsDialog({
               <div className="settingsAccountStatus">
                 <div className="min-w-0">
                   <div className="settingsStatusHeading">
-                    <span>Playbox browser</span>
-                    <Badge variant={getAuthBadgeVariant(playboxAuthStatus, hasPlayboxAuthorization, playboxAuthBrowser?.lastError)}>
-                      {authActionPending ? "working" : playboxAuthStatus.replaceAll("-", " ")}
-                    </Badge>
-                  </div>
-                  <p>{playboxAuthMessage}</p>
-                  <p>
-                    {playboxAuthorizationExpiry ? `Token until ${formatTime(playboxAuthorizationExpiry)}` : "No active token"}
-                    {playboxAuthBrowser?.lastRefreshAt ? ` · refreshed ${formatTime(playboxAuthBrowser.lastRefreshAt)}` : ""}
-                  </p>
-                  {playboxAuthBrowser?.lastError && <p className="text-red-300">{playboxAuthBrowser.lastError}</p>}
-                </div>
-              </div>
-              <ButtonGroup className="settingsActionGrid">
-                <Button variant="outline" disabled={authActionPending} onClick={onPlayboxAuthConnect}>
-                  <KeyRound />
-                  {playboxConnectLabel}
-                </Button>
-                <Button variant="outline" disabled={authActionPending || !playboxAuthBrowser?.hasProfile} onClick={onPlayboxAuthRefresh}>
-                  <RefreshCw />
-                  Refresh Playbox
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={authActionPending || !playboxAuthBrowser?.browserOpen}
-                  onClick={onPlayboxAuthDisconnect}
-                >
-                  Close Playbox
-                </Button>
-              </ButtonGroup>
-              <div className="settingsAccountStatus">
-                <div className="min-w-0">
-                  <div className="settingsStatusHeading">
                     <span>Imported session</span>
                     <Badge
                       variant={
@@ -221,6 +176,8 @@ export function SettingsDialog({
                       {playboxImportedSession?.hasSession ? "available" : "missing"}
                     </Badge>
                   </div>
+                  <p>{hasPlayboxAuthorization ? "Playbox token is active." : "No active Playbox token."}</p>
+                  <p>{playboxAuthorizationExpiry ? `Token until ${formatTime(playboxAuthorizationExpiry)}` : "No active token"}</p>
                   <p>
                     {playboxImportedSession?.hasSession
                       ? `${playboxImportedSession.cookieCount.toLocaleString()} cookies captured`

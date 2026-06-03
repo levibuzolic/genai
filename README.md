@@ -88,10 +88,7 @@ Useful settings:
 - `GENERATEPORN_PAGE_LIMIT`: max API pages to scan
 - `GENERATEPORN_APP_URL`: visible/headless auth browser URL, defaults to `https://app.generateporn.ai/`
 - `AUTH_BROWSER_PROFILE_DIR`: persistent auth browser profile directory, defaults to `MEDIA_DIR/_auth_browser_profile`
-- `PLAYBOX_APP_URL`: visible Playbox auth URL, defaults to `https://www.playbox.com/collection`
-- `PLAYBOX_AUTH_BROWSER_PROFILE_DIR`: persistent Playbox Chrome profile directory, defaults to `MEDIA_DIR/_playbox_auth_browser_profile`
 - `PLAYBOX_AUTH_IMPORT_PATH`: imported Playbox cURL session file, defaults to `MEDIA_DIR/_playbox_auth_session.json`
-- `PLAYBOX_CHROME_PATH`: optional path to the Chrome executable used for Playbox auth
 - `AUTH_BROWSER_REFRESH_MS`: headless refresh interval, defaults to 15 minutes
 - `AUTO_SYNC_ENABLED`: run background incremental syncs while the server is running, defaults to `true`
 - `AUTO_SYNC_STARTUP_DELAY_MS`: delay before the boot sync, defaults to 10 seconds
@@ -110,13 +107,11 @@ Prefer the in-app auth browser for auth. Static tokens expire quickly.
 
 The persisted browser profile survives server restarts as long as `AUTH_BROWSER_PROFILE_DIR` is not deleted. On startup, the server attempts a headless refresh from that profile. If the saved session can no longer refresh, use **Connect account** again.
 
-Playbox auth uses a dedicated server-owned Chrome profile instead of the Playwright auth browser. The server opens normal Chrome visibly, you complete Playbox/Cloudflare/login there, and the backend connects to that Chrome through the Chrome DevTools Protocol to capture the current Playbox access token. Playbox refreshes may briefly reopen visible Chrome because headless refresh is not reliable behind its bot checks.
-
 The local server keeps API tokens in memory only. It does not write bearer tokens to `.env`, `media/catalog.sqlite`, SQLite exports/backups, or the persisted browser profile directory. The browser profile contains normal browser session state and should be treated as sensitive.
 
 ## Playbox cURL Auth Import
 
-If Playbox's Cloudflare check works in your normal Chrome profile but not in the server-owned auth window, import one authenticated API request from Chrome:
+Playbox auth is handled by importing one authenticated API request from your normal Chrome profile:
 
 1. Start the local app.
 2. Open `https://www.playbox.com/collection` in your normal Chrome profile and sign in.

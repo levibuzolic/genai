@@ -18,6 +18,15 @@ const failedItem = {
   downloadError: "Generation failed due to timeout",
 } satisfies CatalogItem
 
+const imageItem = {
+  id: "image-item-1",
+  type: "image",
+  status: "done",
+  prompt: "source portrait",
+  localFile: "renders/source.png",
+  createdAtIso: "2026-05-28T01:00:00.000Z",
+} satisfies CatalogItem
+
 describe("MediaDialog", () => {
   it("hides favorite action for failed items while keeping other actions", () => {
     render(
@@ -80,6 +89,38 @@ describe("MediaDialog", () => {
     expect(screen.queryByRole("link", { name: /open/i })).toBeNull()
   })
 
+  it("offers image detail shortcuts for edit and custom video", () => {
+    const onCreate = vi.fn<(item: CatalogItem) => void>()
+    const onAnimate = vi.fn<(item: CatalogItem) => void>()
+
+    render(
+      <MediaDialog
+        item={imageItem}
+        open
+        onOpenChange={vi.fn<(open: boolean) => void>()}
+        onCopy={vi.fn<(value: string | null | undefined, label: string) => void>()}
+        onCreate={onCreate}
+        onAnimate={onAnimate}
+        onUsePrompt={vi.fn<(item: CatalogItem) => void>()}
+        onTryAgain={vi.fn<(item: CatalogItem) => void>()}
+        onDeleteRemote={vi.fn<(item: CatalogItem) => void>()}
+        onToggleFavorite={vi.fn<(item: CatalogItem) => void>()}
+        previousItem={null}
+        nextItem={null}
+        onPrevious={vi.fn<() => void>()}
+        onNext={vi.fn<() => void>()}
+        videoMuted
+        onVideoMutedChange={vi.fn<(muted: boolean) => void>()}
+      />,
+    )
+
+    screen.getByRole("button", { name: /edit image/i }).click()
+    screen.getByRole("button", { name: /custom video/i }).click()
+
+    expect(onCreate).toHaveBeenCalledWith(imageItem)
+    expect(onAnimate).toHaveBeenCalledWith(imageItem)
+  })
+
   it("offers try again for app-created media", () => {
     const onTryAgain = vi.fn<(item: CatalogItem) => void>()
     const item = {
@@ -91,6 +132,8 @@ describe("MediaDialog", () => {
       createModeId: "custom-video",
       createParams: { prompt: "animate this", quality: "720p-4" },
       sourceKind: "catalog",
+      modelId: "video-model",
+      timeToGenerateMs: 62000,
       sourceItemId: "source-image-1",
     } satisfies CatalogItem
 
@@ -117,6 +160,12 @@ describe("MediaDialog", () => {
 
     screen.getByRole("button", { name: /try again/i }).click()
 
+    expect(screen.queryByRole("button", { name: /edit image/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /custom video/i })).toBeNull()
+    expect(screen.getByText("Video Details")).toBeTruthy()
+    expect(screen.getByText("Catalog")).toBeTruthy()
+    expect(screen.getByText("video-model")).toBeTruthy()
+    expect(screen.getByText("1:02")).toBeTruthy()
     expect(onTryAgain).toHaveBeenCalledWith(item)
   })
 })

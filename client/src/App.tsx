@@ -294,29 +294,6 @@ function App() {
     }
   }
 
-  async function runPlayboxAuthBrowserAction(action: "connect" | "refresh" | "disconnect") {
-    if (authActionPending) return
-    setAuthActionPending(true)
-    const path =
-      action === "connect"
-        ? "/api/playbox/auth/browser/connect"
-        : action === "refresh"
-          ? "/api/playbox/auth/browser/refresh"
-          : "/api/playbox/auth/browser/disconnect"
-    try {
-      const status = await fetchJson<{ message: string }>(path, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(action === "disconnect" ? { deleteProfile: false } : {}),
-      })
-      setCopyFlash(status.message)
-      window.setTimeout(() => setCopyFlash(""), 1800)
-      await reloadConfig()
-    } finally {
-      setAuthActionPending(false)
-    }
-  }
-
   async function importPlayboxCurl(curl: string) {
     if (settingsActionPending) return
     setSettingsActionPending(true)
@@ -445,9 +422,6 @@ function App() {
       onAuthConnect={() => void runAuthBrowserAction("connect")}
       onAuthRefresh={() => void runAuthBrowserAction("refresh")}
       onAuthDisconnect={() => void runAuthBrowserAction("disconnect")}
-      onPlayboxAuthConnect={() => void runPlayboxAuthBrowserAction("connect")}
-      onPlayboxAuthRefresh={() => void runPlayboxAuthBrowserAction("refresh")}
-      onPlayboxAuthDisconnect={() => void runPlayboxAuthBrowserAction("disconnect")}
       onImportPlayboxCurl={(curl) => void importPlayboxCurl(curl)}
       onRefreshPlayboxImport={() => void refreshPlayboxImport()}
       onClearPlayboxImport={() => void clearPlayboxImport()}
@@ -525,7 +499,7 @@ function App() {
         }
         onCopy={(value, label) => void copyValue(value, label)}
         onCreate={(item) => {
-          void create.openCreator({ sourceItem: item, prompt: "", modeId: "custom-video" })
+          void create.openCreator({ sourceItem: item, prompt: "", modeId: "custom-image" })
         }}
         onAnimate={(item) => {
           void create.openCreator({ sourceItem: item, prompt: "", modeId: "custom-video" })

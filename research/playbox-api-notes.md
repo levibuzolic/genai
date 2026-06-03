@@ -47,7 +47,7 @@ Observed/inferred behavior:
 
 ### Best Auth Capture Approach
 
-Use an imported request from the user's normal Chrome profile when the server-owned Chrome profile fails Cloudflare:
+Use an imported request from the user's normal Chrome profile:
 
 1. Sign into `https://www.playbox.com/collection` in the user's normal Chrome profile.
 2. In DevTools Network, choose **Copy as cURL** on a successful `api.playbox.com` request, preferably `/api/users/me-new` or `/auth/refresh-token`.
@@ -338,7 +338,7 @@ If implementation time is tight, a narrower first version can store a normalized
   - `PLAYBOX_AUTHORIZATION`
   - `PLAYBOX_COOKIE`
   - `PLAYBOX_EXTRA_HEADERS_JSON`
-  - `PLAYBOX_AUTH_BROWSER_PROFILE_DIR`
+  - `PLAYBOX_AUTH_IMPORT_PATH`
 - Use `Origin: https://www.playbox.com` and `Referer: https://www.playbox.com/` for API calls.
 - Use `User-Agent` matching the browser profile when possible.
 - Treat the browser profile and raw HAR as sensitive material.

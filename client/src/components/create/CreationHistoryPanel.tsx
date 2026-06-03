@@ -35,7 +35,14 @@ function creationTitle(creation: Creation) {
 }
 
 function creationTime(creation: Creation) {
-  return creation.updatedAt || creation.submittedAt || creation.createdLocallyAt || creation.createdAtIso
+  return (
+    creation.finishedAt ||
+    creation.updatedAt ||
+    creation.submittedAt ||
+    creation.createdLocallyAt ||
+    creation.createdAtIso ||
+    creation.createdAt
+  )
 }
 
 function creationPreviewUrl(creation: Creation) {

@@ -1,7 +1,7 @@
-import { PLAYBOX_API_BASE_URL, PLAYBOX_AUTH_BASE_URL, PLAYBOX_APP_URL } from "./config.ts"
+import { PLAYBOX_API_BASE_URL, PLAYBOX_AUTH_BASE_URL } from "./config.ts"
 import { AUTH_SETUP_MESSAGE } from "./config.ts"
 import { getPlayboxImportedRequestHeaders, refreshPlayboxImportedAuthorization } from "./playbox-auth-import.ts"
-import { getActivePlayboxAuthorization, playboxAuthBrowser } from "./playbox-auth-state.ts"
+import { getActivePlayboxAuthorization } from "./playbox-auth-state.ts"
 import { parseApiHeaders } from "./schemas.ts"
 import type { ApiHeaders, PlayboxCollection, PlayboxCollectionsResponse } from "./types.ts"
 
@@ -90,12 +90,7 @@ function buildPlayboxRequestInit(init: RequestInit): RequestInit {
 }
 
 async function refreshPlayboxAuthorization(): Promise<boolean> {
-  if (await refreshPlayboxImportedAuthorization()) {
-    return Boolean(getActivePlayboxAuthorization())
-  }
-
-  const status = await playboxAuthBrowser.refreshHeadless()
-  return status.status === "connected" && Boolean(getActivePlayboxAuthorization())
+  return (await refreshPlayboxImportedAuthorization()) && Boolean(getActivePlayboxAuthorization())
 }
 
 function parseCollectionsResponse(value: unknown): PlayboxCollectionsResponse {
@@ -152,8 +147,4 @@ async function readApiError(response: Response): Promise<string | null> {
   }
 
   return text
-}
-
-export function getPlayboxAppUrl(): string {
-  return PLAYBOX_APP_URL
 }

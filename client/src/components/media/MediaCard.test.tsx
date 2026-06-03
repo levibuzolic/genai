@@ -74,6 +74,19 @@ describe("MediaCard", () => {
     expect(onDetails).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps prompt text out of the index card body", () => {
+    const { container } = renderCard({
+      ...baseItem,
+      id: "compact-image-1",
+      type: "image",
+      localFile: "renders/compact.png",
+    })
+
+    expect(container.querySelector(".prompt")).toBeNull()
+    expect(screen.queryByText("soft studio portrait")).toBeNull()
+    expect(screen.getByRole("button", { name: /prompt/i })).toBeTruthy()
+  })
+
   it("opens details from rendering media cards", () => {
     const { onDetails } = renderCard({
       ...baseItem,
