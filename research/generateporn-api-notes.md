@@ -19,6 +19,335 @@ Source captures:
 - `output/har/new-video-models-generate-initial-page-load-2.har` (recapture with filtering completely disabled, ~14 MB) — full unfiltered initial page loads for both /editor and the dedicated /generate (pure T2V) route. Includes the main application bundle `assets/index-Der5BJjj.js` (~711 kB decompressed). This was the capture expected to contain the authoritative client-side model configuration and the exact supported (resolution × duration) matrix per model. See new dedicated subsection below.
 - `output/har/updated-edit-image-api.har` captured on 2026-06-01 — fresh Edit Image upload submit against the current app bundle. It confirms the edit endpoint now submits only `image_base64` and `prompt` for upload edits, with no `seed`, `modelId`, or aspect-ratio field in the request.
 - `output/har/spicy-mode.har` captured on 2026-06-01 — fresh video submit for the new `wan2.7-i2v-spicy` model. It uses the normal I2V `/api/jobs/video` body shape and supports the same quality matrix as Wan 2.7.
+- `output/har/generateporn-live-2026-06-03T22-53-22Z.har` captured on 2026-06-03 UTC / 2026-06-04 Melbourne with the app-owned authenticated Chrome profile. This is the current production UI after the "StillHeat" relaunch. It loaded `/`, `/create/generate`, `/create/edit`, and `/create/video`, plus the lazy `CreateFlow-BFRKWFdp.js` chunk.
+- `output/har/generateporn-live-2026-06-03T22-53-22Z-api-summary.json` is the sanitized summary for that run. The raw HAR is local/ignored and may contain auth headers; use the summary and bundle extraction for checked-in documentation.
+- `output/bundles/generateporn-live-2026-06-03T22-53-22Z-app-bundle.js` contains the current production bundle used for the extracted engine/API registry.
+- `research/live-engines-config.json` is the clean current engine/request-shape reference extracted from the live bundle.
+- `output/har/generateporn-submit-2026-06-03T23-42-57Z.har` captured successful current-production submissions for text-to-image, edit-image upload, and image-to-video upload. The raw HAR is local/ignored and may contain auth headers and image data URLs.
+- `output/har/generateporn-submit-2026-06-03T23-42-57Z-api-summary.json` is the redacted submission summary.
+
+## Current Production Relaunch: StillHeat / MotionHeat
+
+Captured from the authenticated production app on 2026-06-03T22:53Z. This is a major change from the May 30 / June 1 Wan/Qwen model-picker research:
+
+- The old `/editor` and `/generate` routes now redirect to `/`.
+- The current create routes are `/create/generate`, `/create/edit`, and `/create/video`.
+- The current UI does not expose the Wan/Qwen model IDs (`wan2.7-*`, `qwen-image-*`, `z-image-turbo`) or send `modelId` from the client.
+- The old preset cards on the home page are marked `COMING SOON`.
+- The visible creation surface is now three branded preview engines:
+
+| Flow | Route | Engine | Job type | Endpoint |
+|------|-------|--------|----------|----------|
+| Text to image | `/create/generate` | `StillHeat v1.0 Preview` | `text2image` | `POST /api/jobs/text2image` |
+| Edit image | `/create/edit` | `StillHeat-EDIT v1.0 Preview` | `edit` | `POST /api/jobs/edit` |
+| Image to video | `/create/video` | `MotionHeat v1.0 Preview` | `video` | `POST /api/jobs/video` |
+
+The authenticated page-load capture only called:
+
+```http
+POST /api/auth/sync
+GET /api/me
+```
+
+No model/options endpoint was observed. The engine registry and request builders are client-side in `CreateFlow-BFRKWFdp.js`.
+
+### Current Submit Payloads
+
+Text-to-image now uses a new endpoint:
+
+```http
+POST /api/jobs/text2image
+```
+
+```json
+{
+  "prompt": "string",
+  "aspectRatio": "3:4",
+  "realism": 0.55,
+  "seed": 1234567
+}
+```
+
+Notes:
+
+- Aspect ratio options are `1:1`, `3:4`, `4:3`, and `9:16`.
+- `realism` is optional and only sent when the "Realism strength" control is enabled.
+- The UI always generates a numeric seed, either random or user-specified.
+- Text-to-image creation cost is shown as 30 Amethyst unless the account is unlimited.
+
+Edit image still uses:
+
+```http
+POST /api/jobs/edit
+```
+
+```json
+{
+  "image_base64": "data:image/[omitted]",
+  "input_url": "https://...",
+  "prompt": "string",
+  "realism": 0.55,
+  "src_width": 1024,
+  "src_height": 1024,
+  "seed": 1234567
+}
+```
+
+Notes:
+
+- The current UI exposes upload/drop only, but the builder still supports `input_url` when a source URL is passed through route state.
+- `JSON.stringify` omits undefined fields, so a normal upload sends `image_base64` and omits `input_url`.
+- Edit creation cost is shown as 60 Amethyst unless the account is unlimited.
+
+Video still uses:
+
+```http
+POST /api/jobs/video
+```
+
+```json
+{
+  "image_base64": "data:image/[omitted]",
+  "input_url": "https://...",
+  "prompt": "string",
+  "resolution": "720p",
+  "duration": 4,
+  "negative_prompt": "string",
+  "seed": 1234567
+}
+```
+
+Notes:
+
+- The current UI requires a source image for video.
+- Resolution options are `720p` and `1080p`; `1080p` is disabled unless the plan is in `pro`, `creator`, or `max`.
+- Duration is a slider from 4 to 16 seconds, step 1.
+- Cost is `12 * duration` for `720p`, `18 * duration` for `1080p`, unless the account is unlimited.
+- The optional negative prompt field is capped at 300 characters.
+
+Polling and history remain unchanged:
+
+```http
+GET /api/jobs/{job_id}
+GET /api/jobs?type={type}&page={page}
+POST /api/jobs/{job_id}/favorite
+DELETE /api/jobs/{job_id}/favorite
+DELETE /api/jobs/{job_id}
+```
+
+### Successful Submission Capture
+
+Captured on 2026-06-03T23:42Z with the app-owned authenticated Chrome profile. Three current-production jobs were submitted and all reached `status: "done"`.
+
+Text-to-image:
+
+```http
+POST /api/jobs/text2image
+```
+
+Request:
+
+```json
+{
+  "prompt": "Photoreal portrait, soft studio light, neutral expression, cinematic 4K",
+  "aspectRatio": "3:4",
+  "realism": 0.55,
+  "seed": 1462001
+}
+```
+
+Create response:
+
+```json
+{
+  "job_id": "b946dfcc-4d84-4961-ba02-e52ec1e2367c"
+}
+```
+
+Terminal job:
+
+```json
+{
+  "id": "b946dfcc-4d84-4961-ba02-e52ec1e2367c",
+  "type": "text2image",
+  "input_url": null,
+  "prompt": "Photoreal portrait, soft studio light, neutral expression, cinematic 4K",
+  "negative_prompt": null,
+  "resolution": "3:4",
+  "duration": null,
+  "seed": 1462001,
+  "external_task_id": "8ebce503-44f6-43fa-9509-acb81a80aca5-e1",
+  "output_url": "https://generations.generateporn.ai/generations/b946dfcc-4d84-4961-ba02-e52ec1e2367c.png",
+  "status": "done",
+  "coin_cost": 0,
+  "priority": "normal",
+  "shared": false,
+  "error": null,
+  "created_at": 1780530182,
+  "model_id": "stillheat",
+  "aspect_ratio": null,
+  "refunded_at": null,
+  "favorited": false
+}
+```
+
+Observed polling statuses:
+
+```text
+pending x11, done
+```
+
+Edit upload:
+
+```http
+POST /api/jobs/edit
+```
+
+Request:
+
+```json
+{
+  "image_base64": "data:image/[omitted]",
+  "prompt": "Warm cinematic lighting, keep the same composition and natural skin texture",
+  "realism": 0.55,
+  "src_width": 832,
+  "src_height": 1248,
+  "seed": 1462002
+}
+```
+
+Terminal job differences:
+
+```json
+{
+  "type": "edit",
+  "resolution": null,
+  "duration": null,
+  "seed": 1462002,
+  "output_url": "https://generations.generateporn.ai/generations/49b45923-a696-45d1-aed6-165617cd82c6.png",
+  "status": "done",
+  "model_id": "stillheat-edit",
+  "aspect_ratio": null
+}
+```
+
+Observed polling statuses:
+
+```text
+pending x4, done
+```
+
+Image-to-video upload:
+
+```http
+POST /api/jobs/video
+```
+
+Request:
+
+```json
+{
+  "image_base64": "data:image/[omitted]",
+  "prompt": "Slow subtle camera push in, natural breathing, soft lighting",
+  "resolution": "720p",
+  "duration": 4,
+  "negative_prompt": "blur, watermark, extra fingers, distorted face",
+  "seed": 1462003
+}
+```
+
+Terminal job differences:
+
+```json
+{
+  "type": "video",
+  "negative_prompt": "blur, watermark, extra fingers, distorted face",
+  "resolution": "720p",
+  "duration": 4,
+  "seed": 1462003,
+  "output_url": "https://generations.generateporn.ai/generations/d4311816-5b62-479e-8f2a-ae4e8e51b9ef.mp4",
+  "status": "done",
+  "model_id": "motionheat",
+  "aspect_ratio": null
+}
+```
+
+Observed polling statuses:
+
+```text
+pending x13, done
+```
+
+Common terminal job fields observed across all three current flows:
+
+```json
+{
+  "id": "uuid",
+  "user_id": "[redacted]",
+  "type": "text2image | edit | video",
+  "input_url": null,
+  "prompt": "string",
+  "negative_prompt": "string | null",
+  "resolution": "3:4 | 720p | null",
+  "duration": "number | null",
+  "seed": "number",
+  "external_task_id": "string",
+  "output_url": "https://generations.generateporn.ai/generations/{job_id}.{png|mp4}",
+  "status": "pending | done | failed",
+  "coin_cost": 0,
+  "priority": "normal",
+  "shared": false,
+  "shared_at": null,
+  "error": null,
+  "created_at": 1780530182,
+  "model_id": "stillheat | stillheat-edit | motionheat",
+  "aspect_ratio": null,
+  "refunded_at": null,
+  "last_polled_at": 1780530215239,
+  "favorited": false,
+  "favorited_at": null
+}
+```
+
+Notes:
+
+- `coin_cost` was `0` because the capture account was on an unlimited plan. Non-unlimited accounts should still expect UI-calculated costs described above.
+- The text-to-image request field is `aspectRatio`, but the terminal job stores that value in `resolution`; `aspect_ratio` remained `null`.
+- Current successful jobs use output URLs on `generations.generateporn.ai/generations/{job_id}.{ext}`.
+- The backend assigns `model_id` even though the client sends no `modelId`.
+
+### Current Account / Plan API Observations
+
+The current bundle uses Clerk bearer auth for all API calls and handles these API errors specially:
+
+- `429 concurrency_limit`
+- `429 daily_video_limit`
+- `429 abuse_suspected`
+- `429 ip_free_account_limit`
+- `image_engine_unconfigured` from create submit responses
+
+The `/api/me` response still includes:
+
+```json
+{
+  "coins": 105,
+  "allowance_coins": 0,
+  "referral_code": "[redacted]",
+  "coin_pack_discount": 0.55,
+  "relaunch_offer": true,
+  "subscription": {
+    "plan": "max",
+    "status": "active",
+    "period_end": 1811679987,
+    "allowance_refresh_at": 1782735987
+  }
+}
+```
+
+Implementation impact: the current app should not hard-code the June 1 `modelId` matrix as the only creation surface. A robust local client should support both:
+
+- legacy/observed explicit `modelId` fields from older captures and history rows, and
+- the current branded-engine API where the client sends no model ID and the backend chooses the active engine behind `/text2image`, `/edit`, or `/video`.
 
 ## Edit Image Flow
 
