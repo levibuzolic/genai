@@ -4,7 +4,9 @@ import * as React from "react"
 import { ComboboxSelect, type ComboboxOption } from "@/components/common/ComboboxSelect"
 import { Field } from "@/components/common/Field"
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import type { CreateFieldOption } from "@/types/domain"
 
 import { CatalogSourcePanel } from "./CatalogSourcePanel"
 import { CreationHistoryPanel } from "./CreationHistoryPanel"
@@ -93,6 +95,7 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
       })) || [],
     [props.qualityField?.options],
   )
+  const videoQualityOptions = React.useMemo(() => getVideoQualityOptions(props.qualityField?.options), [props.qualityField?.options])
 
   return (
     <section id="createArea" ref={ref} className="create-studio createArea" aria-label="Create media">
@@ -148,7 +151,9 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
               />
             )}
 
-            {props.qualityField && (
+            {props.qualityField && videoQualityOptions ? (
+              <VideoQualityControls options={videoQualityOptions} value={props.quality} onChange={props.setQuality} />
+            ) : props.qualityField ? (
               <ComboboxSelect
                 id="createQualitySelect"
                 label={props.qualityField.label || "Quality"}
@@ -157,7 +162,7 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
                 onChange={(value) => props.setQuality(value)}
                 searchPlaceholder="Filter quality"
               />
-            )}
+            ) : null}
           </div>
 
           {showNudifyToggle && (
@@ -233,6 +238,99 @@ export function formatAccountOptionLabel(label: string, pendingCount: number, qu
 
 export function formatAutoAccountOptionLabel(label: string, pendingCount: number, queuedCount: number): string {
   return `Auto · ${formatAccountOptionLabel(label, pendingCount, queuedCount)}`
+}
+
+function VideoQualityControls({
+  options,
+  value,
+  onChange,
+}: {
+  options: CreateFieldOption[]
+  value: string
+  onChange: (value: string) => void
+}) {
+  const selectedOption = options.find((option) => option.value === value) || options[0]
+  const selectedResolution = selectedOption?.resolution || options[0]?.resolution || ""
+  const resolutionOptions = uniqueValues(
+    options.map((option) => option.resolution).filter((resolution): resolution is string => Boolean(resolution)),
+  )
+  const durationOptions = sortQualityOptionsByDuration(
+    options.filter((option) => option.resolution === selectedResolution && typeof option.duration === "number"),
+  )
+  const selectedDuration = Number(selectedOption?.duration || durationOptions[0]?.duration || 0)
+  const minDuration = Number(durationOptions[0]?.duration || selectedDuration || 0)
+  const maxDuration = Number(durationOptions.at(-1)?.duration || selectedDuration || 0)
+
+  function setResolution(resolution: string) {
+    const sameDuration = options.find((option) => option.resolution === resolution && option.duration === selectedDuration)
+    const fallback = options.find((option) => option.resolution === resolution)
+    const next = sameDuration || fallback
+    if (next) onChange(next.value)
+  }
+
+  function setDuration(duration: number) {
+    const next = closestDurationOption(durationOptions, duration)
+    if (next) onChange(next.value)
+  }
+
+  return (
+    <div className="createVideoQuality" aria-label="Video quality">
+      <Tabs value={selectedResolution} onValueChange={setResolution}>
+        <TabsList className="w-full" aria-label="Resolution">
+          {resolutionOptions.map((resolution) => (
+            <TabsTrigger key={resolution} value={resolution}>
+              {resolution}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      <div className="createDurationControl">
+        <output htmlFor="createDurationSlider">{selectedDuration.toLocaleString()}s</output>
+        <input
+          id="createDurationSlider"
+          type="range"
+          min={minDuration}
+          max={maxDuration}
+          step={1}
+          value={selectedDuration}
+          aria-label="Duration"
+          onChange={(event) => setDuration(Number(event.currentTarget.value))}
+        />
+      </div>
+    </div>
+  )
+}
+
+function getVideoQualityOptions(options: CreateFieldOption[] | undefined): CreateFieldOption[] | null {
+  const videoOptions = options?.filter((option) => option.resolution && typeof option.duration === "number") || []
+  return videoOptions.length === options?.length && videoOptions.length > 0 ? videoOptions : null
+}
+
+function uniqueValues(values: string[]): string[] {
+  return [...new Set(values)]
+}
+
+function closestDurationOption(options: CreateFieldOption[], duration: number): CreateFieldOption | undefined {
+  let closest = options[0]
+  for (const option of options) {
+    if (!closest || Math.abs(Number(option.duration) - duration) < Math.abs(Number(closest.duration) - duration)) {
+      closest = option
+    }
+  }
+  return closest
+}
+
+function sortQualityOptionsByDuration(options: CreateFieldOption[]): CreateFieldOption[] {
+  const sorted: CreateFieldOption[] = []
+  for (const option of options) {
+    const insertionIndex = sorted.findIndex((entry) => Number(option.duration) < Number(entry.duration))
+    if (insertionIndex === -1) {
+      sorted.push(option)
+    } else {
+      sorted.splice(insertionIndex, 0, option)
+    }
+  }
+  return sorted
 }
 
 function getPendingGenerationCount(counts: Record<string, number>, accountEmail: string): number {

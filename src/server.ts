@@ -76,7 +76,10 @@ import {
   getPendingGenerationCountsByAccount,
   pollCreateJob,
   refreshCreations,
+  repairLegacyQueuedCreations,
+  retryFailedQueuedCreations,
   resolveCreateSource,
+  setCreationQueuePaused,
   setMediaGenerationConcurrencyLimit,
   startCreationQueueProcessing,
   CREATION_QUEUE_BACKGROUND_JOB_ID,
@@ -291,6 +294,22 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/creations") {
       return sendCachedJson(response, cachedReadOptions(url), () => getCreations(url.searchParams))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/creations/repair-legacy-queued") {
+      return sendJson(response, await repairLegacyQueuedCreations())
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/creations/queue/pause") {
+      return sendJson(response, setCreationQueuePaused(true))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/creations/queue/resume") {
+      return sendJson(response, setCreationQueuePaused(false))
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/creations/queue/retry-failed") {
+      return sendJson(response, retryFailedQueuedCreations())
     }
 
     const creationMatch = url.pathname.match(/^\/api\/creations\/([^/]+)$/)
@@ -755,6 +774,8 @@ export {
   refreshPlayboxImportedAuthorization,
   requestSyncCancellation,
   refreshCreations,
+  repairLegacyQueuedCreations,
+  retryFailedQueuedCreations,
   restoreCatalogBackup,
   resolveMediaDir,
   removeAuthAccount,
@@ -762,6 +783,7 @@ export {
   runMissingThumbnailBackgroundJob,
   scheduleMissingThumbnailBackgroundJobForCatalog,
   server,
+  setCreationQueuePaused,
   setCatalogItemFavoriteRemote,
   startCatalogDownload,
   startAutoSyncLoop,

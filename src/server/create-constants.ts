@@ -22,9 +22,9 @@ export const CREATE_VIDEO_QUALITY_OPTIONS = CREATE_VIDEO_RESOLUTIONS.flatMap((re
     coinCost: CREATE_VIDEO_COIN_COST_PER_SECOND[resolution] * duration,
   })),
 )
-export const CREATE_VIDEO_DEFAULT_QUALITY = "720p-4"
+export const CREATE_VIDEO_DEFAULT_QUALITY = "720p-16"
 export const CREATE_VIDEO_DEFAULT_RESOLUTION = "720p"
-export const CREATE_VIDEO_DEFAULT_DURATION = 4
+export const CREATE_VIDEO_DEFAULT_DURATION = 16
 export const CREATE_IMAGE_ASPECT_RATIO_OPTIONS = [
   { label: "Portrait · 3:4", value: "3:4" },
   { label: "Square · 1:1", value: "1:1" },

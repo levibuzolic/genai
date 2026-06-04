@@ -294,7 +294,9 @@ export function useCreateStudio(onOpen?: () => void) {
         void pollCreateJob(response.jobId, response.pollMs || 2000)
       }, 0)
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error))
+      const message = formatCreateError(error, "submit")
+      setStatus(message.status)
+      if (message.toast) dispatchCreateToast(message.toast)
     } finally {
       setSubmitting(false)
     }
@@ -302,13 +304,19 @@ export function useCreateStudio(onOpen?: () => void) {
 
   async function pollCreateJob(jobId: string, pollMs: number) {
     setSubmitting(false)
-    const data = await fetchJson<CreateJobPollResponse>(`/api/create/jobs/${encodeURIComponent(jobId)}`)
-    setSubmitting(false)
-    setStatus(formatCreateJobStatus(data.job.status))
-    if (["done", "failed", "error"].includes(data.job.status || "")) return
-    window.setTimeout(() => {
-      void pollCreateJob(jobId, data.pollMs || pollMs)
-    }, data.pollMs || pollMs)
+    try {
+      const data = await fetchJson<CreateJobPollResponse>(`/api/create/jobs/${encodeURIComponent(jobId)}`)
+      setSubmitting(false)
+      setStatus(formatCreateJobStatus(data.job.status))
+      if (["done", "failed", "error"].includes(data.job.status || "")) return
+      window.setTimeout(() => {
+        void pollCreateJob(jobId, data.pollMs || pollMs)
+      }, data.pollMs || pollMs)
+    } catch (error) {
+      const message = formatCreateError(error, "poll")
+      setStatus(message.status)
+      if (message.toast) dispatchCreateToast(message.toast)
+    }
   }
 
   async function importTemplate() {
@@ -354,7 +362,7 @@ export function useCreateStudio(onOpen?: () => void) {
     }
     const promptParam = paramAsString(settings.params["prompt"]) || ""
     const negativePromptParam = paramAsString(settings.params["negativePrompt"]) || ""
-    const qualityParam = paramAsString(settings.params["quality"]) || "720p-4"
+    const qualityParam = paramAsString(settings.params["quality"]) || "720p-16"
     const imageParams: CreateParams = { prompt: promptParam }
     const videoParams: CreateParams = { prompt: promptParam, quality: qualityParam }
 
@@ -523,6 +531,23 @@ function dispatchCreateToast(message: string): void {
 function formatCreateJobStatus(status: string | null | undefined): string {
   const normalized = String(status || "pending").replace(/_/g, " ")
   return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}.`
+}
+
+function formatCreateError(error: unknown, phase: "submit" | "poll"): { status: string; toast?: string } {
+  const rawMessage = error instanceof Error ? error.message : String(error)
+  if (!isFetchFailure(rawMessage)) return { status: rawMessage }
+
+  const status =
+    phase === "submit" ? "Create request could not reach the local API." : "Creation status check could not reach the local API."
+
+  return {
+    status,
+    toast: `${status} Check that the local server is running and retry.`,
+  }
+}
+
+function isFetchFailure(message: string): boolean {
+  return message.trim().toLowerCase() === "failed to fetch"
 }
 
 function paramAsString(value: CreateParams[string]): string | undefined {

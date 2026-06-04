@@ -5,11 +5,13 @@ import {
   Maximize2,
   Minimize2,
   PauseCircle,
+  PlayCircle,
   RefreshCw,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Wand2,
   WandSparkles,
   Zap,
 } from "lucide-react"
@@ -37,6 +39,10 @@ import type { Backup, Config, MediaFitMode, SyncStatus } from "@/types/domain"
 export function AppShell({
   config,
   syncStatus,
+  createQueueStatus,
+  creationQueueActionPending,
+  onSetCreationQueuePaused,
+  onRetryFailedQueuedCreations,
   createOpen,
   activeView,
   onOpenLibrary,
@@ -79,6 +85,15 @@ export function AppShell({
 }: {
   config: Config | null
   syncStatus: SyncStatus
+  createQueueStatus: {
+    pending: number
+    queued: number
+    failed: number
+    paused: boolean
+  }
+  creationQueueActionPending: boolean
+  onSetCreationQueuePaused: (paused: boolean) => void
+  onRetryFailedQueuedCreations: () => void
   createOpen: boolean
   activeView: "library" | "playbox" | "templates"
   onOpenLibrary: () => void
@@ -122,6 +137,7 @@ export function AppShell({
   const autoSync = config?.autoSync
   const syncLabel = activeView === "playbox" ? "Sync Playbox" : "Sync"
   const isDesktop = useMediaQuery("(min-width: 1024px)")
+  const activeCreationCount = createQueueStatus.pending + createQueueStatus.queued
 
   return (
     <div
@@ -147,6 +163,43 @@ export function AppShell({
           </nav>
 
           <div className="-mx-3 mt-auto grid gap-0 border-t pt-2" aria-label="System status">
+            <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 overflow-hidden px-3 py-2 text-xs text-muted-foreground">
+              {createQueueStatus.paused ? (
+                <PauseCircle className="size-4 shrink-0" />
+              ) : activeCreationCount > 0 ? (
+                <Loader2 className="size-4 shrink-0 animate-spin" />
+              ) : (
+                <Wand2 className="size-4 shrink-0" />
+              )}
+              <div className="min-w-0 overflow-hidden">
+                <strong className="block truncate font-medium text-foreground">Creation queue</strong>
+                <span className="block truncate">{formatCreationQueueStatus(createQueueStatus)}</span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 px-3 pb-2">
+              <Button
+                id="toggleCreationQueueButton"
+                size="sm"
+                variant="outline"
+                className="h-8"
+                disabled={creationQueueActionPending}
+                onClick={() => onSetCreationQueuePaused(!createQueueStatus.paused)}
+              >
+                {createQueueStatus.paused ? <PlayCircle /> : <PauseCircle />}
+                {createQueueStatus.paused ? "Resume" : "Pause"}
+              </Button>
+              <Button
+                id="retryFailedQueueButton"
+                size="sm"
+                variant="outline"
+                className="h-8"
+                disabled={creationQueueActionPending || createQueueStatus.failed <= 0}
+                onClick={onRetryFailedQueuedCreations}
+              >
+                <RefreshCw />
+                {createQueueStatus.failed > 0 ? `Retry ${createQueueStatus.failed.toLocaleString()}` : "Retry"}
+              </Button>
+            </div>
             <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 overflow-hidden px-3 py-2 text-xs text-muted-foreground">
               <ShieldCheck className="size-4 shrink-0" />
               <div className="min-w-0 overflow-hidden">
@@ -313,4 +366,25 @@ export function AppShell({
       />
     </div>
   )
+}
+
+function formatCreationQueueStatus({
+  pending,
+  queued,
+  failed,
+  paused,
+}: {
+  pending: number
+  queued: number
+  failed: number
+  paused: boolean
+}): string {
+  if (pending <= 0 && queued <= 0 && failed <= 0) return paused ? "Paused" : "Idle"
+
+  const parts: string[] = []
+  if (paused) parts.push("Paused")
+  if (pending > 0) parts.push(`${pending.toLocaleString()} running`)
+  if (queued > 0) parts.push(`${queued.toLocaleString()} queued`)
+  if (failed > 0) parts.push(`${failed.toLocaleString()} failed`)
+  return parts.join(" · ")
 }

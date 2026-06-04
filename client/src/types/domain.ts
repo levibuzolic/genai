@@ -333,6 +333,8 @@ export type CreationsResponse = {
   creations: Creation[]
   activeCount: number
   total: number
+  queuePaused: boolean
+  failedQueuedCount: number
   pollMs: number
 }
 

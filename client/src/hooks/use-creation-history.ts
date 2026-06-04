@@ -3,7 +3,12 @@ import * as React from "react"
 import { fetchJson } from "@/lib/api"
 import { replaceEqualJson } from "@/lib/render-state"
 import type { CreateParams, Creation, CreationEvent, CreationSource, CreationsResponse } from "@/types/domain"
-import type { CreationDetailsResponse, DuplicateCreationResponse, RefreshCreationsResponse } from "@/types/routes"
+import type {
+  CreationDetailsResponse,
+  DuplicateCreationResponse,
+  RefreshCreationsResponse,
+  RetryFailedQueuedCreationsResponse,
+} from "@/types/routes"
 
 const IDLE_CREATION_POLL_MS = 10000
 export type ActiveCreationTransition = {
@@ -18,6 +23,8 @@ export function useCreationHistory(
 ) {
   const [creations, setCreations] = React.useState<Creation[]>([])
   const [activeCount, setActiveCount] = React.useState(0)
+  const [queuePaused, setQueuePausedState] = React.useState(false)
+  const [failedQueuedCount, setFailedQueuedCount] = React.useState(0)
   const [pollMs, setPollMs] = React.useState(IDLE_CREATION_POLL_MS)
   const [loading, setLoading] = React.useState(false)
   const [selectedCreation, setSelectedCreation] = React.useState<Creation | null>(null)
@@ -42,6 +49,8 @@ export function useCreationHistory(
         const transition = getActiveCreationTransition(activeCountRef.current, nextActiveCount, data.creations || [])
         setCreations((current) => replaceEqualJson(current, data.creations || []))
         setActiveCount(nextActiveCount)
+        setQueuePausedState(Boolean(data.queuePaused))
+        setFailedQueuedCount(data.failedQueuedCount || 0)
         activeCountRef.current = nextActiveCount
         setPollMs(data.pollMs || IDLE_CREATION_POLL_MS)
         setStatusMessage((current) => (current ? "" : current))
@@ -92,6 +101,8 @@ export function useCreationHistory(
       const transition = getActiveCreationTransition(activeCountRef.current, nextActiveCount, data.creations || [])
       setCreations((current) => replaceEqualJson(current, data.creations || []))
       setActiveCount(nextActiveCount)
+      setQueuePausedState(Boolean(data.queuePaused))
+      setFailedQueuedCount(data.failedQueuedCount || 0)
       activeCountRef.current = nextActiveCount
       setPollMs(data.pollMs || IDLE_CREATION_POLL_MS)
       setStatusMessage("Creation history refreshed.")
@@ -120,9 +131,38 @@ export function useCreationHistory(
     setStatusMessage(includeSource ? "Settings and source copied into a new draft." : "Settings copied into a new draft.")
   }
 
+  async function setQueuePaused(paused: boolean) {
+    setStatusMessage(paused ? "Pausing creation queue..." : "Resuming creation queue...")
+    try {
+      await fetchJson(`/api/creations/queue/${paused ? "pause" : "resume"}`, { method: "POST" })
+      setQueuePausedState(paused)
+      await loadCreations({ showLoading: false })
+      setStatusMessage(paused ? "Creation queue paused." : "Creation queue resumed.")
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  async function retryFailedQueuedCreations() {
+    setStatusMessage("Retrying failed queued creations...")
+    try {
+      const data = await fetchJson<RetryFailedQueuedCreationsResponse>("/api/creations/queue/retry-failed", { method: "POST" })
+      await loadCreations({ showLoading: false })
+      setStatusMessage(
+        data.failed > 0
+          ? `Retried ${data.retried.toLocaleString()} failed queued creation${data.retried === 1 ? "" : "s"}; ${data.failed.toLocaleString()} could not be retried.`
+          : `Retried ${data.retried.toLocaleString()} failed queued creation${data.retried === 1 ? "" : "s"}.`,
+      )
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   return {
     creations,
     activeCount,
+    queuePaused,
+    failedQueuedCount,
     loading,
     selectedCreation,
     selectedEvents,
@@ -132,6 +172,8 @@ export function useCreationHistory(
     refreshNow,
     openDetails,
     duplicateSettings,
+    setQueuePaused,
+    retryFailedQueuedCreations,
   }
 }
 

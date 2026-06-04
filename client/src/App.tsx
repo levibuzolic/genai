@@ -72,6 +72,7 @@ function App() {
   const [copyFlash, setCopyFlash] = React.useState("")
   const [authActionPending, setAuthActionPending] = React.useState(false)
   const [settingsActionPending, setSettingsActionPending] = React.useState(false)
+  const [creationQueueActionPending, setCreationQueueActionPending] = React.useState(false)
   const [deleteTarget, setDeleteTarget] = React.useState<CatalogItem | null>(null)
   const [deletePending, setDeletePending] = React.useState(false)
   const [keepLocalFiles, setKeepLocalFiles] = React.useState(true)
@@ -105,6 +106,15 @@ function App() {
     [accountOptions, config?.defaultAccountEmail, pendingGenerationCountsByAccount, queuedGenerationCountsByAccount],
   )
   const effectiveCreateAccountEmail = create.selectedAccountEmail || autoCreateAccountEmail
+  const createQueueStatus = React.useMemo(
+    () => ({
+      pending: sumGenerationCounts(pendingGenerationCountsByAccount),
+      queued: sumGenerationCounts(queuedGenerationCountsByAccount),
+      failed: creationHistory.failedQueuedCount,
+      paused: creationHistory.queuePaused,
+    }),
+    [creationHistory.failedQueuedCount, creationHistory.queuePaused, pendingGenerationCountsByAccount, queuedGenerationCountsByAccount],
+  )
   const selectedItemIndex = selectedItem ? galleryItems.findIndex((item) => item.id === selectedItem.id) : -1
   const detailOpen = Boolean(selectedItem)
   const previousDetailItem = selectedItemIndex > 0 ? (galleryItems[selectedItemIndex - 1] ?? null) : null
@@ -395,10 +405,32 @@ function App() {
     await library.loadItems({ keepLoading: true })
   }
 
+  async function setCreationQueuePaused(paused: boolean) {
+    setCreationQueueActionPending(true)
+    try {
+      await creationHistory.setQueuePaused(paused)
+    } finally {
+      setCreationQueueActionPending(false)
+    }
+  }
+
+  async function retryFailedQueuedCreations() {
+    setCreationQueueActionPending(true)
+    try {
+      await creationHistory.retryFailedQueuedCreations()
+    } finally {
+      setCreationQueueActionPending(false)
+    }
+  }
+
   return (
     <AppShell
       config={config}
       syncStatus={sync.syncStatus}
+      createQueueStatus={createQueueStatus}
+      creationQueueActionPending={creationQueueActionPending}
+      onSetCreationQueuePaused={(paused) => void setCreationQueuePaused(paused)}
+      onRetryFailedQueuedCreations={() => void retryFailedQueuedCreations()}
       createOpen={create.open}
       activeView={activeView}
       onOpenLibrary={() => {
@@ -730,6 +762,10 @@ function getAutoCreateAccountEmail({
 
 function getAccountLoad(accountEmail: string, pendingCounts: Record<string, number>, queuedCounts: Record<string, number>): number {
   return getAccountPendingGenerationCount(pendingCounts, accountEmail) + getAccountQueuedGenerationCount(queuedCounts, accountEmail)
+}
+
+function sumGenerationCounts(counts: Record<string, number>): number {
+  return Object.values(counts).reduce((total, count) => total + count, 0)
 }
 
 function buildRetryCreateOptions(item: CatalogItem): {

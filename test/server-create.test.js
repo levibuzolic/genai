@@ -81,7 +81,7 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
     customVideo.fields.find((field) => field.name === "modelId"),
     undefined,
   )
-  assert.equal(customVideo.fields.find((field) => field.name === "quality").default, "720p-4")
+  assert.equal(customVideo.fields.find((field) => field.name === "quality").default, "720p-16")
   assert.equal(customVideo.fields.find((field) => field.name === "quality").options.length, 26)
   assert.deepEqual(
     {
@@ -423,6 +423,108 @@ test("creation submits are accepted locally before upstream queue dispatch", asy
   }
 })
 
+test("creation queue pause prevents queued dispatch until resumed", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-queue-pause-"))
+  const submitted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      submitted.push(JSON.parse(String(options.body)))
+      return jsonResponse({ job_id: "71717171-7171-4771-8771-717171717171" })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+
+    await server.createMediaJob({
+      modeId: "custom-image",
+      source: { kind: "url", url: "https://assets.example/source.png" },
+      params: { prompt: "paused prompt" },
+    })
+    const paused = server.setCreationQueuePaused(true)
+    const pausedResult = await server.runCreationQueueBackgroundJob()
+
+    assert.equal(paused.paused, true)
+    assert.equal(pausedResult.paused, true)
+    assert.equal(pausedResult.dispatched, 0)
+    assert.equal(submitted.length, 0)
+
+    server.setCreationQueuePaused(false)
+    const resumedResult = await server.runCreationQueueBackgroundJob()
+
+    assert.equal(resumedResult.dispatched, 1)
+    assert.equal(submitted.length, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("failed queued creations can be retried when the request body is reusable", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-queue-retry-"))
+  let failNextSubmission = true
+  const submitted = []
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      submitted.push(JSON.parse(String(options.body)))
+      if (failNextSubmission) {
+        failNextSubmission = false
+        return new Response(JSON.stringify({ error: "temporary upstream failure" }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        })
+      }
+      return jsonResponse({ job_id: "72727272-7272-4772-8772-727272727272" })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+
+    const queued = await server.createMediaJob({
+      modeId: "custom-image",
+      source: { kind: "url", url: "https://assets.example/source.png" },
+      params: { prompt: "retry queued prompt" },
+    })
+    await server.runCreationQueueBackgroundJob()
+
+    const failedHistory = await server.getCreations(new URLSearchParams())
+    assert.equal(failedHistory.failedQueuedCount, 1)
+    assert.equal(failedHistory.creations.find((creation) => creation.id === queued.jobId).status, "error")
+
+    const retryResult = server.retryFailedQueuedCreations()
+    assert.equal(retryResult.inspected, 1)
+    assert.equal(retryResult.retried, 1)
+    assert.equal(retryResult.failed, 0)
+
+    const queuedHistory = await server.getCreations(new URLSearchParams())
+    assert.equal(queuedHistory.creations.find((creation) => creation.id === queued.jobId).status, "queued")
+
+    await server.runCreationQueueBackgroundJob()
+    const retriedHistory = await server.getCreations(new URLSearchParams())
+    assert.equal(retriedHistory.creations.find((creation) => creation.id === queued.jobId).status, "pending")
+    assert.deepEqual(
+      submitted.map((body) => body.prompt),
+      ["retry queued prompt", "retry queued prompt"],
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test("creation submits are accepted locally before auth refresh", async () => {
   const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-async-auth-"))
   const jobId = "70707070-7070-4770-8770-707070707070"
@@ -544,6 +646,112 @@ test("video creation requires a source image", async () => {
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test("legacy queued creation repair maps old model jobs to current modes", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-legacy-create-repair-"))
+  const server = await importServer(mediaDir)
+  const createdAt = new Date().toISOString()
+
+  server.saveCreationJob({
+    id: "legacy-video",
+    status: "queued",
+    modeId: "custom-video",
+    modeLabel: "Custom Video",
+    mediaType: "video",
+    source: {
+      kind: "url",
+      url: "https://assets.example/source.png",
+    },
+    params: {
+      prompt: "legacy video",
+      modelId: "wan2.7-i2v-spicy",
+      quality: "wan2.7-i2v-spicy:1080p-15",
+    },
+    request: {
+      prompt: "legacy video",
+      modelId: "wan2.7-i2v-spicy",
+      input_url: "https://assets.example/source.png",
+      resolution: "1080p",
+      duration: 15,
+      seed: null,
+    },
+    requestBody: {
+      prompt: "legacy video",
+      modelId: "wan2.7-i2v-spicy",
+      input_url: "https://assets.example/source.png",
+      resolution: "1080p",
+      duration: 15,
+      seed: null,
+    },
+    createdLocallyAt: createdAt,
+    submittedAt: createdAt,
+    updatedAt: createdAt,
+  })
+
+  server.saveCreationJob({
+    id: "legacy-t2v",
+    status: "queued",
+    modeId: "text-to-video",
+    modeLabel: "Text to Video",
+    mediaType: "video",
+    source: null,
+    params: {
+      prompt: "legacy text video",
+      modelId: "wan2.7-t2v",
+      quality: "1080p-15",
+    },
+    request: {
+      prompt: "legacy text video",
+      modelId: "wan2.7-t2v",
+      resolution: "1080p",
+      duration: 15,
+      seed: null,
+    },
+    requestBody: {
+      prompt: "legacy text video",
+      modelId: "wan2.7-t2v",
+      resolution: "1080p",
+      duration: 15,
+      seed: null,
+    },
+    createdLocallyAt: createdAt,
+    submittedAt: createdAt,
+    updatedAt: createdAt,
+  })
+
+  const result = await server.repairLegacyQueuedCreations()
+  const videoDetails = await server.getCreationDetails("legacy-video")
+  const textDetails = await server.getCreationDetails("legacy-t2v")
+
+  assert.equal(result.inspected, 2)
+  assert.equal(result.updated, 2)
+  assert.equal(result.failed, 0)
+  assert.equal(videoDetails.creation.modeId, "custom-video")
+  assert.equal(videoDetails.creation.mediaType, "video")
+  assert.deepEqual(videoDetails.creation.params, {
+    prompt: "legacy video",
+    quality: "1080p-15",
+  })
+  assert.equal(videoDetails.creation.request.modelId, undefined)
+  assert.equal(videoDetails.creation.request.input_url, "https://assets.example/source.png")
+  assert.equal(videoDetails.creation.request.resolution, "1080p")
+  assert.equal(videoDetails.creation.request.duration, 15)
+  assert.equal(typeof videoDetails.creation.request.seed, "number")
+  assert.equal(textDetails.creation.modeId, "text-to-image")
+  assert.equal(textDetails.creation.mediaType, "image")
+  assert.deepEqual(textDetails.creation.params, {
+    prompt: "legacy text video",
+    aspectRatio: "3:4",
+  })
+  assert.equal(textDetails.creation.request.modelId, undefined)
+  assert.equal(textDetails.creation.request.aspectRatio, "3:4")
+  assert.equal(textDetails.creation.request.realism, 0.55)
+  assert.equal(typeof textDetails.creation.request.seed, "number")
+  assert.equal(
+    textDetails.events.some((event) => event.message === "Mapped queued creation to current GeneratePorn models."),
+    true,
+  )
 })
 
 test("creation requests queue per account when the configured generation limit is full", async () => {

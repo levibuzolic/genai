@@ -51,7 +51,7 @@ describe("useCreateStudio", () => {
     expect(result.current.sourceUrl).toBe("")
     expect(result.current.prompt).toBe("template prompt")
     expect(result.current.negativePrompt).toBe("template negative")
-    expect(result.current.quality).toBe("720p-4")
+    expect(result.current.quality).toBe("720p-16")
     expect(result.current.selectedTemplateId).toBe(templateWithDifferentSource.id)
 
     await act(async () => {
@@ -65,7 +65,7 @@ describe("useCreateStudio", () => {
         params: {
           prompt: "template prompt",
           negativePrompt: "template negative",
-          quality: "720p-4",
+          quality: "720p-16",
         },
         queue: true,
         templateId: templateWithDifferentSource.id,
@@ -84,9 +84,9 @@ describe("useCreateStudio", () => {
     const { result } = renderHook(() => useCreateStudio())
     await waitFor(() => expect(result.current.modes).toHaveLength(1))
     await waitFor(() => expect(result.current.modelId).toBe(""))
-    await waitFor(() => expect(result.current.quality).toBe("720p-4"))
+    await waitFor(() => expect(result.current.quality).toBe("720p-16"))
 
-    expect(result.current.qualityField?.options?.map((option) => option.value)).toEqual(["720p-4", "1080p-15"])
+    expect(result.current.qualityField?.options?.map((option) => option.value)).toEqual(["720p-16", "1080p-15"])
     expect(result.current.selectedMode?.fields?.some((field) => field.name === "modelId")).toBe(false)
   })
 
@@ -124,6 +124,40 @@ describe("useCreateStudio", () => {
     expect(result.current.status).toBe("Pending.")
     expect(result.current.submitting).toBe(false)
   })
+
+  it("shows a detailed toast when create submission cannot reach the API", async () => {
+    const toastMessages: string[] = []
+    const onToast = (event: Event) => {
+      const detail = (event as CustomEvent<{ message?: string }>).detail
+      if (detail?.message) toastMessages.push(detail.message)
+    }
+    window.addEventListener("genai:toast", onToast)
+    globalThis.fetch = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async (input, init) => {
+      const url = String(input)
+      if (url === "/api/create/modes") return jsonResponse({ modes: [customVideoMode] })
+      if (url === "/api/create/jobs" && init?.method === "POST") throw new TypeError("Failed to fetch")
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+
+    const { result } = renderHook(() => useCreateStudio())
+    await waitFor(() => expect(result.current.modes).toHaveLength(1))
+    await act(async () => {
+      await result.current.openCreator({
+        sourceItem,
+        modeId: "custom-video",
+      })
+    })
+
+    await act(async () => {
+      await result.current.submitCreateJob()
+    })
+
+    expect(result.current.status).toBe("Create request could not reach the local API.")
+    expect(result.current.submitting).toBe(false)
+    expect(toastMessages).toEqual(["Create request could not reach the local API. Check that the local server is running and retry."])
+
+    window.removeEventListener("genai:toast", onToast)
+  })
 })
 
 const sourceItem: CatalogItem = {
@@ -148,9 +182,9 @@ const customVideoMode: CreateMode = {
     {
       name: "quality",
       label: "Quality",
-      default: "720p-4",
+      default: "720p-16",
       options: [
-        { label: "720p · 4s", value: "720p-4" },
+        { label: "720p · 16s", value: "720p-16" },
         { label: "1080p · 15s", value: "1080p-15" },
       ],
     },
@@ -167,7 +201,7 @@ const templateWithDifferentSource: CreateTemplate = {
     params: {
       prompt: "template prompt",
       negativePrompt: "template negative",
-      quality: "720p-4",
+      quality: "720p-16",
     },
   },
   workflow: [],

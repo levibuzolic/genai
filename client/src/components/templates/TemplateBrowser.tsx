@@ -31,7 +31,7 @@ const EMPTY_TEMPLATE: TemplateEditorState = {
   modeId: "custom-video",
   prompt: "",
   negativePrompt: "",
-  quality: "720p-4",
+  quality: "720p-16",
   imagePrompt: "",
   videoPrompt: "",
 }
@@ -88,7 +88,7 @@ export function TemplateBrowser({
       modeId: template.settings?.modeId || modeIdForTemplateType(template.type),
       prompt: paramAsString(params["prompt"]) || "",
       negativePrompt: paramAsString(params["negativePrompt"]) || "",
-      quality: paramAsString(params["quality"]) || "720p-4",
+      quality: paramAsString(params["quality"]) || "720p-16",
       imagePrompt: paramAsString(imageStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
       videoPrompt: paramAsString(videoStep?.params["prompt"]) || paramAsString(params["prompt"]) || "",
     })

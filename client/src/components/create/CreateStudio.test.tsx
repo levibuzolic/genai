@@ -126,6 +126,36 @@ describe("CreateStudio", () => {
     expect(onSubmit).toHaveBeenCalledWith({ queue: true })
   })
 
+  it("splits video quality into resolution tabs and a duration slider", () => {
+    const setQuality = vi.fn<(value: string) => void>()
+    render(
+      <CreateStudio
+        {...baseProps}
+        quality="720p-8"
+        setQuality={setQuality}
+        qualityField={{
+          name: "quality",
+          label: "Quality",
+          options: [
+            { label: "720p · 4s", value: "720p-4", resolution: "720p", duration: 4, description: "48 Amethyst" },
+            { label: "720p · 8s", value: "720p-8", resolution: "720p", duration: 8, description: "96 Amethyst" },
+            { label: "1080p · 4s", value: "1080p-4", resolution: "1080p", duration: 4, description: "72 Amethyst" },
+            { label: "1080p · 8s", value: "1080p-8", resolution: "1080p", duration: 8, description: "144 Amethyst" },
+          ],
+        }}
+      />,
+    )
+
+    const resolutionTab = screen.getByRole("tab", { name: "1080p" })
+    resolutionTab.focus()
+    fireEvent.keyDown(resolutionTab, { key: "Enter", code: "Enter" })
+    expect(setQuality).toHaveBeenCalledWith("1080p-8")
+
+    fireEvent.change(screen.getByLabelText("Duration"), { target: { value: "4" } })
+    expect(setQuality).toHaveBeenCalledWith("720p-4")
+    expect(screen.queryByText(/Amethyst/)).toBeNull()
+  })
+
   it("browses library images for collection sources", () => {
     let selectedId = ""
 

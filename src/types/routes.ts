@@ -225,7 +225,23 @@ export type CreationsResponse = {
   creations: PublicCreation[]
   activeCount: number
   total: number
+  queuePaused: boolean
+  failedQueuedCount: number
   pollMs: number
+}
+
+export type CreationQueueControlResponse = OkResponse & {
+  paused: boolean
+  queued: number
+  pending: number
+  failedQueuedCount: number
+}
+
+export type RetryFailedQueuedCreationsResponse = OkResponse & {
+  inspected: number
+  retried: number
+  failed: number
+  failures: { id: string; error: string }[]
 }
 
 export type CreationDetailsResponse = {

@@ -30,6 +30,8 @@ describe("useCreationHistory", () => {
       creations: [finishedCreation],
       activeCount: 0,
       total: 1,
+      queuePaused: false,
+      failedQueuedCount: 0,
       pollMs: 10000,
     }
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => jsonResponse(response))
@@ -78,12 +80,16 @@ describe("useCreationHistory", () => {
         creations: [activeCreation],
         activeCount: 1,
         total: 1,
+        queuePaused: false,
+        failedQueuedCount: 0,
         pollMs: 1000,
       },
       {
         creations: [completedCreation],
         activeCount: 0,
         total: 1,
+        queuePaused: false,
+        failedQueuedCount: 0,
         pollMs: 10000,
       },
     ]
@@ -131,18 +137,24 @@ describe("useCreationHistory", () => {
         creations: [activeCreation],
         activeCount: 1,
         total: 1,
+        queuePaused: false,
+        failedQueuedCount: 0,
         pollMs: 1000,
       },
       {
         creations: [activeCreation],
         activeCount: 1,
         total: 1,
+        queuePaused: false,
+        failedQueuedCount: 0,
         pollMs: 1000,
       },
       {
         creations: [failedCreation],
         activeCount: 0,
         total: 1,
+        queuePaused: false,
+        failedQueuedCount: 1,
         pollMs: 10000,
       },
     ]
@@ -175,6 +187,47 @@ describe("useCreationHistory", () => {
       hasDownloadableCompletion: false,
       hasFailedCompletion: true,
     })
+  })
+
+  it("pauses and retries the creation queue through queue endpoints", async () => {
+    let queuePaused = false
+    const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async (input, init) => {
+      const url = String(input)
+      if (url.startsWith("/api/creations?")) {
+        return jsonResponse({
+          creations: [finishedCreation],
+          activeCount: 0,
+          total: 1,
+          queuePaused,
+          failedQueuedCount: 1,
+          pollMs: 10000,
+        } satisfies CreationsResponse)
+      }
+      if (url === "/api/creations/queue/pause" && init?.method === "POST") {
+        queuePaused = true
+        return jsonResponse({ ok: true, paused: true, queued: 0, pending: 0, failedQueuedCount: 1 })
+      }
+      if (url === "/api/creations/queue/retry-failed" && init?.method === "POST") {
+        return jsonResponse({ ok: true, inspected: 1, retried: 1, failed: 0, failures: [] })
+      }
+      throw new Error(`Unexpected fetch: ${url}`)
+    })
+    globalThis.fetch = fetchMock
+
+    const { result } = renderHook(() => useCreationHistory(async () => undefined))
+    await flushAsyncWork()
+
+    await act(async () => {
+      await result.current.setQueuePaused(true)
+    })
+    await act(async () => {
+      await result.current.retryFailedQueuedCreations()
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/creations/queue/pause", { method: "POST" })
+    expect(fetchMock).toHaveBeenCalledWith("/api/creations/queue/retry-failed", { method: "POST" })
+    expect(result.current.queuePaused).toBe(true)
+    expect(result.current.failedQueuedCount).toBe(1)
   })
 })
 

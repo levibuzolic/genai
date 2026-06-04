@@ -559,6 +559,22 @@
   @apply grid gap-2 md:grid-cols-2 xl:grid-cols-4;
 }
 
+.createVideoQuality {
+  @apply grid gap-2 md:col-span-2 xl:col-span-2 xl:grid-cols-2;
+}
+
+.createDurationControl {
+  @apply grid h-9 min-w-0 grid-cols-1 grid-rows-[1rem_1fr] items-center rounded-md border bg-card px-3 py-1;
+}
+
+.createDurationControl output {
+  @apply text-xs leading-4 font-medium text-foreground;
+}
+
+.createDurationControl input[type="range"] {
+  @apply h-3 w-full min-w-0 self-end accent-foreground;
+}
+
 .createNudifyToggle {
   @apply flex min-h-8 w-fit items-center gap-2 rounded-md border bg-card px-3 py-1.5 text-sm;
 }

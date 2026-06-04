@@ -4,10 +4,12 @@ import type {
   CreateJobPollResponse,
   CreateJobSubmitResponse,
   CreationDetailsResponse,
+  CreationQueueControlResponse,
   CreationsResponse,
   DownloadCreateJobResponse,
   DuplicateCreationResponse,
   RefreshCreationsResponse,
+  RetryFailedQueuedCreationsResponse,
 } from "../types/routes.ts"
 import { fetchGeneratePornApi, fetchJobsPage, getJobsApiBaseUrl } from "./api-client.ts"
 import { getAuthBrowserForAccount, getDefaultAccountEmail, getSyncAccountEmails, hasApiAuth, normalizeAccountEmail } from "./auth-state.ts"
@@ -27,7 +29,12 @@ import {
 import { downloadJob, loadCatalog, saveCatalog, sortItems, toCatalogItem, toPublicCatalogItem } from "./catalog.ts"
 import { AUTH_SETUP_MESSAGE, CREATE_HISTORY_PAGE_LIMIT } from "./config.ts"
 import { buildCreateApiRequest, resolveCreateSource, toPublicCreateJob, validateCreateSourceUrl } from "./create-api.ts"
-import { CREATE_POLL_MS } from "./create-constants.ts"
+import {
+  CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
+  CREATE_POLL_MS,
+  CREATE_VIDEO_DEFAULT_QUALITY,
+  CREATE_VIDEO_QUALITY_OPTIONS,
+} from "./create-constants.ts"
 import { parseCreateApiResponse } from "./create-schemas.ts"
 import { getReusableCreationSource, isActiveCreationStatus, isTerminalCreationStatus } from "./create-shared.ts"
 import { getCreateModeDefinitions, loadCreateTemplateRegistry, prepareCreateSubmission } from "./create-templates.ts"
@@ -35,18 +42,31 @@ import { httpError } from "./errors.ts"
 import { readJsonObject, requireCreateSource, stringOrNull } from "./refinements.ts"
 import { parseGeneratePornJob } from "./schemas.ts"
 import { scheduleMissingThumbnailBackgroundJobForCatalog } from "./sync.ts"
-import type { CreateMode, CreateParams, CreationJob, CreationWorkflow, GeneratePornJob, TemplateSettings } from "./types.ts"
+import type {
+  CreateMode,
+  CreateParams,
+  CreationJob,
+  CreationWorkflow,
+  GeneratePornJob,
+  ResolvedCreateSource,
+  TemplateSettings,
+} from "./types.ts"
 
 export { buildCreateApiRequest, resolveCreateSource }
 
 const DEFAULT_MEDIA_GENERATION_CONCURRENCY_LIMIT = 2
 const MEDIA_GENERATION_CONCURRENCY_LIMIT_META_KEY = "mediaGenerationConcurrencyLimit"
+const CREATION_QUEUE_PAUSED_META_KEY = "creationQueuePaused"
 const QUEUED_CREATION_STATUS = "queued"
 const COMPLETED_CREATION_DOWNLOAD_BATCH_SIZE = 25
 export const CREATION_QUEUE_BACKGROUND_JOB_ID = "creation-queue"
 const RATE_LIMIT_INITIAL_BACKOFF_MS = 60_000
 const RATE_LIMIT_MAX_BACKOFF_MS = 60 * 60 * 1000
 const queuedRequestBodies = new Map<string, Record<string, unknown>>()
+const LEGACY_VIDEO_MODEL_IDS = new Set(["wan2.7-i2v", "wan2.7-i2v-spicy", "wan2.6-i2v-flash", "wan2.2-i2v-plus", "happyhorse-1.0-i2v"])
+const LEGACY_TEXT_TO_VIDEO_MODEL_IDS = new Set(["wan2.7-t2v"])
+const LEGACY_IMAGE_MODEL_IDS = new Set(["qwen-image-2.0-pro", "qwen-image-2.0", "wan2.7-image-pro", "wan2.7-image", "z-image-turbo"])
+const LEGACY_MODEL_IDS = new Set([...LEGACY_VIDEO_MODEL_IDS, ...LEGACY_TEXT_TO_VIDEO_MODEL_IDS, ...LEGACY_IMAGE_MODEL_IDS])
 
 async function createWorkflowJob(
   {
@@ -442,6 +462,18 @@ export function setMediaGenerationConcurrencyLimit(limit: number): { limit: numb
   return { limit: normalized }
 }
 
+export function getCreationQueuePaused(): boolean {
+  return readCatalogMeta(CREATION_QUEUE_PAUSED_META_KEY) === "true"
+}
+
+export function setCreationQueuePaused(paused: boolean): CreationQueueControlResponse {
+  writeCatalogMeta(CREATION_QUEUE_PAUSED_META_KEY, paused ? "true" : "false")
+  if (!paused) {
+    scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "queue-resumed")
+  }
+  return creationQueueControlResponse()
+}
+
 export function startCreationQueueProcessing(): void {
   scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "startup")
 }
@@ -456,6 +488,15 @@ export function getPendingGenerationCountsByAccount(): Record<string, number> {
 
 async function processCreationQueues(accountEmail?: string | null): Promise<Record<string, unknown>> {
   const downloaded = await downloadCompletedCreations()
+  if (getCreationQueuePaused()) {
+    return {
+      accounts: 0,
+      dispatched: 0,
+      downloaded,
+      paused: true,
+      queued: countQueuedCreationsForAllAccounts(),
+    }
+  }
   const accounts = new Set<string>()
   if (accountEmail !== undefined) {
     accounts.add(accountQueueKey(accountEmail))
@@ -478,7 +519,7 @@ async function processCreationQueues(accountEmail?: string | null): Promise<Reco
     accounts: accounts.size,
     dispatched,
     downloaded,
-    queued: listCreationJobs({ status: "all", limit: 1000 }).filter((creation) => creation.status === QUEUED_CREATION_STATUS).length,
+    queued: countQueuedCreationsForAllAccounts(),
   }
 }
 
@@ -540,11 +581,14 @@ async function processCreationQueueForAccount(accountEmail: string | null): Prom
 }
 
 async function submitQueuedCreation(id: string): Promise<CreationJob | null> {
-  const creation = findCreationJob(id)
+  let creation = findCreationJob(id)
   if (!creation || creation.status !== QUEUED_CREATION_STATUS) {
     return creation
   }
 
+  if (isLegacyQueuedCreation(creation)) {
+    creation = (await repairQueuedCreationIfLegacy(creation)) || creation
+  }
   await ensureAccountApiAuth(creation.accountEmail)
   const submitting = saveCreationJob(
     {
@@ -568,6 +612,279 @@ async function submitQueuedCreation(id: string): Promise<CreationJob | null> {
   return submitted
 }
 
+export async function repairLegacyQueuedCreations(): Promise<{
+  ok: true
+  inspected: number
+  updated: number
+  skipped: number
+  failed: number
+  failures: { id: string; error: string }[]
+}> {
+  const queued = listCreationJobs({ status: "all", limit: 1000 }).filter((creation) => creation.status === QUEUED_CREATION_STATUS)
+  let updated = 0
+  let skipped = 0
+  const failures: { id: string; error: string }[] = []
+
+  for (const creation of queued) {
+    try {
+      const repaired = await repairQueuedCreationIfLegacy(creation)
+      if (repaired) {
+        updated += 1
+      } else {
+        skipped += 1
+      }
+    } catch (error) {
+      failures.push({
+        id: creation.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  return {
+    ok: true,
+    inspected: queued.length,
+    updated,
+    skipped,
+    failed: failures.length,
+    failures,
+  }
+}
+
+export function retryFailedQueuedCreations(): RetryFailedQueuedCreationsResponse {
+  const failedCreations = listCreationJobs({ status: "all", limit: 1000 }).filter(isFailedQueuedCreation)
+  let retried = 0
+  const failures: { id: string; error: string }[] = []
+  const now = new Date().toISOString()
+
+  for (const creation of failedCreations) {
+    try {
+      const body = getRetryableQueuedRequestBody(creation)
+      const saved = saveCreationJob(
+        {
+          ...creation,
+          jobId: null,
+          status: QUEUED_CREATION_STATUS,
+          requestBody: body,
+          error: null,
+          response: null,
+          job: null,
+          queueNotBefore: null,
+          queueAttempt: 0,
+          lastRateLimitedAt: null,
+          submittedAt: now,
+          updatedAt: now,
+          finishedAt: null,
+        },
+        {
+          eventStatus: QUEUED_CREATION_STATUS,
+          eventMessage: "Retrying failed queued creation.",
+        },
+      )
+      queuedRequestBodies.set(saved.id, body)
+      retried += 1
+    } catch (error) {
+      failures.push({
+        id: creation.id,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  if (retried > 0 && !getCreationQueuePaused()) {
+    scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "failed-queued-retried")
+  }
+
+  return {
+    ok: true,
+    inspected: failedCreations.length,
+    retried,
+    failed: failures.length,
+    failures,
+  }
+}
+
+async function repairQueuedCreationIfLegacy(creation: CreationJob): Promise<CreationJob | null> {
+  const repaired = await buildLegacyQueuedCreationRepair(creation)
+  if (!repaired) return null
+
+  const saved = saveCreationJob(repaired, {
+    eventStatus: QUEUED_CREATION_STATUS,
+    eventMessage: "Mapped queued creation to current GeneratePorn models.",
+    eventData: {
+      previousModeId: creation.modeId,
+      modeId: repaired.modeId,
+    },
+  })
+  queuedRequestBodies.set(saved.id, saved.requestBody || {})
+  return saved
+}
+
+async function buildLegacyQueuedCreationRepair(creation: CreationJob): Promise<CreationJob | null> {
+  if (!isLegacyQueuedCreation(creation)) return null
+
+  const registry = await loadCreateTemplateRegistry()
+  const modes = getCreateModeDefinitions(registry.templates)
+  const modeId = mapLegacyModeId(creation)
+  const mode = modes.find((entry) => entry.id === modeId)
+  if (!mode || mode.disabled) {
+    throw new Error(`Mapped creation mode is not available: ${modeId}`)
+  }
+
+  const params = normalizeLegacyCreateParams(creation.params, modeId)
+  const workflow = normalizeLegacyWorkflow(creation.workflow)
+  const requestMode = workflow?.steps[0] ? modes.find((entry) => entry.id === workflow.steps[0]?.modeId) : mode
+  if (!requestMode || requestMode.disabled) {
+    throw new Error("Mapped queued creation request mode is not available.")
+  }
+
+  const requestParams = workflow?.steps[0]?.params || params
+  const source = await resolveQueuedRepairSource(requestMode, creation)
+  const liveRequest = buildCreateApiRequest(requestMode, source, requestParams)
+  const now = new Date().toISOString()
+
+  return {
+    ...creation,
+    modeId: mode.id,
+    modeLabel: mode.label,
+    mediaType: mode.mediaType || creation.mediaType,
+    params,
+    request: liveRequest.publicRequest,
+    requestBody: liveRequest.body,
+    workflow,
+    updatedAt: now,
+  }
+}
+
+function isLegacyQueuedCreation(creation: CreationJob): boolean {
+  if (creation.status !== QUEUED_CREATION_STATUS) return false
+  if (creation.modeId === "text-to-video") return true
+  if (hasLegacyCreateParams(creation.params)) return true
+  if (hasLegacyRequestBody(creation.requestBody) || hasLegacyRequestBody(creation.request)) return true
+  return Boolean(creation.workflow?.steps.some((step) => hasLegacyCreateParams(step.params) || step.modeId === "text-to-video"))
+}
+
+function hasLegacyCreateParams(params: CreateParams = {}): boolean {
+  const modelId = stringOrNull(params["modelId"])
+  if (modelId && LEGACY_MODEL_IDS.has(modelId)) return true
+
+  const quality = stringOrNull(params["quality"])
+  return Boolean(quality && quality.includes(":") && LEGACY_MODEL_IDS.has(quality.split(":")[0] || ""))
+}
+
+function hasLegacyRequestBody(body: Record<string, unknown> | null): boolean {
+  const modelId = stringOrNull(body?.["modelId"])
+  return Boolean(modelId && LEGACY_MODEL_IDS.has(modelId))
+}
+
+function mapLegacyModeId(creation: CreationJob): string {
+  const modelId =
+    stringOrNull(creation.params["modelId"]) ||
+    stringOrNull(creation.requestBody?.["modelId"]) ||
+    stringOrNull(creation.request?.["modelId"])
+  if (creation.modeId === "text-to-video" || (modelId && LEGACY_TEXT_TO_VIDEO_MODEL_IDS.has(modelId) && !creation.source)) {
+    return "text-to-image"
+  }
+
+  if (creation.modeId) return creation.modeId
+  if (modelId && LEGACY_TEXT_TO_VIDEO_MODEL_IDS.has(modelId)) return "text-to-image"
+  if (modelId && LEGACY_VIDEO_MODEL_IDS.has(modelId)) return "custom-video"
+  return "custom-image"
+}
+
+function normalizeLegacyWorkflow(workflow: CreationWorkflow | null): CreationWorkflow | null {
+  if (!workflow) return null
+
+  return {
+    ...workflow,
+    steps: workflow.steps.map((step) => {
+      const modeId = step.modeId === "text-to-video" ? "text-to-image" : step.modeId
+      return {
+        ...step,
+        modeId,
+        params: normalizeLegacyCreateParams(step.params || {}, modeId),
+      }
+    }),
+  }
+}
+
+function normalizeLegacyCreateParams(params: CreateParams = {}, modeId: string): CreateParams {
+  const next: CreateParams = {}
+
+  for (const [key, value] of Object.entries(params)) {
+    if (key === "modelId") continue
+    if (key === "seed" && (value === null || value === "")) continue
+    next[key] = value
+  }
+
+  if (isVideoModeId(modeId)) {
+    next["quality"] = normalizeLegacyVideoQuality(params["quality"])
+    delete next["aspectRatio"]
+    return next
+  }
+
+  if (modeId === "text-to-image") {
+    const aspectRatio = normalizeLegacyImageAspectRatio(params["aspectRatio"] || params["quality"])
+    delete next["quality"]
+    next["aspectRatio"] = aspectRatio
+  }
+
+  return next
+}
+
+function normalizeLegacyVideoQuality(value: unknown): string {
+  const raw = stringOrNull(value)
+  const quality = raw?.includes(":") ? raw.split(":").at(-1) || "" : raw || CREATE_VIDEO_DEFAULT_QUALITY
+  return CREATE_VIDEO_QUALITY_OPTIONS.some((option) => option.value === quality) ? quality : CREATE_VIDEO_DEFAULT_QUALITY
+}
+
+function normalizeLegacyImageAspectRatio(value: unknown): string {
+  const raw = stringOrNull(value)
+  const aspectRatio = raw || ""
+  return CREATE_IMAGE_ASPECT_RATIO_OPTIONS.some((option) => option.value === aspectRatio) ? aspectRatio : "3:4"
+}
+
+function isVideoModeId(modeId: string | null): boolean {
+  return modeId === "custom-video" || modeId === "custom-image-video" || modeId === "nudify-video"
+}
+
+async function resolveQueuedRepairSource(mode: CreateMode, creation: CreationJob): Promise<ResolvedCreateSource | null> {
+  if (mode.source?.required === false) return null
+
+  const existingBody = queuedRequestBodies.get(creation.id) || creation.requestBody || creation.request || {}
+  const inputUrl = stringOrNull(existingBody["input_url"])
+  if (inputUrl) {
+    const url = validateCreateSourceUrl(inputUrl)
+    return {
+      value: url,
+      isDataUrl: false,
+      publicSource: {
+        kind: "url",
+        url,
+      },
+    }
+  }
+
+  const imageBase64 = stringOrNull(existingBody["image_base64"])
+  if (imageBase64?.startsWith("data:image/")) {
+    return {
+      value: imageBase64,
+      isDataUrl: true,
+      publicSource: creation.source?.["kind"]
+        ? requireCreateSource(creation.source)
+        : {
+            kind: "upload",
+          },
+    }
+  }
+
+  if (creation.source?.["kind"] && creation.source["kind"] !== "upload") {
+    return resolveCreateSource(requireCreateSource(creation.source))
+  }
+
+  throw new Error("Queued creation source cannot be rebuilt. Recreate this upload-based job from the source image.")
+}
+
 function countPendingGenerations(accountEmail: string | null): number {
   return listCreationJobs({ status: "all", limit: 1000 }).filter(
     (creation) => accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail) && isPendingGeneration(creation),
@@ -578,6 +895,42 @@ function countQueuedGenerations(accountEmail: string | null): number {
   return listCreationJobs({ status: "all", limit: 1000 }).filter(
     (creation) => accountQueueKey(creation.accountEmail) === accountQueueKey(accountEmail) && creation.status === QUEUED_CREATION_STATUS,
   ).length
+}
+
+function countQueuedCreationsForAllAccounts(): number {
+  return listCreationJobs({ status: "all", limit: 1000 }).filter((creation) => creation.status === QUEUED_CREATION_STATUS).length
+}
+
+function countFailedQueuedCreations(): number {
+  return listCreationJobs({ status: "all", limit: 1000 }).filter(isFailedQueuedCreation).length
+}
+
+function creationQueueControlResponse(): CreationQueueControlResponse {
+  return {
+    ok: true,
+    paused: getCreationQueuePaused(),
+    queued: countQueuedCreationsForAllAccounts(),
+    pending: listCreationJobs({ status: "all", limit: 1000 }).filter((creation) => isPendingGeneration(creation)).length,
+    failedQueuedCount: countFailedQueuedCreations(),
+  }
+}
+
+function isFailedQueuedCreation(creation: CreationJob): boolean {
+  const status = creation.status.toLowerCase()
+  return (status === "failed" || status === "error") && (creation.id.startsWith("local-") || Boolean(creation.requestBody))
+}
+
+function getRetryableQueuedRequestBody(creation: CreationJob): Record<string, unknown> {
+  const body = queuedRequestBodies.get(creation.id) || creation.requestBody || {}
+  if (Object.keys(body).length === 0) {
+    throw new Error("Creation does not have a reusable queued request body.")
+  }
+
+  if (body["image_base64"] === "[image data URL omitted]") {
+    throw new Error("Uploaded image data was not retained; recreate this job from the source image.")
+  }
+
+  return body
 }
 
 function resolveCreateAccountEmail(requestedAccountEmail: string | null): string | null {
@@ -730,6 +1083,10 @@ function accountQueueKey(accountEmail: string | null): string {
 }
 
 function scheduleNextQueuedCreationRun(): void {
+  if (getCreationQueuePaused()) {
+    return
+  }
+
   const nextQueued = listCreationJobs({ status: "all", limit: 1000 })
     .filter((creation) => creation.status === QUEUED_CREATION_STATUS && !isQueueReady(creation))
     .toSorted(compareQueuedCreations)[0]
@@ -1029,6 +1386,8 @@ export async function getCreations(searchParams = new URLSearchParams()): Promis
     creations: rows.map((row) => toPublicCreation(row)),
     activeCount,
     total: rows.length,
+    queuePaused: getCreationQueuePaused(),
+    failedQueuedCount: countFailedQueuedCreations(),
     pollMs: activeCount ? CREATE_POLL_MS : 10000,
   }
 }
@@ -1131,6 +1490,8 @@ export async function refreshCreations({
     imported,
     creations: rows.map((row) => toPublicCreation(row)),
     activeCount: rows.filter((row) => isActiveCreationStatus(row.status)).length,
+    queuePaused: getCreationQueuePaused(),
+    failedQueuedCount: countFailedQueuedCreations(),
     pollMs: rows.some((row) => isActiveCreationStatus(row.status)) ? CREATE_POLL_MS : 10000,
     total: rows.length,
   }
