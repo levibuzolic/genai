@@ -760,8 +760,7 @@ function createParamsFromCatalogItem(item: CatalogItem): CreateParams {
   const params: CreateParams = {}
   if (item.prompt) params["prompt"] = item.prompt
   if (item.negativePrompt) params["negativePrompt"] = item.negativePrompt
-  if (item.modelId || item.model_id) params["modelId"] = item.modelId || item.model_id
-  if (item.duration) params["quality"] = `1080p-${item.duration}`
+  if (item.duration) params["quality"] = `720p-${item.duration}`
   return params
 }
 

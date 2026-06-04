@@ -197,6 +197,7 @@ export type CreateFieldOption = {
   resolution?: string
   duration?: number
   description?: string
+  coinCost?: number
   tier?: string
   protocol?: string
   kind?: string

@@ -805,7 +805,7 @@ function isVisibleCreationCatalogProjection(creation: CreationJob): boolean {
 }
 
 function mediaTypeFromCreateMode(modeId: string | null): string {
-  return modeId === "custom-image" ? "image" : "video"
+  return modeId === "custom-image" || modeId === "text-to-image" ? "image" : "video"
 }
 
 function durationFromCreateParams(params: CreateParams): number | null {

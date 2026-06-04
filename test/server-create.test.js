@@ -53,10 +53,10 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
     prompt: "animate this",
     quality: "1080p-10",
   }).body
-  const spicyVideo = server.buildCreateApiRequest(customVideo, dataSource, {
-    prompt: "spicy motion",
-    modelId: "wan2.7-i2v-spicy",
+  const videoWithSeed = server.buildCreateApiRequest(customVideo, dataSource, {
+    prompt: "seeded motion",
     quality: "1080p-15",
+    seed: 1234.9,
   }).body
   const imageUrl = server.buildCreateApiRequest(customImage, urlSource, {
     prompt: "edit this",
@@ -73,36 +73,42 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
 
   assert.equal(videoUpload.image_base64, imageDataUrl())
   assert.equal(videoUpload.input_url, undefined)
-  assert.equal(videoUpload.modelId, "wan2.7-i2v")
+  assert.equal(videoUpload.modelId, undefined)
   assert.equal(videoUpload.resolution, "1080p")
   assert.equal(videoUpload.duration, 10)
-  assert.equal(customVideo.fields.find((field) => field.name === "modelId").options.length, 5)
-  assert.equal(customVideo.fields.find((field) => field.name === "quality").default, "1080p-15")
+  assert.equal(typeof videoUpload.seed, "number")
+  assert.equal(
+    customVideo.fields.find((field) => field.name === "modelId"),
+    undefined,
+  )
+  assert.equal(customVideo.fields.find((field) => field.name === "quality").default, "720p-4")
+  assert.equal(customVideo.fields.find((field) => field.name === "quality").options.length, 26)
   assert.deepEqual(
     {
-      modelId: spicyVideo.modelId,
-      resolution: spicyVideo.resolution,
-      duration: spicyVideo.duration,
-      seed: spicyVideo.seed,
-      hasSource: Boolean(spicyVideo.image_base64),
+      modelId: videoWithSeed.modelId,
+      resolution: videoWithSeed.resolution,
+      duration: videoWithSeed.duration,
+      seed: videoWithSeed.seed,
+      hasSource: Boolean(videoWithSeed.image_base64),
     },
     {
-      modelId: "wan2.7-i2v-spicy",
+      modelId: undefined,
       resolution: "1080p",
       duration: 15,
-      seed: null,
+      seed: 1234,
       hasSource: true,
     },
   )
   assert.equal(imageVideo.label, "Image Edit + Video")
   assert.equal(nudifyVideo.label, "Nudify + Video")
-  assert.equal(videoUpload.seed, null)
   assert.equal(imageUrl.input_url, "https://assets.example/source.png")
   assert.equal(imageUrl.image_base64, undefined)
-  assert.equal(imageUrl.seed, undefined)
+  assert.equal(imageUrl.realism, 0.55)
+  assert.equal(typeof imageUrl.seed, "number")
   assert.equal(imageUpload.image_base64, imageDataUrl())
   assert.equal(imageUpload.input_url, undefined)
-  assert.equal(imageUpload.seed, undefined)
+  assert.equal(imageUpload.realism, 0.55)
+  assert.equal(typeof imageUpload.seed, "number")
   assert.equal(templateUpload.image_base64, imageDataUrl())
   assert.equal(templateUpload.negative_prompt, "template negative")
   assert.equal(templateUrl.input_url, "https://assets.example/source.png")
@@ -110,28 +116,19 @@ test("creation request shaping uses image_base64 for uploads and input_url for U
   assert.equal(generatedImage.input_url, undefined)
   assert.equal(generatedImage.image_base64, undefined)
   assert.equal(generatedImage.prompt, "make a poster")
-  assert.equal(generatedImage.modelId, "qwen-image-2.0-pro")
+  assert.equal(generatedImage.modelId, undefined)
   assert.equal(generatedImage.aspectRatio, "1:1")
-
-  const textToVideo = modes.find((mode) => mode.id === "text-to-video")
-  const generatedVideo = server.buildCreateApiRequest(textToVideo, null, {
-    prompt: "make a video",
-    modelId: "wan2.7-t2v",
-    quality: "1080p-15",
-  }).body
-  assert.deepEqual(generatedVideo, {
-    prompt: "make a video",
-    modelId: "wan2.7-t2v",
-    resolution: "1080p",
-    duration: 15,
-    seed: null,
-  })
+  assert.equal(generatedImage.realism, 0.55)
+  assert.equal(typeof generatedImage.seed, "number")
+  assert.equal(
+    modes.some((mode) => mode.id === "text-to-video"),
+    false,
+  )
   assert.throws(
     () =>
       server.buildCreateApiRequest(customVideo, urlSource, {
         prompt: "bad combo",
-        modelId: "wan2.2-i2v-plus",
-        quality: "720p-4",
+        quality: "1440p-99",
       }),
     /Unsupported video quality/,
   )
@@ -511,51 +508,39 @@ test("text-to-image creation submits without a source image", async () => {
 
     assert.equal(response.queued, true)
     assert.equal(response.modeId, "text-to-image")
-    assert.deepEqual(submittedBody, {
-      prompt: "make a portrait",
-      modelId: "qwen-image-2.0-pro",
-      aspectRatio: "4:3",
-    })
+    assert.equal(submittedBody.prompt, "make a portrait")
+    assert.equal(submittedBody.modelId, undefined)
+    assert.equal(submittedBody.aspectRatio, "4:3")
+    assert.equal(submittedBody.realism, 0.55)
+    assert.equal(typeof submittedBody.seed, "number")
   } finally {
     globalThis.fetch = originalFetch
   }
 })
 
-test("text-to-video creation submits model video without a source image", async () => {
-  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-text-to-video-"))
-  const jobId = "59595959-5959-4595-8595-595959595959"
+test("video creation requires a source image", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-video-source-required-"))
   const originalFetch = globalThis.fetch
-  let submittedBody = null
-  globalThis.fetch = async (url, options = {}) => {
-    assert.equal(String(url), "https://api.generateporn.ai/api/jobs/video")
-    submittedBody = JSON.parse(String(options.body))
-    return jsonResponse({ job_id: jobId })
+  globalThis.fetch = async (url) => {
+    throw new Error(`Unexpected fetch: ${url}`)
   }
 
   try {
     const server = await importServer(mediaDir, {
       GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
     })
-    const response = await server.createMediaJob({
-      modeId: "text-to-video",
-      params: {
-        prompt: "make a cinematic shot",
-        modelId: "wan2.7-t2v",
-        quality: "720p-8",
-      },
-      source: null,
-    })
-    await server.runCreationQueueBackgroundJob()
-
-    assert.equal(response.queued, true)
-    assert.equal(response.modeId, "text-to-video")
-    assert.deepEqual(submittedBody, {
-      prompt: "make a cinematic shot",
-      modelId: "wan2.7-t2v",
-      resolution: "720p",
-      duration: 8,
-      seed: null,
-    })
+    await assert.rejects(
+      () =>
+        server.createMediaJob({
+          modeId: "custom-video",
+          params: {
+            prompt: "make a cinematic shot",
+            quality: "720p-8",
+          },
+          source: null,
+        }),
+      /Source is required/,
+    )
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -1116,8 +1101,8 @@ test("creation job submit and download use mocked API and merge into catalog", a
     assert.equal(submitBody.image_base64.startsWith("data:image/jpeg;base64,"), true)
     assert.notEqual(submitBody.image_base64, sourceDataUrl)
     assert.equal(submitBody.input_url, undefined)
-    assert.equal(submitBody.modelId, "wan2.7-i2v")
-    assert.equal(submitBody.seed, null)
+    assert.equal(submitBody.modelId, undefined)
+    assert.equal(typeof submitBody.seed, "number")
     assert.equal(
       history.creations.some((creation) => creation.jobId === jobId && creation.status === "done"),
       true,
@@ -1195,7 +1180,11 @@ test("creation queue downloads completed creations into the catalog", async () =
     })
 
     await server.createMediaJob({
-      modeId: "text-to-video",
+      modeId: "custom-video",
+      source: {
+        kind: "url",
+        url: "https://assets.example/source.png",
+      },
       params: {
         prompt: "auto download this",
         quality: "720p-5",

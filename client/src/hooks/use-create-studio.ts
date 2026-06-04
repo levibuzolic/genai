@@ -354,10 +354,9 @@ export function useCreateStudio(onOpen?: () => void) {
     }
     const promptParam = paramAsString(settings.params["prompt"]) || ""
     const negativePromptParam = paramAsString(settings.params["negativePrompt"]) || ""
-    const qualityParam = paramAsString(settings.params["quality"]) || "1080p-15"
-    const modelParam = paramAsString(settings.params["modelId"]) || modelId
+    const qualityParam = paramAsString(settings.params["quality"]) || "720p-4"
     const imageParams: CreateParams = { prompt: promptParam }
-    const videoParams: CreateParams = { prompt: promptParam, quality: qualityParam, modelId: modelParam }
+    const videoParams: CreateParams = { prompt: promptParam, quality: qualityParam }
 
     if (negativePromptParam) {
       imageParams["negativePrompt"] = negativePromptParam

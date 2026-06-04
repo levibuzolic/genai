@@ -247,6 +247,8 @@ export type CreateSource =
 export type ResolvedCreateSource = {
   value: string
   isDataUrl: boolean
+  width?: number | undefined
+  height?: number | undefined
   publicSource: Record<string, unknown>
 }
 
@@ -259,6 +261,7 @@ export type CreateFieldOption = {
   resolution?: string | undefined
   duration?: number | undefined
   description?: string | undefined
+  coinCost?: number | undefined
   tier?: string | undefined
   protocol?: string | undefined
   kind?: string | undefined

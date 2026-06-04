@@ -22,6 +22,8 @@ Reference:
 
 Important: the current live bundle does **not** contain or send the old `wan2.7-*`, `qwen-image-*`, or `z-image-turbo` model IDs from the June 1 capture. Treat those as historical/legacy observations unless a future capture shows the model picker returning.
 
+Save point: commit `af4fd21` (`[Gan 2.7] Final notes before switching to their models`) preserves the old Gan/Wan/Qwen implementation and research state before the local app switched fully to StillHeat/StillHeat-EDIT/MotionHeat.
+
 Successful current-production submissions confirmed these terminal `model_id` values:
 
 | Flow | Terminal `type` | Terminal `model_id` |

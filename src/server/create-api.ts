@@ -6,11 +6,9 @@ import { MEDIA_DIR } from "./config.ts"
 import {
   CREATE_IMAGE_ACCEPT,
   CREATE_IMAGE_ASPECT_RATIO_OPTIONS,
-  CREATE_IMAGE_DEFAULT_MODEL_ID,
-  CREATE_TEXT_VIDEO_DEFAULT_MODEL_ID,
-  CREATE_VIDEO_DEFAULT_MODEL_ID,
+  CREATE_REALISM_MAX,
+  CREATE_REALISM_MIN,
   CREATE_VIDEO_QUALITY_OPTIONS,
-  CREATE_VIDEO_MODEL_DEFINITIONS,
   CREATE_VIDEO_DEFAULT_DURATION,
   CREATE_VIDEO_DEFAULT_RESOLUTION,
 } from "./create-constants.ts"
@@ -55,11 +53,9 @@ export function buildCreateApiRequest(
   body["prompt"] = prompt.trim()
 
   if (mode.endpoint === "text2image") {
-    body["modelId"] = params["modelId"] || mode.defaults?.["modelId"] || CREATE_IMAGE_DEFAULT_MODEL_ID
     body["aspectRatio"] = getImageAspectRatio(params, mode)
-    if (params["seed"] !== undefined && params["seed"] !== "") {
-      body["seed"] = params["seed"]
-    }
+    addRealism(body, params, mode)
+    body["seed"] = getCreateSeed(params, mode)
     return {
       body,
       publicRequest: redactDataUrlFields(body),
@@ -67,9 +63,7 @@ export function buildCreateApiRequest(
   }
 
   if (mode.endpoint === "video") {
-    const model = getVideoModel(params, mode)
-    const quality = getVideoQuality(params, mode, model.id)
-    body["modelId"] = model.id
+    const quality = getVideoQuality(params, mode)
     body["resolution"] = quality.resolution
     body["duration"] = quality.duration
 
@@ -79,18 +73,6 @@ export function buildCreateApiRequest(
       body["negative_prompt"] = negativePrompt
     }
 
-    if (model.kind !== "t2v") {
-      if (!source) {
-        throw new Error("Source is required.")
-      }
-
-      if (source.isDataUrl) {
-        body["image_base64"] = source.value
-      } else {
-        body["input_url"] = source.value
-      }
-    }
-  } else {
     if (!source) {
       throw new Error("Source is required.")
     }
@@ -100,10 +82,21 @@ export function buildCreateApiRequest(
     } else {
       body["input_url"] = source.value
     }
-  }
+    body["seed"] = getCreateSeed(params, mode)
+  } else {
+    if (!source) {
+      throw new Error("Source is required.")
+    }
 
-  if (mode.id === "custom-video" || mode.id === "text-to-video") {
-    body["seed"] = params["seed"] ?? mode.defaults?.["seed"] ?? null
+    if (source.isDataUrl) {
+      body["image_base64"] = source.value
+      if (source.width) body["src_width"] = source.width
+      if (source.height) body["src_height"] = source.height
+    } else {
+      body["input_url"] = source.value
+    }
+    addRealism(body, params, mode)
+    body["seed"] = getCreateSeed(params, mode)
   }
 
   return {
@@ -123,31 +116,7 @@ function getImageAspectRatio(params: CreateParams, mode: CreateMode): string {
   return aspectRatio
 }
 
-function getVideoModel(params: CreateParams, mode: CreateMode): { id: string; kind: string } {
-  const modelId = String(
-    params["modelId"] ||
-      mode.fixed?.["modelId"] ||
-      mode.defaults?.["modelId"] ||
-      (mode.source?.required === false ? CREATE_TEXT_VIDEO_DEFAULT_MODEL_ID : CREATE_VIDEO_DEFAULT_MODEL_ID),
-  )
-  const model = CREATE_VIDEO_MODEL_DEFINITIONS.find((entry) => entry.id === modelId)
-
-  if (!model) {
-    throw new Error("Unsupported video model.")
-  }
-
-  if (mode.source?.required === false && model.kind !== "t2v") {
-    throw new Error("Text-to-video mode requires a text-to-video model.")
-  }
-
-  if (mode.source?.required !== false && model.kind === "t2v") {
-    throw new Error("Image-to-video mode requires an image-to-video model.")
-  }
-
-  return model
-}
-
-function getVideoQuality(params: CreateParams, mode: CreateMode, modelId: string): { resolution: string; duration: number } {
+function getVideoQuality(params: CreateParams, mode: CreateMode): { resolution: string; duration: number } {
   if (mode.kind === "template") {
     return {
       resolution: mode.fixed?.resolution || CREATE_VIDEO_DEFAULT_RESOLUTION,
@@ -158,7 +127,7 @@ function getVideoQuality(params: CreateParams, mode: CreateMode, modelId: string
   if (params["quality"]) {
     const quality = String(params["quality"])
     const option = CREATE_VIDEO_QUALITY_OPTIONS.find(
-      (entry) => entry.modelId === modelId && (entry.value === quality || `${entry.resolution}-${entry.duration}` === quality),
+      (entry) => entry.value === quality || `${entry.resolution}-${entry.duration}` === quality,
     )
     if (option) {
       return {
@@ -166,13 +135,12 @@ function getVideoQuality(params: CreateParams, mode: CreateMode, modelId: string
         duration: option.duration,
       }
     }
+    throw new Error("Unsupported video quality.")
   }
 
   const resolution = String(params["resolution"] || mode.defaults?.["resolution"] || CREATE_VIDEO_DEFAULT_RESOLUTION)
   const duration = Number(params["duration"] || mode.defaults?.["duration"] || CREATE_VIDEO_DEFAULT_DURATION)
-  const allowed = CREATE_VIDEO_QUALITY_OPTIONS.some(
-    (entry) => entry.modelId === modelId && entry.resolution === resolution && entry.duration === duration,
-  )
+  const allowed = CREATE_VIDEO_QUALITY_OPTIONS.some((entry) => entry.resolution === resolution && entry.duration === duration)
 
   if (!allowed) {
     throw new Error("Unsupported video quality.")
@@ -182,6 +150,25 @@ function getVideoQuality(params: CreateParams, mode: CreateMode, modelId: string
     resolution,
     duration,
   }
+}
+
+function addRealism(body: Record<string, unknown>, params: CreateParams, mode: CreateMode): void {
+  const raw = params["realism"] ?? mode.defaults?.["realism"]
+  if (raw === undefined || raw === null || raw === "") return
+  const realism = Number(raw)
+  if (!Number.isFinite(realism) || realism < CREATE_REALISM_MIN || realism > CREATE_REALISM_MAX) {
+    throw new Error("Unsupported realism strength.")
+  }
+  body["realism"] = realism
+}
+
+function getCreateSeed(params: CreateParams, mode: CreateMode): number {
+  const raw = params["seed"] ?? mode.defaults?.["seed"]
+  if (raw !== undefined && raw !== null && raw !== "") {
+    const seed = Number(raw)
+    if (Number.isFinite(seed) && seed > 0) return Math.floor(seed)
+  }
+  return Math.floor(1_000_000 + Math.random() * 9_000_000)
 }
 
 export async function resolveCreateSource(source: CreateSource | null | undefined): Promise<ResolvedCreateSource> {
@@ -210,7 +197,11 @@ export async function resolveCreateSource(source: CreateSource | null | undefine
         kind: "upload",
         contentType: image.contentType,
         size: image.byteLength,
+        width: image.width,
+        height: image.height,
       },
+      width: image.width,
+      height: image.height,
     }
   }
 
@@ -254,7 +245,11 @@ export async function resolveCreateSource(source: CreateSource | null | undefine
         itemId: item.id,
         contentType: image.contentType,
         size: image.byteLength,
+        width: image.width,
+        height: image.height,
       },
+      width: image.width,
+      height: image.height,
     }
   }
 
@@ -323,7 +318,9 @@ function parseCreateDataUrl(value: unknown): { contentType: string; bytes: Buffe
   }
 }
 
-async function normalizeCreateDataUrl(value: unknown): Promise<{ dataUrl: string; contentType: string; byteLength: number }> {
+async function normalizeCreateDataUrl(
+  value: unknown,
+): Promise<{ dataUrl: string; contentType: string; byteLength: number; width: number; height: number }> {
   const parsed = parseCreateDataUrl(value)
   let output: Awaited<ReturnType<typeof imageBufferToCreateJpeg>>
 
@@ -337,6 +334,8 @@ async function normalizeCreateDataUrl(value: unknown): Promise<{ dataUrl: string
     dataUrl: `data:image/jpeg;base64,${output.bytes.toString("base64")}`,
     contentType: "image/jpeg",
     byteLength: output.bytes.byteLength,
+    width: output.width,
+    height: output.height,
   }
 }
 

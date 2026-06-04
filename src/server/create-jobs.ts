@@ -389,7 +389,6 @@ function createWorkflowSteps(modeId: string, params: CreateParams, templateWorkf
           ...videoStep?.params,
           prompt: String(params["prompt"] || videoStep?.params["prompt"] || ""),
           quality: String(params["quality"] || videoStep?.params["quality"] || ""),
-          modelId: String(params["modelId"] || videoStep?.params["modelId"] || ""),
         },
       },
     ]
@@ -409,7 +408,6 @@ function createWorkflowSteps(modeId: string, params: CreateParams, templateWorkf
           ...videoStep?.params,
           prompt: String(params["prompt"] || videoStep?.params["prompt"] || ""),
           quality: String(params["quality"] || videoStep?.params["quality"] || ""),
-          modelId: String(params["modelId"] || videoStep?.params["modelId"] || ""),
         },
       },
     ]
@@ -1257,16 +1255,12 @@ export function saveCreationFromJob(
 }
 
 function inferCreateModeId(job: GeneratePornJob): string {
-  const modelId = job.modelId || job.model_id || ""
-  if (job.type === "video" && modelId.endsWith("-t2v")) return "text-to-video"
-
+  if (job.type === "text2image") return "text-to-image"
   return job.type === "video" ? "custom-video" : "custom-image"
 }
 
 function inferCreateModeLabel(job: GeneratePornJob): string {
-  const modelId = job.modelId || job.model_id || ""
-  if (job.type === "video" && modelId.endsWith("-t2v")) return "Text to Video"
-
+  if (job.type === "text2image") return "Text to Image"
   return job.type === "video" ? "Custom Video" : "Edit Image"
 }
 
@@ -1279,10 +1273,6 @@ function paramsFromCreateJob(job: GeneratePornJob): CreateParams {
 
   if (job.resolution && job.duration) {
     params["quality"] = `${job.resolution}-${job.duration}`
-  }
-
-  if (job.modelId || job.model_id) {
-    params["modelId"] = job.modelId || job.model_id
   }
 
   return params
