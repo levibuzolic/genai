@@ -189,13 +189,19 @@ describe("useCreationHistory", () => {
     })
   })
 
-  it("pauses and retries the creation queue through queue endpoints", async () => {
+  it("pauses the queue and retries an individual failed creation", async () => {
     let queuePaused = false
+    const failedCreation: Creation = {
+      ...finishedCreation,
+      id: "creation-error",
+      status: "error",
+      active: false,
+    }
     const fetchMock = vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async (input, init) => {
       const url = String(input)
       if (url.startsWith("/api/creations?")) {
         return jsonResponse({
-          creations: [finishedCreation],
+          creations: [failedCreation],
           activeCount: 0,
           total: 1,
           queuePaused,
@@ -207,8 +213,8 @@ describe("useCreationHistory", () => {
         queuePaused = true
         return jsonResponse({ ok: true, paused: true, queued: 0, pending: 0, failedQueuedCount: 1 })
       }
-      if (url === "/api/creations/queue/retry-failed" && init?.method === "POST") {
-        return jsonResponse({ ok: true, inspected: 1, retried: 1, failed: 0, failures: [] })
+      if (url === "/api/creations/creation-error/retry" && init?.method === "POST") {
+        return jsonResponse({ ok: true, creation: { ...failedCreation, status: "queued", active: true } })
       }
       throw new Error(`Unexpected fetch: ${url}`)
     })
@@ -221,11 +227,11 @@ describe("useCreationHistory", () => {
       await result.current.setQueuePaused(true)
     })
     await act(async () => {
-      await result.current.retryFailedQueuedCreations()
+      await result.current.retryCreation(failedCreation)
     })
 
     expect(fetchMock).toHaveBeenCalledWith("/api/creations/queue/pause", { method: "POST" })
-    expect(fetchMock).toHaveBeenCalledWith("/api/creations/queue/retry-failed", { method: "POST" })
+    expect(fetchMock).toHaveBeenCalledWith("/api/creations/creation-error/retry", { method: "POST" })
     expect(result.current.queuePaused).toBe(true)
     expect(result.current.failedQueuedCount).toBe(1)
   })

@@ -18,6 +18,10 @@ function statusLabel(status: string) {
   return status.replace(/_/g, " ")
 }
 
+function isErrorCreationStatus(status: string) {
+  return ["failed", "error"].includes(status.toLowerCase())
+}
+
 function sourceLabel(creation: Creation) {
   if (creation.source?.kind === "catalog") {
     const itemId = typeof creation.source.itemId === "string" ? creation.source.itemId : ""
@@ -78,6 +82,7 @@ export function CreationHistoryPanel({
   onDetails,
   onCloseDetails,
   onDuplicate,
+  onRetry,
   onSaveTemplate,
 }: {
   creations: Creation[]
@@ -90,6 +95,7 @@ export function CreationHistoryPanel({
   onDetails: (creation: Creation) => Promise<void>
   onCloseDetails: () => void
   onDuplicate: (creation: Creation, options?: { includeSource?: boolean }) => Promise<void>
+  onRetry: (creation: Creation) => Promise<void>
   onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
   const active = creations.filter((creation) => creation.active)
@@ -127,6 +133,7 @@ export function CreationHistoryPanel({
                 prominent
                 onDetails={onDetails}
                 onDuplicate={onDuplicate}
+                onRetry={onRetry}
                 onSaveTemplate={onSaveTemplate}
               />
             ))
@@ -144,6 +151,7 @@ export function CreationHistoryPanel({
                 creation={creation}
                 onDetails={onDetails}
                 onDuplicate={onDuplicate}
+                onRetry={onRetry}
                 onSaveTemplate={onSaveTemplate}
               />
             ))
@@ -170,6 +178,12 @@ export function CreationHistoryPanel({
                   <Badge variant={statusVariant(selectedCreation.status)}>{statusLabel(selectedCreation.status)}</Badge>
                   <p>{creationTitle(selectedCreation)}</p>
                   <div className="dialogActions">
+                    {isErrorCreationStatus(selectedCreation.status) && (
+                      <Button onClick={() => void onRetry(selectedCreation)}>
+                        <RefreshCw />
+                        Retry
+                      </Button>
+                    )}
                     <Button onClick={() => void onDuplicate(selectedCreation)}>
                       <CopyPlus />
                       Copy settings
@@ -245,12 +259,14 @@ function CreationHistoryRow({
   prominent = false,
   onDetails,
   onDuplicate,
+  onRetry,
   onSaveTemplate,
 }: {
   creation: Creation
   prominent?: boolean
   onDetails: (creation: Creation) => Promise<void>
   onDuplicate: (creation: Creation, options?: { includeSource?: boolean }) => Promise<void>
+  onRetry: (creation: Creation) => Promise<void>
   onSaveTemplate: (creation: Creation) => Promise<void>
 }) {
   const previewUrl = creationPreviewUrl(creation)
@@ -278,6 +294,11 @@ function CreationHistoryRow({
       <Badge className="creationHistoryStatusBadge" variant={statusVariant(creation.status)}>
         {statusLabel(creation.status)}
       </Badge>
+      {isErrorCreationStatus(creation.status) && (
+        <Button variant="outline" size="icon-xs" onClick={() => void onRetry(creation)} aria-label="Retry creation" title="Retry creation">
+          <RefreshCw />
+        </Button>
+      )}
       <Button variant="outline" size="icon-xs" onClick={() => void onDuplicate(creation)} aria-label="Copy settings" title="Copy settings">
         <CopyPlus />
       </Button>

@@ -843,6 +843,101 @@
   @apply max-w-full min-w-0 max-h-52 overflow-auto border bg-background p-3 text-xs text-muted-foreground;
 }
 
+.creationHistoryView {
+  @apply grid min-h-screen grid-rows-[auto_auto_minmax(0,1fr)] gap-3 p-4 lg:min-h-dvh lg:p-5;
+}
+
+.creationHistoryViewHeader {
+  @apply flex min-w-0 items-start justify-between gap-3 border-b pb-3;
+}
+
+.creationHistoryViewHeader h2 {
+  @apply mt-2 text-xl font-semibold;
+}
+
+.creationHistoryViewHeader p {
+  @apply mt-1 text-sm text-muted-foreground;
+}
+
+.creationHistoryFilters {
+  @apply grid min-w-0 grid-cols-1 gap-2 md:grid-cols-[minmax(16rem,1fr)_10rem_10rem_10rem_auto];
+}
+
+.creationHistorySearch {
+  @apply relative min-w-0;
+}
+
+.creationHistorySearch svg {
+  @apply pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground;
+}
+
+.creationHistorySearch input {
+  @apply pl-9;
+}
+
+.creationHistoryTableFrame {
+  @apply min-h-0 overflow-auto border bg-background;
+}
+
+.creationHistoryTable {
+  @apply min-w-[900px] w-full border-collapse;
+}
+
+.creationHistoryTable th {
+  @apply sticky top-0 z-10 bg-card text-xs font-medium text-muted-foreground;
+}
+
+.creationHistoryTable th,
+.creationHistoryTable td {
+  @apply border-b px-3 py-2 text-left align-middle;
+}
+
+.creationHistoryTable th:first-child,
+.creationHistoryTable td:first-child {
+  @apply w-[38%];
+}
+
+.creationHistoryTable th:last-child,
+.creationHistoryTable td:last-child {
+  @apply w-48 text-right;
+}
+
+.creationHistoryTable td {
+  @apply text-sm;
+}
+
+.creationHistoryAttempt {
+  @apply grid min-w-0 gap-0.5 rounded-md bg-transparent p-1 text-left hover:bg-accent;
+}
+
+.creationHistoryAttempt strong,
+.creationHistoryAttempt span,
+.creationHistoryAttempt em {
+  @apply min-w-0 truncate;
+}
+
+.creationHistoryAttempt strong {
+  @apply font-medium;
+}
+
+.creationHistoryAttempt span,
+.creationHistoryAttempt em,
+.creationHistoryTable td time {
+  @apply text-xs text-muted-foreground;
+}
+
+.creationHistoryAttempt em {
+  @apply not-italic text-red-300;
+}
+
+.creationHistoryTableActions {
+  @apply flex min-w-0 flex-wrap justify-end gap-1;
+}
+
+.creationHistoryNoResults {
+  @apply p-6 text-sm text-muted-foreground;
+}
+
 .templateBrowser {
   @apply grid gap-0;
 }
@@ -1338,6 +1433,18 @@
 
   .creationHistoryStatusBadge {
     @apply max-w-16 text-[10px];
+  }
+
+  .creationHistoryView {
+    @apply min-h-[calc(100dvh-5rem)] p-3 pb-20;
+  }
+
+  .creationHistoryViewHeader {
+    @apply items-start;
+  }
+
+  .creationHistoryFilters {
+    @apply grid-cols-1;
   }
 
   .templateBrowserLayout,

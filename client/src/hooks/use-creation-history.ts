@@ -7,7 +7,7 @@ import type {
   CreationDetailsResponse,
   DuplicateCreationResponse,
   RefreshCreationsResponse,
-  RetryFailedQueuedCreationsResponse,
+  RetryQueuedCreationResponse,
 } from "@/types/routes"
 
 const IDLE_CREATION_POLL_MS = 10000
@@ -32,6 +32,7 @@ export function useCreationHistory(
   const [statusMessage, setStatusMessage] = React.useState("")
   const pollTimerRef = React.useRef<number | null>(null)
   const activeCountRef = React.useRef(0)
+  const historyLimitRef = React.useRef<number | undefined>(undefined)
   const onActiveCompletionRef = React.useRef(onActiveCompletion)
 
   React.useEffect(() => {
@@ -39,11 +40,13 @@ export function useCreationHistory(
   }, [onActiveCompletion])
 
   const loadCreations = React.useCallback(
-    async ({ refresh = false, showLoading = true }: { refresh?: boolean; showLoading?: boolean } = {}) => {
+    async ({ limit, refresh = false, showLoading = true }: { limit?: number; refresh?: boolean; showLoading?: boolean } = {}) => {
       if (showLoading) setLoading(true)
       try {
+        if (limit) historyLimitRef.current = limit
         const params = new URLSearchParams({ status: "all" })
         if (refresh) params.set("refresh", "true")
+        if (limit || historyLimitRef.current) params.set("limit", String(limit || historyLimitRef.current))
         const data = await fetchJson<CreationsResponse>(`/api/creations?${params}`)
         const nextActiveCount = data.activeCount || 0
         const transition = getActiveCreationTransition(activeCountRef.current, nextActiveCount, data.creations || [])
@@ -143,16 +146,15 @@ export function useCreationHistory(
     }
   }
 
-  async function retryFailedQueuedCreations() {
-    setStatusMessage("Retrying failed queued creations...")
+  async function retryCreation(creation: Creation) {
+    setStatusMessage("Retrying creation...")
     try {
-      const data = await fetchJson<RetryFailedQueuedCreationsResponse>("/api/creations/queue/retry-failed", { method: "POST" })
+      const data = await fetchJson<RetryQueuedCreationResponse>(`/api/creations/${encodeURIComponent(creation.id)}/retry`, {
+        method: "POST",
+      })
+      setSelectedCreation((current) => (current?.id === creation.id ? replaceEqualJson(current, data.creation) : current))
       await loadCreations({ showLoading: false })
-      setStatusMessage(
-        data.failed > 0
-          ? `Retried ${data.retried.toLocaleString()} failed queued creation${data.retried === 1 ? "" : "s"}; ${data.failed.toLocaleString()} could not be retried.`
-          : `Retried ${data.retried.toLocaleString()} failed queued creation${data.retried === 1 ? "" : "s"}.`,
-      )
+      setStatusMessage("Creation queued for retry.")
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : String(error))
     }
@@ -173,7 +175,7 @@ export function useCreationHistory(
     openDetails,
     duplicateSettings,
     setQueuePaused,
-    retryFailedQueuedCreations,
+    retryCreation,
   }
 }
 

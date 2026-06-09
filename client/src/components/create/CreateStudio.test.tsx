@@ -85,6 +85,7 @@ const baseProps = {
   onCreationDetails: noopAsync,
   onCloseCreationDetails: noop,
   onDuplicateCreation: noopAsync,
+  onRetryCreation: noopAsync,
   onSaveCreationTemplate: noopAsync,
 } satisfies CreateStudioProps
 

@@ -2,6 +2,7 @@ import * as React from "react"
 
 import { AppShell } from "@/components/app/AppShell"
 import { CreateStudio } from "@/components/create/CreateStudio"
+import { CreationHistoryView } from "@/components/create/CreationHistoryView"
 import { LibraryView } from "@/components/library/LibraryView"
 import { MediaDialog } from "@/components/media/MediaDialog"
 import { TemplateBrowser, type CreateTemplateDraft } from "@/components/templates/TemplateBrowser"
@@ -23,6 +24,7 @@ import { isImageItem } from "@/lib/media"
 import type {
   CatalogItem,
   CreateParams,
+  Creation,
   CreationSource,
   DeleteCatalogItemResponse,
   FavoriteCatalogItemResponse,
@@ -32,8 +34,16 @@ import type {
 function App() {
   usePreventIosViewportZoom()
 
-  const { route, navigateToCreate, navigateToItem, navigateToLibrary, navigateToPlaybox, navigateToSettings, navigateToTemplates } =
-    useAppNavigation()
+  const {
+    route,
+    navigateToCreate,
+    navigateToHistory,
+    navigateToItem,
+    navigateToLibrary,
+    navigateToPlaybox,
+    navigateToSettings,
+    navigateToTemplates,
+  } = useAppNavigation()
   const { config, reloadConfig } = useConfig()
   const activeView = route.view
   const library = useLibrary({ provider: activeView === "playbox" ? "playbox" : "generateporn" })
@@ -68,6 +78,7 @@ function App() {
       }
     },
   )
+  const loadCreationHistory = creationHistory.loadCreations
   const [selectedItem, setSelectedItem] = React.useState<CatalogItem | null>(null)
   const [copyFlash, setCopyFlash] = React.useState("")
   const [authActionPending, setAuthActionPending] = React.useState(false)
@@ -149,6 +160,12 @@ function App() {
       setCreateOpen(false)
     }
   }, [createOpen, route.createOpen, setCreateOpen])
+
+  React.useEffect(() => {
+    if (activeView === "history") {
+      void loadCreationHistory({ limit: 5000, showLoading: false })
+    }
+  }, [activeView, loadCreationHistory])
 
   React.useEffect(() => {
     let cancelled = false
@@ -414,10 +431,10 @@ function App() {
     }
   }
 
-  async function retryFailedQueuedCreations() {
+  async function retryFailedCreation(creation: Creation) {
     setCreationQueueActionPending(true)
     try {
-      await creationHistory.retryFailedQueuedCreations()
+      await creationHistory.retryCreation(creation)
     } finally {
       setCreationQueueActionPending(false)
     }
@@ -430,7 +447,6 @@ function App() {
       createQueueStatus={createQueueStatus}
       creationQueueActionPending={creationQueueActionPending}
       onSetCreationQueuePaused={(paused) => void setCreationQueuePaused(paused)}
-      onRetryFailedQueuedCreations={() => void retryFailedQueuedCreations()}
       createOpen={create.open}
       activeView={activeView}
       onOpenLibrary={() => {
@@ -441,6 +457,9 @@ function App() {
       }}
       onOpenCreate={() => {
         void create.openCreator()
+      }}
+      onOpenHistory={() => {
+        navigateToHistory()
       }}
       onOpenTemplates={() => {
         navigateToTemplates()
@@ -492,6 +511,23 @@ function App() {
             await templates.saveTemplate(draft)
           }}
           onDeleteTemplate={templates.deleteTemplate}
+        />
+      ) : activeView === "history" ? (
+        <CreationHistoryView
+          creations={creationHistory.creations}
+          loading={creationHistory.loading}
+          selectedCreation={creationHistory.selectedCreation}
+          selectedEvents={creationHistory.selectedEvents}
+          statusMessage={creationHistory.statusMessage}
+          onRefresh={() => creationHistory.loadCreations({ limit: 5000, refresh: true })}
+          onDetails={creationHistory.openDetails}
+          onCloseDetails={() => creationHistory.setSelectedCreation(null)}
+          onDuplicate={creationHistory.duplicateSettings}
+          onRetry={retryFailedCreation}
+          onSaveTemplate={async (creation) => {
+            const label = creation.params?.["prompt"] || creation.modeLabel || creation.modeId || "Saved creation"
+            await templates.saveCreationAsTemplate(creation.id, String(label).slice(0, 80))
+          }}
         />
       ) : (
         <LibraryView
@@ -676,6 +712,7 @@ function App() {
             onCreationDetails={creationHistory.openDetails}
             onCloseCreationDetails={() => creationHistory.setSelectedCreation(null)}
             onDuplicateCreation={creationHistory.duplicateSettings}
+            onRetryCreation={retryFailedCreation}
             onSaveCreationTemplate={async (creation) => {
               const label = creation.params?.["prompt"] || creation.modeLabel || creation.modeId || "Saved creation"
               await templates.saveCreationAsTemplate(creation.id, String(label).slice(0, 80))

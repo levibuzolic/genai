@@ -77,7 +77,7 @@ import {
   pollCreateJob,
   refreshCreations,
   repairLegacyQueuedCreations,
-  retryFailedQueuedCreations,
+  retryFailedQueuedCreation,
   resolveCreateSource,
   setCreationQueuePaused,
   setMediaGenerationConcurrencyLimit,
@@ -308,13 +308,14 @@ const server = http.createServer(async (request, response) => {
       return sendJson(response, setCreationQueuePaused(false))
     }
 
-    if (request.method === "POST" && url.pathname === "/api/creations/queue/retry-failed") {
-      return sendJson(response, retryFailedQueuedCreations())
-    }
-
     const creationMatch = url.pathname.match(/^\/api\/creations\/([^/]+)$/)
     if (request.method === "GET" && creationMatch) {
       return sendCachedJson(response, cachedReadOptions(url), () => getCreationDetails(creationMatch[1] || ""))
+    }
+
+    const creationRetryMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/retry$/)
+    if (request.method === "POST" && creationRetryMatch) {
+      return sendJson(response, retryFailedQueuedCreation(creationRetryMatch[1] || ""))
     }
 
     const creationDuplicateMatch = url.pathname.match(/^\/api\/creations\/([^/]+)\/duplicate$/)
@@ -775,7 +776,7 @@ export {
   requestSyncCancellation,
   refreshCreations,
   repairLegacyQueuedCreations,
-  retryFailedQueuedCreations,
+  retryFailedQueuedCreation,
   restoreCatalogBackup,
   resolveMediaDir,
   removeAuthAccount,

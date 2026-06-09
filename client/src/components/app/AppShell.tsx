@@ -1,6 +1,7 @@
 import {
   Archive,
   Images,
+  ListFilter,
   Loader2,
   Maximize2,
   Minimize2,
@@ -42,12 +43,12 @@ export function AppShell({
   createQueueStatus,
   creationQueueActionPending,
   onSetCreationQueuePaused,
-  onRetryFailedQueuedCreations,
   createOpen,
   activeView,
   onOpenLibrary,
   onOpenPlaybox,
   onOpenCreate,
+  onOpenHistory,
   onOpenTemplates,
   onStartSync,
   onStartPlayboxSync,
@@ -93,12 +94,12 @@ export function AppShell({
   }
   creationQueueActionPending: boolean
   onSetCreationQueuePaused: (paused: boolean) => void
-  onRetryFailedQueuedCreations: () => void
   createOpen: boolean
-  activeView: "library" | "playbox" | "templates"
+  activeView: "library" | "playbox" | "history" | "templates"
   onOpenLibrary: () => void
   onOpenPlaybox: () => void
   onOpenCreate: () => void
+  onOpenHistory: () => void
   onOpenTemplates: () => void
   onStartSync: (incremental: boolean) => void
   onStartPlayboxSync: () => void
@@ -154,6 +155,13 @@ export function AppShell({
             <RailButton id="playboxViewButton" active={activeView === "playbox"} icon={Images} label="Playbox" onClick={onOpenPlaybox} />
             <RailButton id="createViewButton" active={createOpen} icon={WandSparkles} label="Create" onClick={onOpenCreate} />
             <RailButton
+              id="historyViewButton"
+              active={activeView === "history"}
+              icon={ListFilter}
+              label="History"
+              onClick={onOpenHistory}
+            />
+            <RailButton
               id="templateViewButton"
               active={activeView === "templates"}
               icon={Sparkles}
@@ -176,28 +184,17 @@ export function AppShell({
                 <span className="block truncate">{formatCreationQueueStatus(createQueueStatus)}</span>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2 px-3 pb-2">
+            <div className="px-3 pb-2">
               <Button
                 id="toggleCreationQueueButton"
                 size="sm"
                 variant="outline"
-                className="h-8"
+                className="h-8 w-full"
                 disabled={creationQueueActionPending}
                 onClick={() => onSetCreationQueuePaused(!createQueueStatus.paused)}
               >
                 {createQueueStatus.paused ? <PlayCircle /> : <PauseCircle />}
                 {createQueueStatus.paused ? "Resume" : "Pause"}
-              </Button>
-              <Button
-                id="retryFailedQueueButton"
-                size="sm"
-                variant="outline"
-                className="h-8"
-                disabled={creationQueueActionPending || createQueueStatus.failed <= 0}
-                onClick={onRetryFailedQueuedCreations}
-              >
-                <RefreshCw />
-                {createQueueStatus.failed > 0 ? `Retry ${createQueueStatus.failed.toLocaleString()}` : "Retry"}
               </Button>
             </div>
             <div className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 overflow-hidden px-3 py-2 text-xs text-muted-foreground">
@@ -300,7 +297,7 @@ export function AppShell({
       </div>
 
       {!isDesktop && (
-        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-4 border-t bg-background p-2" aria-label="Primary">
+        <nav className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-5 border-t bg-background p-2" aria-label="Primary">
           <RailButton
             className="h-10 justify-center [&_svg]:size-4"
             active={activeView === "library"}
@@ -321,6 +318,13 @@ export function AppShell({
             icon={WandSparkles}
             label="Create"
             onClick={onOpenCreate}
+          />
+          <RailButton
+            className="h-10 justify-center [&_svg]:size-4"
+            active={activeView === "history"}
+            icon={ListFilter}
+            label="History"
+            onClick={onOpenHistory}
           />
           <RailButton
             className="h-10 justify-center [&_svg]:size-4"

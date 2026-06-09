@@ -9,7 +9,7 @@ import type {
   DownloadCreateJobResponse,
   DuplicateCreationResponse,
   RefreshCreationsResponse,
-  RetryFailedQueuedCreationsResponse,
+  RetryQueuedCreationResponse,
 } from "../types/routes.ts"
 import { fetchGeneratePornApi, fetchJobsPage, getJobsApiBaseUrl } from "./api-client.ts"
 import { getAuthBrowserForAccount, getDefaultAccountEmail, getSyncAccountEmails, hasApiAuth, normalizeAccountEmail } from "./auth-state.ts"
@@ -651,56 +651,24 @@ export async function repairLegacyQueuedCreations(): Promise<{
   }
 }
 
-export function retryFailedQueuedCreations(): RetryFailedQueuedCreationsResponse {
-  const failedCreations = listCreationJobs({ status: "all", limit: 1000 }).filter(isFailedQueuedCreation)
-  let retried = 0
-  const failures: { id: string; error: string }[] = []
-  const now = new Date().toISOString()
-
-  for (const creation of failedCreations) {
-    try {
-      const body = getRetryableQueuedRequestBody(creation)
-      const saved = saveCreationJob(
-        {
-          ...creation,
-          jobId: null,
-          status: QUEUED_CREATION_STATUS,
-          requestBody: body,
-          error: null,
-          response: null,
-          job: null,
-          queueNotBefore: null,
-          queueAttempt: 0,
-          lastRateLimitedAt: null,
-          submittedAt: now,
-          updatedAt: now,
-          finishedAt: null,
-        },
-        {
-          eventStatus: QUEUED_CREATION_STATUS,
-          eventMessage: "Retrying failed queued creation.",
-        },
-      )
-      queuedRequestBodies.set(saved.id, body)
-      retried += 1
-    } catch (error) {
-      failures.push({
-        id: creation.id,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
+export function retryFailedQueuedCreation(id: string): RetryQueuedCreationResponse {
+  const creation = findCreationJob(id)
+  if (!creation) {
+    throw httpError("Creation was not found.", 404)
   }
 
-  if (retried > 0 && !getCreationQueuePaused()) {
+  if (!isFailedQueuedCreation(creation)) {
+    throw httpError("Creation is not in a retryable error state.", 400)
+  }
+
+  const saved = requeueFailedCreation(creation)
+  if (!getCreationQueuePaused()) {
     scheduleBackgroundJob(CREATION_QUEUE_BACKGROUND_JOB_ID, 0, "failed-queued-retried")
   }
 
   return {
     ok: true,
-    inspected: failedCreations.length,
-    retried,
-    failed: failures.length,
-    failures,
+    creation: toPublicCreation(saved),
   }
 }
 
@@ -933,6 +901,34 @@ function getRetryableQueuedRequestBody(creation: CreationJob): Record<string, un
   return body
 }
 
+function requeueFailedCreation(creation: CreationJob): CreationJob {
+  const body = getRetryableQueuedRequestBody(creation)
+  const now = new Date().toISOString()
+  const saved = saveCreationJob(
+    {
+      ...creation,
+      jobId: null,
+      status: QUEUED_CREATION_STATUS,
+      requestBody: body,
+      error: null,
+      response: null,
+      job: null,
+      queueNotBefore: null,
+      queueAttempt: 0,
+      lastRateLimitedAt: null,
+      submittedAt: now,
+      updatedAt: now,
+      finishedAt: null,
+    },
+    {
+      eventStatus: QUEUED_CREATION_STATUS,
+      eventMessage: "Retrying failed queued creation.",
+    },
+  )
+  queuedRequestBodies.set(saved.id, body)
+  return saved
+}
+
 function resolveCreateAccountEmail(requestedAccountEmail: string | null): string | null {
   if (requestedAccountEmail) {
     return requestedAccountEmail
@@ -1014,7 +1010,7 @@ function requeueRateLimitedCreation(creation: CreationJob, body: Record<string, 
     },
     {
       eventStatus: QUEUED_CREATION_STATUS,
-      eventMessage: `Rate limited; retrying after ${queueNotBefore}.`,
+      eventMessage: `${retryableQueueEventPrefix(message)}; retrying after ${queueNotBefore}.`,
       eventData: body,
     },
   )
@@ -1028,12 +1024,19 @@ function isRetryableRateLimitCreateResponse(body: Record<string, unknown>, error
   const message = String(error || body["error"] || "")
   return (
     (status === "failed" || Boolean(error)) &&
-    (/throttling\.ratequota/i.test(message) || /rate limit/i.test(message) || /requests rate limit exceeded/i.test(message))
+    (/throttling\.ratequota/i.test(message) ||
+      /rate limit/i.test(message) ||
+      /requests rate limit exceeded/i.test(message) ||
+      /insufficient[_\s-]?coins/i.test(message))
   )
 }
 
 function rateLimitMessageFromBody(body: Record<string, unknown>): string | null {
   return typeof body["error"] === "string" && body["error"] ? body["error"] : null
+}
+
+function retryableQueueEventPrefix(message: string): string {
+  return /insufficient[_\s-]?coins/i.test(message) ? "Insufficient coins" : "Rate limited"
 }
 
 function queuedCreateResponse(
@@ -1375,11 +1378,12 @@ export async function downloadCreateJob(jobId: string): Promise<DownloadCreateJo
 export async function getCreations(searchParams = new URLSearchParams()): Promise<CreationsResponse> {
   const status = searchParams.get("status") || "all"
   const refresh = searchParams.get("refresh") === "true"
+  const limit = normalizeCreationHistoryLimit(searchParams.get("limit"))
 
   if (refresh && getSyncAccountEmails().length > 0) {
     await refreshActiveCreations()
   }
-  const rows = listCreationJobSummaries({ status })
+  const rows = listCreationJobSummaries({ status, limit })
   const activeCount = rows.filter((row) => isActiveCreationStatus(row.status)).length
 
   return {
@@ -1390,6 +1394,13 @@ export async function getCreations(searchParams = new URLSearchParams()): Promis
     failedQueuedCount: countFailedQueuedCreations(),
     pollMs: activeCount ? CREATE_POLL_MS : 10000,
   }
+}
+
+function normalizeCreationHistoryLimit(value: string | null): number {
+  if (!value) return 80
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return 80
+  return Math.max(1, Math.min(5000, Math.floor(parsed)))
 }
 
 export async function getCreationDetails(id: string): Promise<CreationDetailsResponse> {

@@ -225,6 +225,7 @@ export const CreateStudio = React.forwardRef<HTMLElement, CreateStudioProps>(fun
           onDetails={props.onCreationDetails}
           onCloseDetails={props.onCloseCreationDetails}
           onDuplicate={props.onDuplicateCreation}
+          onRetry={props.onRetryCreation}
           onSaveTemplate={props.onSaveCreationTemplate}
         />
       </div>

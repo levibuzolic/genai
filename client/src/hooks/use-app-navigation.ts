@@ -10,7 +10,7 @@ export type AppRoute = {
   view: AppView
 }
 
-export type AppView = "library" | "playbox" | "templates"
+export type AppView = "library" | "playbox" | "history" | "templates"
 
 const SETTINGS_SECTIONS = new Set<SettingsSection>(["library", "account", "playbox-auth", "backups"])
 
@@ -53,6 +53,7 @@ export function useAppNavigation() {
     ),
     navigateToLibrary: React.useCallback((options?: { replace?: boolean }) => navigate("/", options), [navigate]),
     navigateToPlaybox: React.useCallback((options?: { replace?: boolean }) => navigate("/playbox", options), [navigate]),
+    navigateToHistory: React.useCallback((options?: { replace?: boolean }) => navigate("/history", options), [navigate]),
     navigateToSettings: React.useCallback(
       (section: SettingsSection = "library", options?: { replace?: boolean }) => navigate(`/settings/${section}`, options),
       [navigate],
@@ -66,6 +67,7 @@ function routeFromLocation(location: Location): AppRoute {
   const firstPart = pathParts[0] || ""
 
   if (firstPart === "templates") return baseRoute({ view: "templates" })
+  if (firstPart === "history") return baseRoute({ view: "history" })
   if (firstPart === "playbox") {
     if (pathParts[1] === "items" && pathParts[2]) return baseRoute({ view: "playbox", itemId: pathParts[2] })
     return baseRoute({ view: "playbox" })

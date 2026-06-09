@@ -237,11 +237,8 @@ export type CreationQueueControlResponse = OkResponse & {
   failedQueuedCount: number
 }
 
-export type RetryFailedQueuedCreationsResponse = OkResponse & {
-  inspected: number
-  retried: number
-  failed: number
-  failures: { id: string; error: string }[]
+export type RetryQueuedCreationResponse = OkResponse & {
+  creation: PublicCreation
 }
 
 export type CreationDetailsResponse = {

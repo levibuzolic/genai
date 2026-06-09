@@ -50,6 +50,7 @@ describe("CreationHistoryPanel", () => {
         onDetails={vi.fn<(creation: Creation) => Promise<void>>()}
         onCloseDetails={vi.fn<() => void>()}
         onDuplicate={vi.fn<(creation: Creation, options?: { includeSource?: boolean }) => Promise<void>>()}
+        onRetry={vi.fn<(creation: Creation) => Promise<void>>()}
         onSaveTemplate={vi.fn<(creation: Creation) => Promise<void>>()}
       />,
     )
@@ -71,6 +72,7 @@ describe("CreationHistoryPanel", () => {
       onDetails: vi.fn<(creation: Creation) => Promise<void>>(),
       onCloseDetails: vi.fn<() => void>(),
       onDuplicate,
+      onRetry: vi.fn<(creation: Creation) => Promise<void>>(),
       onSaveTemplate: vi.fn<(creation: Creation) => Promise<void>>(),
     }
     const { rerender } = render(<CreationHistoryPanel {...props} selectedCreation={null} />)
@@ -86,5 +88,37 @@ describe("CreationHistoryPanel", () => {
     expect(onDuplicate).toHaveBeenNthCalledWith(2, finishedCreation, { includeSource: true })
     expect(onDuplicate).toHaveBeenNthCalledWith(3, finishedCreation)
     expect(onDuplicate).toHaveBeenNthCalledWith(4, finishedCreation, { includeSource: true })
+  })
+
+  it("offers retry actions for failed creations only", () => {
+    const failedCreation: Creation = {
+      ...finishedCreation,
+      id: "job-error",
+      status: "error",
+      error: "temporary upstream failure",
+    }
+    const onRetry = vi.fn<(creation: Creation) => Promise<void>>(async () => undefined)
+    const props = {
+      creations: [failedCreation, finishedCreation],
+      activeCount: 0,
+      loading: false,
+      selectedEvents: [],
+      statusMessage: "",
+      onRefresh: vi.fn<() => Promise<void>>(),
+      onDetails: vi.fn<(creation: Creation) => Promise<void>>(),
+      onCloseDetails: vi.fn<() => void>(),
+      onDuplicate: vi.fn<(creation: Creation, options?: { includeSource?: boolean }) => Promise<void>>(),
+      onRetry,
+      onSaveTemplate: vi.fn<(creation: Creation) => Promise<void>>(),
+    }
+    const { rerender } = render(<CreationHistoryPanel {...props} selectedCreation={null} />)
+
+    fireEvent.click(screen.getByRole("button", { name: /^retry creation$/i }))
+    rerender(<CreationHistoryPanel {...props} selectedCreation={failedCreation} />)
+    fireEvent.click(screen.getByRole("button", { name: /^retry$/i }))
+
+    expect(onRetry).toHaveBeenCalledTimes(2)
+    expect(onRetry).toHaveBeenNthCalledWith(1, failedCreation)
+    expect(onRetry).toHaveBeenNthCalledWith(2, failedCreation)
   })
 })

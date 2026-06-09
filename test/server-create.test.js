@@ -505,10 +505,9 @@ test("failed queued creations can be retried when the request body is reusable",
     assert.equal(failedHistory.failedQueuedCount, 1)
     assert.equal(failedHistory.creations.find((creation) => creation.id === queued.jobId).status, "error")
 
-    const retryResult = server.retryFailedQueuedCreations()
-    assert.equal(retryResult.inspected, 1)
-    assert.equal(retryResult.retried, 1)
-    assert.equal(retryResult.failed, 0)
+    const retryResult = server.retryFailedQueuedCreation(queued.jobId)
+    assert.equal(retryResult.creation.id, queued.jobId)
+    assert.equal(retryResult.creation.status, "queued")
 
     const queuedHistory = await server.getCreations(new URLSearchParams())
     assert.equal(queuedHistory.creations.find((creation) => creation.id === queued.jobId).status, "queued")
@@ -925,6 +924,48 @@ test("rate limited creation responses show queued retry with exponential backoff
     assert.equal(retriedDetails.creation.jobId, jobId)
     assert.equal(retriedDetails.creation.status, "pending")
     assert.equal(retriedDetails.creation.queueAttempt, 0)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("insufficient coins creation responses remain queued for later retry", async () => {
+  const mediaDir = await mkdtemp(path.join(os.tmpdir(), "media-library-create-insufficient-coins-"))
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (url, options = {}) => {
+    const href = String(url)
+
+    if (href === "https://api.generateporn.ai/api/jobs/edit" && options.method === "POST") {
+      return new Response(JSON.stringify({ error: "insufficient_coins" }), {
+        status: 402,
+        headers: { "content-type": "application/json" },
+      })
+    }
+
+    throw new Error(`Unexpected fetch: ${href}`)
+  }
+
+  try {
+    const server = await importServer(mediaDir, {
+      GENERATEPORN_AUTHORIZATION: fakeBearerToken(),
+    })
+
+    const created = await server.createMediaJob({
+      modeId: "custom-image",
+      source: { kind: "url", url: "https://assets.example/source.png" },
+      params: { prompt: "wait for coins" },
+    })
+    await server.runCreationQueueBackgroundJob()
+
+    const details = await server.getCreationDetails(created.jobId)
+    assert.equal(details.creation.status, "queued")
+    assert.equal(details.creation.error, "insufficient_coins")
+    assert.equal(details.creation.queueAttempt, 1)
+    assert.equal(details.creation.queueNotBefore !== null, true)
+    assert.equal(
+      details.events.some((event) => event.message?.startsWith("Insufficient coins; retrying after ")),
+      true,
+    )
   } finally {
     globalThis.fetch = originalFetch
   }

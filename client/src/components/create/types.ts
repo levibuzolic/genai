@@ -81,5 +81,6 @@ export type CreateStudioProps = {
   onCreationDetails: (creation: Creation) => Promise<void>
   onCloseCreationDetails: () => void
   onDuplicateCreation: (creation: Creation, options?: { includeSource?: boolean }) => Promise<void>
+  onRetryCreation: (creation: Creation) => Promise<void>
   onSaveCreationTemplate: (creation: Creation) => Promise<void>
 }
